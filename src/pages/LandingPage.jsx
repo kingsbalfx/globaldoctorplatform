@@ -104,7 +104,7 @@ function LandingPage() {
 
       if (result.checkout_url) {
         alert(`Redirecting to Kora for payment: ${result.transaction?.id || result.id}`)
-        // window.location.href = result.checkout_url;
+        window.location.href = result.checkout_url;
         setShowPaymentForm(false)
         setPaymentData({ type: 'priority_access' })
       }

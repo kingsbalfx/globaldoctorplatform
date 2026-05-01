@@ -44,19 +44,3 @@ export async function createPaymentSession(paymentData) {
 
   return response.json()
 }
-
-export async function confirmPayment(clientSecret, paymentMethod) {
-  const stripe = await import('@stripe/stripe-js').then(({ loadStripe }) =>
-    loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_demo')
-  )
-
-  const { error } = await stripe.confirmCardPayment(clientSecret, {
-    payment_method: paymentMethod,
-  })
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return { success: true }
-}

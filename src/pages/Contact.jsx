@@ -94,8 +94,8 @@ function Contact({ onNavigate }) {
                   </div>
                   <div>
                     <h3 className="font-semibold text-slate-900">Email Support</h3>
-                    <a href="mailto:shafiuabdullahi.sa3@gmail.com" className="text-brand-600 hover:text-brand-700">
-                      shafiuabdullahi.sa3@gmail.com
+                    <a href="mailto:shafiuabdulahi.sa3@gmail.com" className="text-brand-600 hover:text-brand-700">
+                      shafiuabdulahi.sa3@gmail.com
                     </a>
                     <p className="text-sm text-slate-600 mt-1">We respond within 24 hours</p>
                   </div>
@@ -270,8 +270,8 @@ function Contact({ onNavigate }) {
             <div className="mt-6 text-center">
               <p className="text-sm text-slate-600">
                 Prefer to email directly?{' '}
-                <a href="mailto:shafiuabdullahi.sa3@gmail.com" className="text-brand-600 hover:text-brand-700 font-medium">
-                  shafiuabdullahi.sa3@gmail.com
+                <a href="mailto:shafiuabdulahi.sa3@gmail.com" className="text-brand-600 hover:text-brand-700 font-medium">
+                  shafiuabdulahi.sa3@gmail.com
                 </a>
               </p>
             </div>
