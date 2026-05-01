@@ -10,7 +10,7 @@
       "destination": "/server/index.js"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|logo.png|background.png|favicon.ico).*)",
       "destination": "/index.html"
     }
   ]
