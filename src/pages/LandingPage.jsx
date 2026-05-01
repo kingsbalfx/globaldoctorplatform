@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
-import { fetchDoctors, submitReview, createPaymentSession, confirmPayment } from '../lib/kiraApi'
+import { fetchDoctors, submitReview, createPaymentSession } from '../lib/kiraApi'
 
 const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology']
 const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French']
@@ -16,31 +16,11 @@ function LandingPage() {
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [reviewData, setReviewData] = useState({ rating: 5, comment: '' })
   const [paymentData, setPaymentData] = useState({ type: 'priority_access' })
-  const [stripe, setStripe] = useState(null)
-  const [elements, setElements] = useState(null)
-  const [clientSecret, setClientSecret] = useState('')
   const [processingPayment, setProcessingPayment] = useState(false)
 
   useEffect(() => {
     loadDoctors()
   }, [])
-
-  useEffect(() => {
-    if (showPaymentForm && selectedDoctor) {
-      initializeStripe()
-    }
-  }, [showPaymentForm, selectedDoctor])
-
-  const initializeStripe = async () => {
-    const { loadStripe } = await import('@stripe/stripe-js')
-    const stripeInstance = await loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_demo')
-    setStripe(stripeInstance)
-
-    if (stripeInstance) {
-      const { Elements } = await import('@stripe/react-stripe-js')
-      // We'll handle elements differently for simplicity
-    }
-  }
 
   const loadDoctors = async () => {
     setLoading(true)
@@ -110,11 +90,11 @@ function LandingPage() {
 
   const handlePayment = async (event) => {
     event.preventDefault()
-    if (!selectedDoctor || !stripe) return
+    if (!selectedDoctor) return
 
     setProcessingPayment(true)
     try {
-      // Create payment intent
+      // Create Kora payment session via backend
       const result = await createPaymentSession({
         patientId: 'patient-demo', // In real app, get from auth
         doctorId: selectedDoctor.id,
@@ -122,16 +102,12 @@ function LandingPage() {
         type: paymentData.type,
       })
 
-      setClientSecret(result.clientSecret)
-
-      // For demo purposes, we'll simulate card confirmation
-      // In a real app, you'd collect card details and confirm
-      await new Promise(resolve => setTimeout(resolve, 1000)) // Simulate processing
-
-      alert('Payment processed successfully! (Demo mode)')
-      setShowPaymentForm(false)
-      setPaymentData({ type: 'priority_access' })
-      setClientSecret('')
+      if (result.checkout_url) {
+        alert(`Redirecting to Kora for payment: ${result.transaction?.id || result.id}`)
+        // window.location.href = result.checkout_url;
+        setShowPaymentForm(false)
+        setPaymentData({ type: 'priority_access' })
+      }
     } catch (error) {
       alert('Payment failed: ' + error.message)
     } finally {
@@ -212,7 +188,7 @@ function LandingPage() {
         </article>
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <h3 className="text-xl font-semibold text-slate-900">Secure consultations</h3>
-          <p className="mt-3 text-slate-600">Mock Stripe integration supports priority access and telehealth payments for a complete monetization flow.</p>
+          <p className="mt-3 text-slate-600">Kora integration supports priority access and telehealth payments for a complete monetization flow.</p>
         </article>
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <h3 className="text-xl font-semibold text-slate-900">Patient reviews</h3>
