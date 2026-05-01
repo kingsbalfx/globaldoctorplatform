@@ -1,34 +1,17 @@
 {
   "version": 2,
   "builds": [
+    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } },
+    { "src": "server/index.js", "use": "@vercel/node" }
+  ],
+  "rewrites": [
     {
-      "src": "server/index.js",
-      "use": "@vercel/node"
+      "source": "/api/(.*)",
+      "destination": "/server/index.js"
     },
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/server/index.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
-    }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  },
-  "functions": {
-    "server/index.js": {
-      "maxDuration": 30
-    }
-  }
+  ]
 }
