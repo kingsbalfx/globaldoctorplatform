@@ -1,16 +1,17 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } },
-    { "src": "server/index.js", "use": "@vercel/node" }
-  ],
+  "functions": {
+    "server/index.js": {
+      "runtime": "@vercel/node",
+      "memory": 1024
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
       "destination": "/server/index.js"
     },
     {
-      "source": "/((?!assets/|logo.png|background.png|favicon.ico).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
