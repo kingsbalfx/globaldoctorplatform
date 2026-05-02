@@ -1,7 +1,7 @@
 let API_BASE = import.meta.env.VITE_API_BASE || '';
 if (import.meta.env.PROD && API_BASE.includes('localhost')) {
   API_BASE = '';
-} else if (!API_BASE && !import.meta.env.PROD) {
+} else if (!API_BASE && !import.meta.env.PROD) { // Only default to localhost if not in production and no API_BASE is set
   API_BASE = 'http://localhost:4000';
 }
 
