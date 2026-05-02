@@ -94,7 +94,7 @@ function Contact({ onNavigate }) {
                   </div>
                   <div>
                     <h3 className="font-semibold text-slate-900">Email Support</h3>
-                    <a href="mailto:shafiuabdulahi.sa3@gmail.com" className="text-brand-600 hover:text-brand-700">
+                    <a href="mailto:shafiuabdulahi.sa3@gmail.com" className="text-brand-600 hover:text-brand-700 block">
                       shafiuabdulahi.sa3@gmail.com
                     </a>
                     <p className="text-sm text-slate-600 mt-1">We respond within 24 hours</p>

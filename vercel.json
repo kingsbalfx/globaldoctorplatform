@@ -1,17 +1,11 @@
 {
-  "functions": {
-    "api/index.js": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!assets/|logo.png|favicon.ico).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
