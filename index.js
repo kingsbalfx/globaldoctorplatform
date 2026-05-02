@@ -36,7 +36,7 @@ const doctors = [
     verified: true,
     isOnline: false,
     fee: 40,
-    price: { basic: 40, premium: 80 },
+    price: { basic: 60, premium: 120 },
     licenseVerified: true,
   },
   {
@@ -50,7 +50,7 @@ const doctors = [
     verified: false,
     isOnline: true,
     fee: 30,
-    price: { basic: 40, premium: 80 },
+    price: { basic: 45, premium: 90 },
     licenseVerified: false,
   },
 ]
@@ -70,8 +70,7 @@ const chatMessages = []
 const appointmentReminders = []
 const emergencyRequests = []
 const serverSettings = {
-  minimumSubscriptionUSD: 5, // $5 = 200 tokens
-  tokenRate: 40, // 1 USD = 40 tokens
+  minimumSubscriptionUSD: 5,
 }
 const patientTokens = [] // Token balances
 const subscriptions = [] // Subscription management
@@ -102,11 +101,6 @@ app.post('/api/doctors/register', (req, res) => {
     specialty,
     location,
     licenseNumber,
-    bankAccount: req.body.bankAccount || '',
-    bankCode: req.body.bankCode || '',
-    accountName: req.body.accountName || '',
-    currency: req.body.currency || 'USD',
-    earningsTokens: 0,
     verified: false,
     createdAt: new Date().toISOString(),
   }
@@ -125,12 +119,7 @@ app.post('/api/doctors/register', (req, res) => {
     availability: 'Available upon request',
     verified: false,
     licenseVerified: false,
-    fee: specialty === 'General Practitioner' ? 20 : 40,
-    bankAccount: req.body.bankAccount || '',
-    bankCode: req.body.bankCode || '',
-    accountName: req.body.accountName || '',
-    currency: req.body.currency || 'USD',
-    earningsTokens: 0,
+    fee: 50, // Default fee
     created_at: newDoctor.createdAt,
   }
 
@@ -418,51 +407,6 @@ app.patch('/api/patients/:patientId/status', (req, res) => {
   res.json({ patient, message: 'Patient status updated' })
 })
 
-// ============ DOCTOR WITHDRAWAL ENDPOINT ============
-
-app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
-  const { doctorId } = req.params
-  const doctor = doctorsAuth.find(d => d.id === doctorId) || doctors.find(d => d.id === doctorId)
-
-  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
-  
-  const tokens = doctor.earningsTokens || 0
-  // Minimum $5 (50 tokens)
-  if (tokens < 50) {
-    return res.status(400).json({ error: 'Minimum withdrawal is 50 tokens ($5)' })
-  }
-
-  if (!doctor.bankAccount || !doctor.bankCode) {
-    return res.status(400).json({ error: 'Please update your bank details in your profile first' })
-  }
-
-  const amountInUSD = tokens / 10
-
-  try {
-    // Kora Payout Logic
-    /*
-    const payout = await axios.post('https://api.korapay.com/merchant/api/v1/payouts', {
-      amount: amountInUSD,
-      currency: doctor.currency,
-      destination: {
-        type: 'bank_account',
-        bank_account: {
-          account_number: doctor.bankAccount,
-          bank_code: doctor.bankCode
-        }
-      },
-      reference: `wd-${Date.now()}`
-    }, { headers: { Authorization: `Bearer ${process.env.KORA_SECRET_KEY}` }})
-    */
-
-    // Reset tokens after successful payout
-    doctor.earningsTokens = 0
-    res.json({ message: `Withdrawal of $${amountInUSD.toFixed(2)} initialized to ${doctor.bankAccount}`, amount: amountInUSD })
-  } catch (error) {
-    res.status(500).json({ error: 'Kora payout failed. Please try again later.' })
-  }
-})
-
 // ============ PAYMENT INTEGRATION ENDPOINTS ============
 
 app.post('/api/payments/kora/initialize', async (req, res) => {
@@ -705,22 +649,13 @@ app.post('/api/appointments', (req, res) => {
   // Check token balance
   const tokenRecord = patientTokens.find(t => t.patientId === patientId)
   const currentTokens = tokenRecord?.balance || 0
-  
-  // Pricing Logic
-  let requiredTokens = tokensRequired
-  if (!requiredTokens) {
-    if (consultationType === 'referral') {
-      requiredTokens = 15
-    } else {
-      requiredTokens = (doctor.specialty === 'General Practitioner' ? 20 : 40)
-    }
-  }
+  const requiredTokens = tokensRequired || (subscriptionType === 'basic' ? 50 : 100)
 
   if (currentTokens < requiredTokens) {
     return res.status(402).json({ error: 'Insufficient tokens. Please purchase more tokens.' })
   }
 
-  // Deduct tokens and calculate revenue split
+  // Deduct tokens
   if (tokenRecord) {
     tokenRecord.balance -= requiredTokens
     tokenRecord.transactions.push({
@@ -736,7 +671,7 @@ app.post('/api/appointments', (req, res) => {
     const doctorShare = requiredTokens * 0.35
     const companyShare = requiredTokens * 0.25
 
-    // Update doctor's earnings
+    // Update doctor's earnings (35%)
     const authDoc = doctorsAuth.find(d => d.id === doctorId)
     if (authDoc) {
       authDoc.earningsTokens = (authDoc.earningsTokens || 0) + doctorShare
