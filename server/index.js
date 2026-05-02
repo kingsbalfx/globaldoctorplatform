@@ -648,13 +648,19 @@ app.post('/api/appointments', (req, res) => {
   // Check token balance
   const tokenRecord = patientTokens.find(t => t.patientId === patientId)
   const currentTokens = tokenRecord?.balance || 0
-  const requiredTokens = tokensRequired || (subscriptionType === 'basic' ? 50 : 100)
+  
+  // Pricing Logic: GP = 20, Specialist = 40, Referral = 15
+  let requiredTokens = tokensRequired;
+  if (!requiredTokens) {
+    if (consultationType === 'referral') requiredTokens = 15;
+    else requiredTokens = (doctor.specialty === 'General Practitioner' ? 20 : 40);
+  }
 
   if (currentTokens < requiredTokens) {
     return res.status(402).json({ error: 'Insufficient tokens. Please purchase more tokens.' })
   }
 
-  // Deduct tokens
+  // Deduct tokens and calculate revenue split
   if (tokenRecord) {
     tokenRecord.balance -= requiredTokens
     tokenRecord.transactions.push({
@@ -664,6 +670,18 @@ app.post('/api/appointments', (req, res) => {
       description: `Appointment with ${doctor.name}: ${requiredTokens} tokens`,
       createdAt: new Date().toISOString(),
     })
+
+    // Revenue Split: Admin 40%, Doctor 35%, Company 25%
+    const adminShare = requiredTokens * 0.40;
+    const doctorShare = requiredTokens * 0.35;
+    // Remaining 25% stays with the platform/company
+
+    // Update doctor's earnings
+    const authDoc = doctorsAuth.find(d => d.id === doctorId);
+    if (authDoc) {
+      authDoc.earningsTokens = (authDoc.earningsTokens || 0) + doctorShare;
+    }
+    doctor.earningsTokens = (doctor.earningsTokens || 0) + doctorShare;
   }
 
   const appointment = {
