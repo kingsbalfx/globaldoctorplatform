@@ -3,7 +3,7 @@
 -- Run this in PostgreSQL to create the core application tables.
 
 -- Doctors authentication and profile data
-CREATE TABLE doctors_auth (
+CREATE TABLE IF NOT EXISTS doctors_auth (
   id SERIAL PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE doctors_auth (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-CREATE TABLE doctors (
+CREATE TABLE IF NOT EXISTS doctors (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   specialty TEXT NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE doctors (
   license_number TEXT,
   license_issuer TEXT,
   license_expiry TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   bank_account TEXT,
   bank_code TEXT,
   account_name TEXT,
@@ -46,7 +46,7 @@ CREATE TABLE doctors (
 );
 
 -- Patients and authentication
-CREATE TABLE patients (
+CREATE TABLE IF NOT EXISTS patients (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
@@ -60,14 +60,14 @@ CREATE TABLE patients (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-CREATE TABLE patient_tokens (
+CREATE TABLE IF NOT EXISTS patient_tokens (
   id SERIAL PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   balance INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-CREATE TABLE token_transactions (
+CREATE TABLE IF NOT EXISTS token_transactions (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   transaction_type TEXT NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE token_transactions (
 );
 
 -- Reviews left by patients for doctors
-CREATE TABLE reviews (
+CREATE TABLE IF NOT EXISTS reviews (
   id TEXT PRIMARY KEY,
   doctor_id TEXT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
@@ -88,7 +88,7 @@ CREATE TABLE reviews (
 );
 
 -- Referrals for cross-specialty routing
-CREATE TABLE referrals (
+CREATE TABLE IF NOT EXISTS referrals (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   from_specialty TEXT NOT NULL,
@@ -100,7 +100,7 @@ CREATE TABLE referrals (
 );
 
 -- Subscriptions and token bundles
-CREATE TABLE subscriptions (
+CREATE TABLE IF NOT EXISTS subscriptions (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   plan TEXT NOT NULL,
@@ -112,7 +112,7 @@ CREATE TABLE subscriptions (
 );
 
 -- Emergency request history
-CREATE TABLE emergency_requests (
+CREATE TABLE IF NOT EXISTS emergency_requests (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   patient_name TEXT NOT NULL,
@@ -122,7 +122,7 @@ CREATE TABLE emergency_requests (
 );
 
 -- Notifications stored for users
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   user_type TEXT NOT NULL,
@@ -138,7 +138,7 @@ CREATE TABLE notifications (
 );
 
 -- Payments and transactions
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE SET NULL,
   doctor_id TEXT NOT NULL REFERENCES doctors(id) ON DELETE SET NULL,
@@ -153,7 +153,7 @@ CREATE TABLE payments (
 );
 
 -- Patient file storage metadata
-CREATE TABLE patient_files (
+CREATE TABLE IF NOT EXISTS patient_files (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -164,7 +164,7 @@ CREATE TABLE patient_files (
 );
 
 -- Appointments and reminders
-CREATE TABLE appointments (
+CREATE TABLE IF NOT EXISTS appointments (
   id TEXT PRIMARY KEY,
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   doctor_id TEXT NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
@@ -178,7 +178,7 @@ CREATE TABLE appointments (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
-CREATE TABLE appointment_reminders (
+CREATE TABLE IF NOT EXISTS appointment_reminders (
   id TEXT PRIMARY KEY,
   appointment_id TEXT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
   reminder_type TEXT NOT NULL,
@@ -190,7 +190,7 @@ CREATE TABLE appointment_reminders (
 );
 
 -- Chat and consultation messaging
-CREATE TABLE chat_messages (
+CREATE TABLE IF NOT EXISTS chat_messages (
   id TEXT PRIMARY KEY,
   consultation_id TEXT NOT NULL,
   sender_id TEXT NOT NULL,
@@ -205,7 +205,7 @@ CREATE TABLE chat_messages (
 );
 
 -- Administrative uploaded files metadata
-CREATE TABLE uploaded_files (
+CREATE TABLE IF NOT EXISTS uploaded_files (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   size TEXT NOT NULL,
@@ -214,7 +214,7 @@ CREATE TABLE uploaded_files (
 );
 
 -- Optional settings table
-CREATE TABLE server_settings (
+CREATE TABLE IF NOT EXISTS server_settings (
   id SERIAL PRIMARY KEY,
   key TEXT NOT NULL UNIQUE,
   value JSONB NOT NULL,
