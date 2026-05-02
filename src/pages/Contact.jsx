@@ -93,8 +93,7 @@ function Contact({ onNavigate }) {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="font-semibold text-slate-900">Email Support</h3>
-                    <a href="mailto:globaldoctorconnect@gmail.com" className="text-brand-600 hover:text-brand-700 block">
+                    <h3 className="font-semibold text-slate-900">Email Support</h3>              <a href="mailto:globaldoctorconnect@gmail.com" className="text-brand-600 hover:text-brand-700 block">
                       globaldoctorconnect@gmail.com
                     </a>
                     <p className="text-sm text-slate-600 mt-1">We respond within 24 hours</p>
