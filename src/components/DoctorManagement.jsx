@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getSpecialtyInfo, getSpecialtyLogo } from '../lib/specialtyRegistry'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
-const specialties = Object.values(require('../lib/specialtyRegistry').specialtyRegistry).map(s => s.name)
+const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Obstetrics & GYN', 'Ophthalmology', 'General Practice']
 
 function DoctorManagement() {
   const [showForm, setShowForm] = useState(false)
