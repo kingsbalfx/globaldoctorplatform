@@ -10,9 +10,8 @@
       "source": "/api/(.*)",
       "destination": "/api/index.js"
     },
-    { "handle": "filesystem" },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|logo.png|favicon.ico).*)",
       "destination": "/index.html"
     }
   ]
