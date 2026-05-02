@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getSpecialtyInfo, getSpecialtyLogo } from '../lib/specialtyRegistry'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
-const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Obstetrics & GYN', 'Ophthalmology', 'General Practice']
+const specialties = ['General Practitioner', 'Neurology', 'Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Obstetrics & GYN', 'Ophthalmology']
 
 function DoctorManagement() {
   const [showForm, setShowForm] = useState(false)
@@ -25,13 +25,14 @@ function DoctorManagement() {
   }
   const [formData, setFormData] = useState({
     name: '',
-    specialty: 'Cardiology',
+    specialty: 'General Practitioner',
     location: '',
     languages: 'English',
-    fee: '50',
+    fee: '20',
     licenseNumber: '',
     licenseIssuer: '',
     licenseExpiry: '',
+    bankAccount: '',
   })
 
   const handleAddDoctor = async (event) => {
@@ -144,6 +145,13 @@ function DoctorManagement() {
             </select>
             <input
               type="text"
+              placeholder="Bank Account (Routing/Account Number)"
+              value={formData.bankAccount}
+              onChange={(e) => handleChange('bankAccount', e.target.value)}
+              className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+            />
+            <input
+              type="text"
               placeholder="Location (City, Country)"
               value={formData.location}
               onChange={(e) => handleChange('location', e.target.value)}
@@ -223,7 +231,8 @@ function DoctorManagement() {
               </p>
               <p className="text-xs text-slate-500 mt-2">{doctor.location}</p>
               <p className="text-xs text-slate-500">License: {doctor.license_number}</p>
-              <p className="text-sm font-semibold text-slate-900 mt-3">${doctor.consultation_fee || doctor.fee}/consult</p>
+              <p className="text-sm font-semibold text-slate-900 mt-3">{doctor.consultation_fee || doctor.fee} Tokens/consult</p>
+              <p className="text-xs font-medium text-green-600">Earned: {doctor.earningsTokens?.toFixed(1) || 0} Tokens</p>
               <div className="flex gap-2 mt-4">
                 {!doctor.verified && (
                   <button

@@ -7,12 +7,35 @@ import NotificationCenter from '../components/NotificationCenter'
 import AdminSettings from '../components/AdminSettings'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+
 function AdminDashboard({ doctor, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview')
   const adminSpecialty = doctor?.specialty || 'General Practice'
   const adminSpecialtyInfo = getSpecialtyInfo(adminSpecialty)
   const adminHeaderStyle = {
     backgroundImage: `linear-gradient(135deg, ${adminSpecialtyInfo.color}, ${adminSpecialtyInfo.bgColor})`,
+  }
+  const [withdrawing, setWithdrawing] = useState(false)
+
+  const handleWithdraw = async () => {
+    if (!window.confirm(`Withdraw ${doctor.earningsTokens} tokens as $${((doctor.earningsTokens / 100) * 10).toFixed(2)}?`)) return
+    
+    setWithdrawing(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/doctors/${doctor.id}/withdraw`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error)
+      alert('Success: ' + data.message)
+      window.location.reload()
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setWithdrawing(false)
+    }
   }
 
   if (!doctor) {
@@ -56,6 +79,7 @@ function AdminDashboard({ doctor, onLogout }) {
           { id: 'referrals', label: 'Referrals', icon: '🔄' },
           { id: 'settings', label: 'Settings', icon: '⚙️' },
           { id: 'files', label: 'Files', icon: '📎' },
+          { id: 'wallet', label: 'Financials', icon: '💰' },
           { id: 'notifications', label: 'Notifications', icon: '🔔' },
         ].map(tab => (
           <button
@@ -118,7 +142,7 @@ function AdminDashboard({ doctor, onLogout }) {
                   </div>
                   <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-sm">
                     <span>Monthly revenue</span>
-                    <strong className="text-2xl">$2,350</strong>
+                    <strong className="text-2xl">${((doctor.earningsTokens || 0) / 10).toFixed(2)}</strong>
                   </div>
                   <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-sm">
                     <span>Profile views</span>
@@ -147,6 +171,43 @@ function AdminDashboard({ doctor, onLogout }) {
                 <p className="text-slate-900">$50 consultation fee received</p>
                 <p className="text-xs text-slate-500 mt-1">2 days ago</p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wallet Tab */}
+      {activeTab === 'wallet' && (
+        <div className="space-y-8">
+          <div className="rounded-3xl bg-white p-10 shadow-xl shadow-slate-200/50">
+            <h3 className="text-2xl font-bold text-slate-900 mb-6">Earnings & Withdrawals</h3>
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="bg-brand-50 rounded-3xl p-8 border border-brand-100">
+                <p className="text-brand-700 font-medium">Accumulated Tokens</p>
+                <p className="text-5xl font-bold text-brand-900 mt-2">{doctor.earningsTokens || 0}</p>
+                <p className="text-brand-600 mt-4 text-sm">Estimated Payout: <span className="font-bold">${((doctor.earningsTokens || 0) / 10).toFixed(2)}</span></p>
+              </div>
+              <div className="bg-slate-50 rounded-3xl p-8 border border-slate-200">
+                <p className="text-slate-600 font-medium">Withdrawal Method</p>
+                <p className="text-slate-900 font-bold mt-2">{doctor.bankAccount ? `Bank: ${doctor.bankAccount}` : 'No bank account linked'}</p>
+                <p className="text-slate-500 text-xs mt-1">Currency: {doctor.currency || 'USD'}</p>
+                <button 
+                  disabled={withdrawing || (doctor.earningsTokens || 0) < 50}
+                  onClick={handleWithdraw}
+                  className="mt-6 w-full bg-brand-700 text-white rounded-2xl py-4 font-bold hover:bg-brand-600 disabled:opacity-50 transition-all"
+                >
+                  {withdrawing ? 'Processing...' : (doctor.earningsTokens || 0) < 50 ? 'Min. 50 Tokens to Withdraw ($5)' : 'Withdraw to Bank'}
+                </button>
+              </div>
+            </div>
+            <div className="mt-8 p-6 bg-blue-50 rounded-2xl border border-blue-100">
+              <h4 className="text-blue-900 font-semibold mb-2">Withdrawal Policy</h4>
+              <ul className="text-blue-800 text-sm space-y-1">
+                <li>• Payout conversion rate: 10 Tokens = $1 USD.</li>
+                <li>• Minimum withdrawal amount is 50 Tokens ($5).</li>
+                <li>• Payouts are processed via Kora automatically.</li>
+                <li>• Ensure your bank account name matches your registered name.</li>
+              </ul>
             </div>
           </div>
         </div>

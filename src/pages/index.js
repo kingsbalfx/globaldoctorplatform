@@ -102,10 +102,7 @@ app.post('/api/doctors/register', (req, res) => {
     specialty,
     location,
     licenseNumber,
-    bankAccount: bankAccount || '',
-    bankCode: bankCode || '',
-    accountName: accountName || '',
-    currency: currency || 'USD',
+    bankAccount: req.body.bankAccount || '',
     earningsTokens: 0,
     verified: false,
     createdAt: new Date().toISOString(),
@@ -126,10 +123,6 @@ app.post('/api/doctors/register', (req, res) => {
     verified: false,
     licenseVerified: false,
     fee: specialty === 'General Practitioner' ? 20 : 40, 
-    bankAccount: bankAccount || '',
-    bankCode: bankCode || '',
-    accountName: accountName || '',
-    currency: currency || 'USD',
     earningsTokens: 0,
     created_at: newDoctor.createdAt,
   }
@@ -418,51 +411,6 @@ app.patch('/api/patients/:patientId/status', (req, res) => {
   res.json({ patient, message: 'Patient status updated' })
 })
 
-// ============ DOCTOR WITHDRAWAL ENDPOINT ============
-
-app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
-  const { doctorId } = req.params
-  const doctor = doctorsAuth.find(d => d.id === doctorId) || doctors.find(d => d.id === doctorId)
-
-  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
-  
-  const tokens = doctor.earningsTokens || 0
-  // Minimum 50 tokens = $5 USD
-  if (tokens < 50) {
-    return res.status(400).json({ error: 'Minimum withdrawal is 50 tokens ($5)' })
-  }
-
-  if (!doctor.bankAccount || !doctor.bankCode) {
-    return res.status(400).json({ error: 'Please update your bank details in your profile first' })
-  }
-
-  const amountInUSD = (tokens / 100) * 10
-
-  try {
-    // Kora Payout Logic
-    /*
-    const payout = await axios.post('https://api.korapay.com/merchant/api/v1/payouts', {
-      amount: amountInUSD,
-      currency: doctor.currency,
-      destination: {
-        type: 'bank_account',
-        bank_account: {
-          account_number: doctor.bankAccount,
-          bank_code: doctor.bankCode
-        }
-      },
-      reference: `wd-${Date.now()}`
-    }, { headers: { Authorization: `Bearer ${process.env.KORA_SECRET_KEY}` }})
-    */
-
-    // Reset tokens after successful payout
-    doctor.earningsTokens = 0
-    res.json({ message: `Withdrawal of $${amountInUSD.toFixed(2)} initialized to ${doctor.bankAccount}`, amount: amountInUSD })
-  } catch (error) {
-    res.status(500).json({ error: 'Kora payout failed. Please try again later.' })
-  }
-})
-
 // ============ PAYMENT INTEGRATION ENDPOINTS ============
 
 app.post('/api/payments/kora/initialize', async (req, res) => {
@@ -706,8 +654,15 @@ app.post('/api/appointments', (req, res) => {
   const tokenRecord = patientTokens.find(t => t.patientId === patientId)
   const currentTokens = tokenRecord?.balance || 0
   
-  // New Token Logic: GP = 20, Specialist = 40
-  const requiredTokens = tokensRequired || (doctor.specialty === 'General Practitioner' ? 20 : 40)
+  // Pricing Logic: 
+  // General Practitioner = 20 tokens
+  // Specialist = 40 tokens
+  // Referral = 15 tokens
+  let requiredTokens = tokensRequired
+  if (!requiredTokens) {
+    if (consultationType === 'specialist' || consultationType === 'referral') requiredTokens = 15
+    else requiredTokens = (doctor.specialty === 'General Practitioner' ? 20 : 40)
+  }
 
   if (currentTokens < requiredTokens) {
     return res.status(402).json({ error: 'Insufficient tokens. Please purchase more tokens.' })

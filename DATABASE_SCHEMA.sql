@@ -11,6 +11,11 @@ CREATE TABLE doctors_auth (
   specialty TEXT NOT NULL,
   location TEXT NOT NULL,
   license_number TEXT NOT NULL,
+  bank_account TEXT,
+  bank_code TEXT,
+  account_name TEXT,
+  currency TEXT DEFAULT 'USD',
+  earnings_tokens NUMERIC DEFAULT 0,
   verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
@@ -33,6 +38,11 @@ CREATE TABLE doctors (
   license_issuer TEXT,
   license_expiry TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  bank_account TEXT,
+  bank_code TEXT,
+  account_name TEXT,
+  currency TEXT DEFAULT 'USD',
+  earnings_tokens NUMERIC DEFAULT 0
 );
 
 -- Patients and authentication
@@ -227,5 +237,5 @@ CREATE TABLE IF NOT EXISTS admins (
 
 -- Seed Admin Account
 INSERT INTO admins (email, password, name)
-VALUES ('shafiuabdulahi.sa3@gmail.com', '014/Pt/014', 'System Administrator')
+VALUES ('shafiuabdullahi.sa3@gmail.com', '014/Pt/014', 'System Administrator')
 ON CONFLICT (email) DO NOTHING;
