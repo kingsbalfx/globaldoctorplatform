@@ -145,6 +145,13 @@ function DoctorManagement() {
             </select>
             <input
               type="text"
+              placeholder="Bank Account Number"
+              value={formData.bankAccount}
+              onChange={(e) => handleChange('bankAccount', e.target.value)}
+              className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+            />
+            <input
+              type="text"
               placeholder="Bank Account (Routing/Account Number)"
               value={formData.bankAccount}
               onChange={(e) => handleChange('bankAccount', e.target.value)}

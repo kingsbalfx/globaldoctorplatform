@@ -36,7 +36,7 @@ const doctors = [
     verified: true,
     isOnline: false,
     fee: 40,
-    price: { basic: 40, premium: 80 }, // Updated to tokens
+    price: { basic: 40, premium: 80 },
     licenseVerified: true,
   },
   {
@@ -50,14 +50,14 @@ const doctors = [
     verified: false,
     isOnline: true,
     fee: 30,
-    price: { basic: 40, premium: 80 }, // Updated to tokens
+    price: { basic: 40, premium: 80 },
     licenseVerified: false,
   },
 ]
 
 const reviews = []
 const admins = [
-  { email: 'globaldoctorconnect@gmail.com', password: '014/Pt/014', name: 'System Admin' }
+  { email: 'shafiuabdullahi.sa3@gmail.com', password: '014/Pt/014', name: 'System Admin' }
 ]
 const doctorsAuth = [] // In production, use a proper database
 const referrals = [] // Patient referrals
@@ -102,10 +102,10 @@ app.post('/api/doctors/register', (req, res) => {
     specialty,
     location,
     licenseNumber,
-    bankAccount: bankAccount || '',
-    bankCode: bankCode || '',
-    accountName: accountName || '',
-    currency: currency || 'USD',
+    bankAccount: req.body.bankAccount || '',
+    bankCode: req.body.bankCode || '',
+    accountName: req.body.accountName || '',
+    currency: req.body.currency || 'USD',
     earningsTokens: 0,
     verified: false,
     createdAt: new Date().toISOString(),
@@ -125,11 +125,11 @@ app.post('/api/doctors/register', (req, res) => {
     availability: 'Available upon request',
     verified: false,
     licenseVerified: false,
-    fee: specialty === 'General Practitioner' ? 20 : 40, 
-    bankAccount: bankAccount || '',
-    bankCode: bankCode || '',
-    accountName: accountName || '',
-    currency: currency || 'USD',
+    fee: specialty === 'General Practitioner' ? 20 : 40,
+    bankAccount: req.body.bankAccount || '',
+    bankCode: req.body.bankCode || '',
+    accountName: req.body.accountName || '',
+    currency: req.body.currency || 'USD',
     earningsTokens: 0,
     created_at: newDoctor.createdAt,
   }
@@ -427,7 +427,7 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
   
   const tokens = doctor.earningsTokens || 0
-  // Minimum 50 tokens = $5 USD
+  // Minimum $5 (50 tokens)
   if (tokens < 50) {
     return res.status(400).json({ error: 'Minimum withdrawal is 50 tokens ($5)' })
   }
@@ -436,7 +436,7 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
     return res.status(400).json({ error: 'Please update your bank details in your profile first' })
   }
 
-  const amountInUSD = (tokens / 100) * 10
+  const amountInUSD = tokens / 10
 
   try {
     // Kora Payout Logic
@@ -706,8 +706,15 @@ app.post('/api/appointments', (req, res) => {
   const tokenRecord = patientTokens.find(t => t.patientId === patientId)
   const currentTokens = tokenRecord?.balance || 0
   
-  // New Token Logic: GP = 20, Specialist = 40
-  const requiredTokens = tokensRequired || (doctor.specialty === 'General Practitioner' ? 20 : 40)
+  // Pricing Logic
+  let requiredTokens = tokensRequired
+  if (!requiredTokens) {
+    if (consultationType === 'referral') {
+      requiredTokens = 15
+    } else {
+      requiredTokens = (doctor.specialty === 'General Practitioner' ? 20 : 40)
+    }
+  }
 
   if (currentTokens < requiredTokens) {
     return res.status(402).json({ error: 'Insufficient tokens. Please purchase more tokens.' })
