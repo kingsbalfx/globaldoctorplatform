@@ -1,6 +1,6 @@
 {
   "functions": {
-    "server/index.js": {
+    "api/index.js": {
       "memory": 1024,
       "maxDuration": 10
     }
@@ -8,8 +8,9 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/server/index.js"
+      "destination": "/api/index.js"
     },
+    { "handle": "filesystem" },
     {
       "source": "/(.*)",
       "destination": "/index.html"
