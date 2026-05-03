@@ -239,6 +239,33 @@ app.get('/api/patients/:patientId/tokens', (req, res) => {
   res.json({ tokens: tokenRecord.balance })
 })
 
+app.post('/api/doctors/:doctorId/withdraw', (req, res) => {
+  const { doctorId } = req.params
+  const doctor = doctorsAuth.find(d => d.id === doctorId) || doctors.find(d => d.id === doctorId)
+
+  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+  
+  const tokens = doctor.earningsTokens || 0
+  // Minimum $5 (50 tokens)
+  if (tokens < 50) {
+    return res.status(400).json({ error: 'Minimum withdrawal is 50 tokens ($5)' })
+  }
+
+  if (!doctor.bankAccount || !doctor.bankCode) {
+    return res.status(400).json({ error: 'Please update your bank details in your profile first' })
+  }
+
+  const amountInUSD = tokens / 10
+
+  // Mock Kora Payout
+  doctor.earningsTokens = 0
+  res.json({ 
+    message: `Withdrawal of $${amountInUSD.toFixed(2)} initiated successfully to ${doctor.bankAccount}`,
+    amount: amountInUSD,
+    reference: `WD-${Date.now()}`
+  })
+})
+
 app.post('/api/patients/:patientId/tokens/add', (req, res) => {
   const { patientId } = req.params
   const { amount } = req.body
@@ -649,7 +676,13 @@ app.post('/api/appointments', (req, res) => {
   // Check token balance
   const tokenRecord = patientTokens.find(t => t.patientId === patientId)
   const currentTokens = tokenRecord?.balance || 0
-  const requiredTokens = tokensRequired || (subscriptionType === 'basic' ? 50 : 100)
+  
+  // Pricing Logic: GP = 20, Specialist = 40, Referral = 15
+  let requiredTokens = tokensRequired;
+  if (!requiredTokens) {
+    if (consultationType === 'referral') requiredTokens = 15;
+    else requiredTokens = (doctor.specialty === 'General Practitioner' ? 20 : 40);
+  }
 
   if (currentTokens < requiredTokens) {
     return res.status(402).json({ error: 'Insufficient tokens. Please purchase more tokens.' })

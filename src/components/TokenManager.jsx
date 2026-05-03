@@ -6,9 +6,10 @@ function TokenManager({ patient, onTokensUpdated }) {
   const [tokens, setTokens] = useState(0)
   const [subscription, setSubscription] = useState(null)
   const [showPurchase, setShowPurchase] = useState(false)
-  const [purchaseAmount, setPurchaseAmount] = useState(100)
-  const [minSubscriptionUSD, setMinSubscriptionUSD] = useState(5)
+  const [purchaseUSD, setPurchaseUSD] = useState(10)
+  const [minSubscriptionUSD, setMinSubscriptionUSD] = useState(10)
   const [loading, setLoading] = useState(false)
+  const [hasPurchasedBefore, setHasPurchasedBefore] = useState(false)
 
   useEffect(() => {
     if (patient) {
@@ -36,6 +37,12 @@ function TokenManager({ patient, onTokensUpdated }) {
       if (response.ok) {
         const data = await response.json()
         setTokens(data.tokens || 0)
+        // Check history for prior purchases
+        const historyRes = await fetch(`${API_BASE}/api/patients/${patient.id}/tokens/history`).catch(() => null)
+        if (historyRes?.ok) {
+          const historyData = await historyRes.json()
+          setHasPurchasedBefore((historyData.transactions || []).some(t => t.type === 'purchase'))
+        }
         onTokensUpdated?.(data.tokens || 0)
       }
     } catch (error) {
@@ -57,12 +64,14 @@ function TokenManager({ patient, onTokensUpdated }) {
 
   const handlePurchaseTokens = async () => {
     setLoading(true)
+    // Rate logic: 1st purchase $10=100 tokens, Repurchase $10=75 tokens
+    const tokensToReward = hasPurchasedBefore ? (purchaseUSD * 7.5) : (purchaseUSD * 10)
     try {
       // Integrate with Kora Payments
       const paymentData = {
-        amount: purchaseAmount,
+        amount: purchaseUSD,
         currency: 'USD',
-        description: `${purchaseAmount} GlobalDoc Tokens`,
+        description: `${tokensToReward} GlobalDoc Tokens`,
         customer: {
           email: patient.email,
           name: patient.name,
@@ -89,7 +98,7 @@ function TokenManager({ patient, onTokensUpdated }) {
       }
 
       // Simulate payment success and add tokens
-      await addTokensToAccount(purchaseAmount)
+      await addTokensToAccount(tokensToReward)
     } catch (error) {
       alert('Payment failed: ' + error.message)
     } finally {
@@ -243,20 +252,20 @@ function TokenManager({ patient, onTokensUpdated }) {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Select Amount
+                  Select Deposit Amount (USD)
                 </label>
                 <div className="grid grid-cols-3 gap-3">
-                  {[100, 250, 500].map(amount => (
+                  {[10, 25, 50].map(usd => (
                     <button
-                      key={amount}
-                      onClick={() => setPurchaseAmount(amount)}
+                      key={usd}
+                      onClick={() => setPurchaseUSD(usd)}
                       className={`p-3 rounded-2xl text-sm font-medium transition ${
-                        purchaseAmount === amount
+                        purchaseUSD === usd
                           ? 'bg-brand-700 text-white'
                           : 'bg-slate-100 text-slate-900 hover:bg-slate-200'
                       }`}
                     >
-                      {amount} tokens
+                      ${usd}
                     </button>
                   ))}
                 </div>
@@ -264,13 +273,18 @@ function TokenManager({ patient, onTokensUpdated }) {
 
               <div className="bg-slate-50 rounded-2xl p-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-600">Amount:</span>
-                  <span className="font-semibold text-slate-900">{purchaseAmount} tokens</span>
+                  <span className="text-slate-600">You will receive:</span>
+                  <span className="font-semibold text-slate-900">
+                    {hasPurchasedBefore ? purchaseUSD * 7.5 : purchaseUSD * 10} tokens
+                  </span>
                 </div>
                 <div className="flex justify-between items-center mt-2">
                   <span className="text-slate-600">Price:</span>
-                  <span className="font-semibold text-brand-700">${(purchaseAmount / 10).toFixed(2)}</span>
+                  <span className="font-semibold text-brand-700">${purchaseUSD.toFixed(2)}</span>
                 </div>
+                <p className="text-[10px] text-slate-400 mt-2 italic">
+                  {hasPurchasedBefore ? 'Repurchase rate: $10 = 75 tokens' : 'First-time bonus: $10 = 100 tokens!'}
+                </p>
               </div>
 
               <div className="flex space-x-3">
