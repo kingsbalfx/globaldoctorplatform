@@ -194,6 +194,7 @@ function LandingPage() {
             </div>
           </div>
         </div>
+      </div>
       </section>
 
       <section className="mt-12 grid gap-8 lg:grid-cols-3">
