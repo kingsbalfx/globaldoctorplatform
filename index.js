@@ -57,7 +57,7 @@ const doctors = [
 
 const reviews = []
 const admins = [
-  { email: 'globaldoctorconnect@gmail.com', password: '014/Pt/014', name: 'System Admin' }
+  { email: 'SHAFIUABDULLAHI.SA3@GMAIL.COM', password: '014/Pt/014', name: 'System Admin' }
 ]
 const doctorsAuth = [] // In production, use a proper database
 const referrals = [] // Patient referrals
