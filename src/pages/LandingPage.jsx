@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { fetchDoctors, submitReview, createPaymentSession } from '../lib/kiraApi'
 
-const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology']
+const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Neurology', 'General Practitioner', 'Urology']
 const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French']
 
 function LandingPage() {
@@ -129,24 +129,39 @@ function LandingPage() {
             <img src="/logo.png" alt="GlobalDoc Connect logo" className="h-12 w-12 rounded-full object-cover shadow-sm" />
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-700">GlobalDoc Connect</p>
-              <p className="text-xs text-slate-500">Your brand logo, favicon, and landing hero style all use the public assets.</p>
+              <p className="text-xs text-slate-500">Verified clinicians, clear specialties, and fast booking—built for global care.</p>
             </div>
           </div>
           <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
-            <div>
-              <span className="inline-flex rounded-full bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700">Global telehealth marketplace</span>
-              <h1 className="mt-8 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
-                Find verified doctors worldwide, book consultations, and pay securely.
+            <div className="flex flex-col justify-end lg:min-h-[420px]">
+              <span className="inline-flex w-fit rounded-full bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700">Global care, anywhere</span>
+              <h1 className="mt-10 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
+                Quality care that fits your life.
               </h1>
-            <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-600">
-              GlobalDoc Connect makes it easy for patients to discover specialists by location, language, and availability while doctors earn from telehealth and priority access services.
-            </p>
-            <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-              <a href="#search" className="inline-flex items-center justify-center rounded-full bg-brand-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Search doctors</a>
-              <a href="#for-doctors" className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Learn for doctors</a>
+              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-600">
+                Search verified doctors by specialty, language, and availability—then book a consultation in minutes.
+              </p>
+              <div className="mt-8 flex flex-col gap-4 sm:flex-row">
+                <a href="#search" className="inline-flex items-center justify-center rounded-full bg-brand-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Search doctors</a>
+                <a href="#for-doctors" className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">For clinicians</a>
+              </div>
+
+              {/* Ads / Trust strip */}
+              <div className="mt-10 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm">
+                  <p className="text-xs font-semibold text-slate-900">Pay securely</p>
+                  <p className="mt-1 text-xs text-slate-500">Protected checkout and verified payments.</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm">
+                  <p className="text-xs font-semibold text-slate-900">Verified clinicians</p>
+                  <p className="mt-1 text-xs text-slate-500">Profiles screened to reduce impersonation.</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm">
+                  <p className="text-xs font-semibold text-slate-900">Fast booking</p>
+                  <p className="mt-1 text-xs text-slate-500">Choose time, channel, and preference.</p>
+                </div>
+              </div>
             </div>
-          </div>
-          </div>
           <div className="rounded-3xl bg-slate-50 p-8 shadow-inner shadow-slate-200/80">
             <div className="rounded-3xl border border-slate-200 bg-white p-6">
               <h2 className="text-xl font-semibold text-slate-900">Search doctors</h2>
@@ -157,9 +172,9 @@ function LandingPage() {
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="block text-sm font-medium text-slate-700">
-                    Specialty
+                    Specialities
                     <select value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500">
-                      <option value="">All specialties</option>
+                      <option value="">Specialities</option>
                       {specialties.map((item) => <option key={item} value={item}>{item}</option>)}
                     </select>
                   </label>
@@ -188,7 +203,7 @@ function LandingPage() {
         </article>
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <h3 className="text-xl font-semibold text-slate-900">Secure consultations</h3>
-          <p className="mt-3 text-slate-600">Kora integration supports priority access and telehealth payments for a complete monetization flow.</p>
+          <p className="mt-3 text-slate-600">Chat and video options help patients connect with clinicians without complicated steps.</p>
         </article>
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <h3 className="text-xl font-semibold text-slate-900">Patient reviews</h3>
@@ -209,7 +224,7 @@ function LandingPage() {
             </div>
             <div>
               <h3 className="text-xl font-semibold text-slate-900">Book with confidence</h3>
-              <p className="mt-2 text-slate-600">Patients pay for priority access or teleconsultation sessions with a secure checkout flow.</p>
+              <p className="mt-2 text-slate-600">Book a consultation, share notes ahead of time, and get reminders automatically.</p>
             </div>
             <div>
               <h3 className="text-xl font-semibold text-slate-900">Review only verified clinicians</h3>
@@ -221,41 +236,52 @@ function LandingPage() {
 
       <section id="for-doctors" className="mt-16 grid gap-8 lg:grid-cols-2">
         <div className="rounded-3xl bg-brand-700 px-8 py-10 text-white shadow-xl shadow-brand-700/20">
-          <h2 className="text-3xl font-bold">Monetization for doctors</h2>
-          <p className="mt-5 max-w-xl text-lg leading-8 text-brand-100">Doctors earn from telehealth consultations and priority access bookings. The platform supports both subscription and commission-based listing models.</p>
+          <h2 className="text-3xl font-bold">For clinicians</h2>
+          <p className="mt-5 max-w-xl text-lg leading-8 text-brand-100">
+            A clean workspace for verified profiles, consultations, referrals, and follow-ups—built to keep care organised.
+          </p>
           <ul className="mt-8 space-y-4 text-sm text-brand-100/90">
-            <li>• Verified badge for licensed professionals</li>
-            <li>• Regional targeting by specialty and language</li>
-            <li>• Real-time availability and booking notifications</li>
-            <li>• Transparent fee management and revenue tracking</li>
+            <li>• Professional profile and license verification</li>
+            <li>• Availability, bookings, and reminders</li>
+            <li>• Secure chat and video sessions</li>
+            <li>• Referrals and patient documentation tools</li>
           </ul>
         </div>
+
         <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <div className="rounded-3xl bg-slate-50 p-6">
-            <h3 className="text-xl font-semibold text-slate-900">Featured doctor</h3>
-            <p className="mt-3 text-slate-600">Priority access drives premium bookings, and the dashboard helps doctors manage consultations and ratings.</p>
+            <h3 className="text-xl font-semibold text-slate-900">For patients</h3>
+            <p className="mt-3 text-slate-600">Find the right doctor faster with clear specialties, verified badges, and quick booking.</p>
 
-            <div className="mt-6 space-y-4 text-slate-700">
-              <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-sm">
-                <span>Weekly booking growth</span>
-                <strong>+18%</strong>
-              </div>
-              <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-sm">
-                <span>Average rating</span>
-                <strong>4.9/5</strong>
-              </div>
-              <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-sm">
-                <span>Verified doctor badge</span>
-                <strong>Enabled</strong>
-              </div>
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              {[
+                { title: 'Search by speciality', body: 'Filter by location, language, availability, and rating.' },
+                { title: 'Book in minutes', body: 'Choose a time that works and confirm with one flow.' },
+                { title: 'Talk securely', body: 'Use in-app chat and video for consultations.' },
+                { title: 'Stay on track', body: 'Reminders and follow-ups help keep care consistent.' },
+              ].map((item) => (
+                <div key={item.title} className="rounded-2xl bg-white px-4 py-4 shadow-sm">
+                  <p className="font-semibold text-slate-900">{item.title}</p>
+                  <p className="mt-1 text-sm text-slate-600">{item.body}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </section>
 
       <section className="mt-16 rounded-3xl bg-white p-10 shadow-xl shadow-slate-200/60" id="contact">
-        <h2 className="text-2xl font-bold text-slate-900">Ready to launch GlobalDoc Connect?</h2>
-        <p className="mt-3 max-w-2xl text-slate-600">This starter platform includes a mobile-first landing experience, doctor search and a backend API structure for ratings and payments.</p>
+        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Need help choosing a doctor?</h2>
+            <p className="mt-3 max-w-2xl text-slate-600">Reach the support team and get guidance on specialties, bookings, and next steps.</p>
+          </div>
+          <div className="rounded-3xl bg-slate-50 p-6 border border-slate-200">
+            <p className="text-sm font-semibold text-slate-900">Contact</p>
+            <p className="mt-2 text-sm text-slate-600">Email: <a className="text-brand-700 hover:text-brand-600 font-semibold" href="mailto:globaldoctorconnect@gmail.com">globaldoctorconnect@gmail.com</a></p>
+            <p className="mt-2 text-xs text-slate-500">Support replies within 24 hours.</p>
+          </div>
+        </div>
       </section>
 
       <section className="mt-12 rounded-3xl bg-slate-900 px-8 py-10 text-white">

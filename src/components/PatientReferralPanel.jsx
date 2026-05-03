@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
+import { API_BASE } from '../lib/apiBase'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
-const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practice']
+const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
 
 function PatientReferralPanel({ patient, currentDoctor, onReferralSubmitted }) {
   const [reason, setReason] = useState('')
@@ -11,7 +11,7 @@ function PatientReferralPanel({ patient, currentDoctor, onReferralSubmitted }) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
 
-  const currentSpecialty = currentDoctor?.specialty || 'General Practice'
+  const currentSpecialty = currentDoctor?.specialty || 'General Practitioner'
   const currentInfo = getSpecialtyInfo(currentSpecialty)
 
   const handleSubmit = async (event) => {

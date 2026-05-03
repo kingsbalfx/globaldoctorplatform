@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+import { API_BASE } from '../lib/apiBase'
 
 function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentScheduled }) {
   const [currentDate, setCurrentDate] = useState(new Date())

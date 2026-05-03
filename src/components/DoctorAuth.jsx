@@ -1,6 +1,5 @@
 import { useState } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+import { API_BASE } from '../lib/apiBase'
 
 function DoctorAuth({ onAuth }) {
   const [isLogin, setIsLogin] = useState(true)
@@ -94,11 +93,14 @@ function DoctorAuth({ onAuth }) {
                     required
                   >
                     <option value="">Select specialty</option>
+                    <option value="General Practitioner">General Practitioner</option>
                     <option value="Cardiology">Cardiology</option>
                     <option value="Dermatology">Dermatology</option>
                     <option value="Psychiatry">Psychiatry</option>
                     <option value="Pediatrics">Pediatrics</option>
                     <option value="Oncology">Oncology</option>
+                    <option value="Neurology">Neurology</option>
+                    <option value="Urology">Urology</option>
                   </select>
                 </div>
                 <div>

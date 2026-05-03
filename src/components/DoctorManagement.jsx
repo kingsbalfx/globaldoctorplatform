@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getSpecialtyInfo, getSpecialtyLogo } from '../lib/specialtyRegistry'
+import { API_BASE } from '../lib/apiBase'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
-const specialties = ['General Practitioner', 'Neurology', 'Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Obstetrics & GYN', 'Ophthalmology']
+const specialties = ['General Practitioner', 'Neurology', 'Urology', 'Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Obstetrics & GYN', 'Ophthalmology']
 
 function DoctorManagement() {
   const [showForm, setShowForm] = useState(false)

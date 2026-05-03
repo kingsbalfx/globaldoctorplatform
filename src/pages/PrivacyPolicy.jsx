@@ -299,7 +299,7 @@ function PrivacyPolicy({ onNavigate }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <h4 className="font-semibold text-slate-900 mb-2">Privacy Officer</h4>
-                    <p className="text-slate-700">Email: shafiuabdullahi.sa3@gmail.com</p>
+                    <p className="text-slate-700">Email: globaldoctorconnect@gmail.com</p>
                     <p className="text-slate-700">Subject: "Privacy Inquiry"</p>
                   </div>
                   <div>
@@ -343,7 +343,7 @@ function PrivacyPolicy({ onNavigate }) {
         </div>
       </main>
 
-      <Footer />
+      <Footer onNavigate={onNavigate} />
     </div>
   )
 }

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+import { API_BASE } from '../lib/apiBase'
 
 function DoctorSelection({ patient, onDoctorSelected }) {
   const [doctors, setDoctors] = useState([])
@@ -54,7 +53,7 @@ function DoctorSelection({ patient, onDoctorSelected }) {
   }
 
   const handleGeneralDoctor = () => {
-    const generalDoctor = doctors.find(d => d.specialty === 'General Practice')
+    const generalDoctor = doctors.find(d => d.specialty === 'General Practitioner' || d.specialty === 'General Practice')
     if (generalDoctor) {
       setSelectedDoctor(generalDoctor)
     } else {
@@ -62,7 +61,7 @@ function DoctorSelection({ patient, onDoctorSelected }) {
       const virtualGeneral = {
         id: 'general',
         name: 'General Doctor',
-        specialty: 'General Practice',
+        specialty: 'General Practitioner',
         experience: '10+ years',
         rating: 4.8,
         price: { basic: 50, premium: 100 },
@@ -98,7 +97,7 @@ function DoctorSelection({ patient, onDoctorSelected }) {
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900">Choose Your Doctor</h1>
-          <p className="text-slate-600 mt-2">Select a specialist or start with our general practitioner</p>
+          <p className="text-slate-600 mt-2">Select a specialist or start with a general practitioner</p>
           <div className="mt-4 bg-white rounded-2xl p-4 shadow-sm">
             <p className="text-sm text-slate-600">Your Token Balance: <span className="font-semibold text-brand-700">{tokens} tokens</span></p>
           </div>

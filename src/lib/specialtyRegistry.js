@@ -82,7 +82,7 @@ export const specialtyRegistry = {
     gradient: 'from-blue-600 to-indigo-500',
   },
   general: {
-    name: 'General Practice',
+    name: 'General Practitioner',
     color: '#16A085',
     bgColor: '#D1F2EB',
     icon: '⚕️',

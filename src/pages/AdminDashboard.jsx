@@ -6,31 +6,78 @@ import FileManager from '../components/FileManager'
 import NotificationCenter from '../components/NotificationCenter'
 import AdminSettings from '../components/AdminSettings'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-
-const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? '' : 'http://localhost:4000')
+import { API_BASE } from '../lib/apiBase'
 
 function AdminDashboard({ doctor, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview')
-  const adminSpecialty = doctor?.specialty || 'General Practice'
+  const adminSpecialty = doctor?.specialty || 'General Practitioner'
   const adminSpecialtyInfo = getSpecialtyInfo(adminSpecialty)
   const adminHeaderStyle = {
     backgroundImage: `linear-gradient(135deg, ${adminSpecialtyInfo.color}, ${adminSpecialtyInfo.bgColor})`,
   }
   const [withdrawing, setWithdrawing] = useState(false)
+  const [savingPayoutDetails, setSavingPayoutDetails] = useState(false)
+  const minWithdrawTokens = 50
+  const [withdrawTokenAmount, setWithdrawTokenAmount] = useState(() => {
+    const value = Number(doctor?.earningsTokens || 0)
+    return value > 0 ? String(Math.floor(value)) : ''
+  })
+  const [payoutDetails, setPayoutDetails] = useState(() => ({
+    payoutMethod: doctor?.payoutMethod || 'bank_account',
+    bankCode: doctor?.bankCode || '',
+    bankAccount: doctor?.bankAccount || '',
+    currency: doctor?.currency || '',
+    mobileMoneyOperator: doctor?.mobileMoneyOperator || '',
+    mobileMoneyNumber: doctor?.mobileMoneyNumber || '',
+  }))
+
+  const handleSavePayoutDetails = async () => {
+    setSavingPayoutDetails(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/doctors/${doctor.id}/payout-details`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payoutDetails),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to save payout details')
+      alert('Payout details saved.')
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setSavingPayoutDetails(false)
+    }
+  }
 
   const handleWithdraw = async () => {
-    if (!window.confirm(`Withdraw ${doctor.earningsTokens} tokens as $${((doctor.earningsTokens / 100) * 10).toFixed(2)}?`)) return
+    const tokens = Number(withdrawTokenAmount)
+    if (!Number.isFinite(tokens) || tokens <= 0) {
+      alert('Enter a valid token amount to withdraw.')
+      return
+    }
+    if (tokens < minWithdrawTokens) {
+      alert(`Minimum withdrawal is ${minWithdrawTokens} tokens ($5).`)
+      return
+    }
+    if (tokens > (doctor.earningsTokens || 0)) {
+      alert('Requested amount exceeds your available tokens.')
+      return
+    }
+
+    if (!window.confirm(`Withdraw ${tokens} tokens (~$${(tokens / 10).toFixed(2)})?`)) return
     
     setWithdrawing(true)
     try {
       const response = await fetch(`${API_BASE}/api/doctors/${doctor.id}/withdraw`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tokens })
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
-      alert('Success: ' + data.message)
-      window.location.reload()
+      const payoutLine = data.currency ? `Payout: ${data.payoutAmount ?? ''} ${data.currency}` : ''
+      const usdLine = typeof data.amountUSD === 'number' ? `USD: $${data.amountUSD.toFixed(2)}` : ''
+      alert([`Success: ${data.message}`, `Reference: ${data.reference}`, payoutLine, usdLine].filter(Boolean).join('\n'))
     } catch (err) {
       alert(err.message)
     } finally {
@@ -186,27 +233,119 @@ function AdminDashboard({ doctor, onLogout }) {
                 <p className="text-brand-700 font-medium">Accumulated Tokens</p>
                 <p className="text-5xl font-bold text-brand-900 mt-2">{doctor.earningsTokens || 0}</p>
                 <p className="text-brand-600 mt-4 text-sm">Estimated Payout: <span className="font-bold">${((doctor.earningsTokens || 0) / 10).toFixed(2)}</span></p>
+
+                <div className="mt-6">
+                  <label className="block text-sm font-semibold text-brand-900">Withdraw token amount</label>
+                  <input
+                    type="number"
+                    min={minWithdrawTokens}
+                    step="1"
+                    value={withdrawTokenAmount}
+                    onChange={(e) => setWithdrawTokenAmount(e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-brand-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-300"
+                    placeholder={`Minimum ${minWithdrawTokens}`}
+                  />
+                  <p className="mt-2 text-xs text-brand-700/90">Minimum withdrawal: {minWithdrawTokens} tokens ($5). Conversion: 10 tokens = $1.</p>
+                </div>
               </div>
               <div className="bg-slate-50 rounded-3xl p-8 border border-slate-200">
-                <p className="text-slate-600 font-medium">Withdrawal Method</p>
-                <p className="text-slate-900 font-bold mt-2">{doctor.bankAccount ? `Bank: ${doctor.bankAccount}` : 'No bank account linked'}</p>
-                <p className="text-slate-500 text-xs mt-1">Currency: {doctor.currency || 'USD'}</p>
-                <button 
-                  disabled={withdrawing || (doctor.earningsTokens || 0) < 50}
-                  onClick={handleWithdraw}
-                  className="mt-6 w-full bg-brand-700 text-white rounded-2xl py-4 font-bold hover:bg-brand-600 disabled:opacity-50 transition-all"
-                >
-                  {withdrawing ? 'Processing...' : (doctor.earningsTokens || 0) < 50 ? 'Min. 50 Tokens to Withdraw ($5)' : 'Withdraw to Bank'}
-                </button>
+                <p className="text-slate-600 font-medium">Payout Details (Kora)</p>
+
+                <div className="mt-5 grid gap-4">
+                  <label className="text-sm font-semibold text-slate-700">
+                    Payout method
+                    <select
+                      value={payoutDetails.payoutMethod}
+                      onChange={(e) => setPayoutDetails((prev) => ({ ...prev, payoutMethod: e.target.value }))}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                    >
+                      <option value="bank_account">Bank account</option>
+                      <option value="mobile_money">Mobile money</option>
+                    </select>
+                  </label>
+
+                  <label className="text-sm font-semibold text-slate-700">
+                    Payout currency
+                    <select
+                      value={payoutDetails.currency}
+                      onChange={(e) => setPayoutDetails((prev) => ({ ...prev, currency: e.target.value }))}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                    >
+                      <option value="">Auto (by location)</option>
+                      <option value="NGN">NGN</option>
+                      <option value="KES">KES</option>
+                      <option value="ZAR">ZAR</option>
+                      <option value="GHS">GHS</option>
+                      <option value="XOF">XOF</option>
+                      <option value="XAF">XAF</option>
+                      <option value="EGP">EGP</option>
+                      <option value="USD">USD</option>
+                      <option value="GBP">GBP</option>
+                    </select>
+                  </label>
+
+                  {payoutDetails.payoutMethod === 'bank_account' ? (
+                    <>
+                      <input
+                        type="text"
+                        placeholder="Bank code (e.g. 058)"
+                        value={payoutDetails.bankCode}
+                        onChange={(e) => setPayoutDetails((prev) => ({ ...prev, bankCode: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Account number"
+                        value={payoutDetails.bankAccount}
+                        onChange={(e) => setPayoutDetails((prev) => ({ ...prev, bankAccount: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        placeholder="Mobile money operator (e.g. safaricom-ke)"
+                        value={payoutDetails.mobileMoneyOperator}
+                        onChange={(e) => setPayoutDetails((prev) => ({ ...prev, mobileMoneyOperator: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Mobile number (e.g. +2547xxxxxxxx)"
+                        value={payoutDetails.mobileMoneyNumber}
+                        onChange={(e) => setPayoutDetails((prev) => ({ ...prev, mobileMoneyNumber: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                      />
+                    </>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleSavePayoutDetails}
+                      disabled={savingPayoutDetails}
+                      className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {savingPayoutDetails ? 'Saving...' : 'Save details'}
+                    </button>
+                    <button
+                      disabled={withdrawing || Number(doctor.earningsTokens || 0) < minWithdrawTokens}
+                      onClick={handleWithdraw}
+                      className="flex-1 rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
+                    >
+                      {withdrawing ? 'Processing...' : 'Withdraw'}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             <div className="mt-8 p-6 bg-blue-50 rounded-2xl border border-blue-100">
               <h4 className="text-blue-900 font-semibold mb-2">Withdrawal Policy</h4>
               <ul className="text-blue-800 text-sm space-y-1">
-                <li>• Payout conversion rate: 10 Tokens = $1 USD.</li>
+                <li>• Conversion rate: 10 Tokens = $1 USD.</li>
                 <li>• Minimum withdrawal amount is 50 Tokens ($5).</li>
-                <li>• Payouts are processed via Kora automatically.</li>
-                <li>• Ensure your bank account name matches your registered name.</li>
+                <li>• Payouts are processed via Kora when configured.</li>
+                <li>• Ensure payout details match your registered identity.</li>
               </ul>
             </div>
           </div>

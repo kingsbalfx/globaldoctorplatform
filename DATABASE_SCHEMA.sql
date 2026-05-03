@@ -237,5 +237,5 @@ CREATE TABLE IF NOT EXISTS admins (
 
 -- Seed Admin Account
 INSERT INTO admins (email, password, name)
-VALUES ('shafiuabdullahi.sa3@gmail.com', '014/Pt/014', 'System Administrator')
+VALUES ('globaldoctorconnect@gmail.com', '014/Pt/014', 'System Administrator')
 ON CONFLICT (email) DO NOTHING;

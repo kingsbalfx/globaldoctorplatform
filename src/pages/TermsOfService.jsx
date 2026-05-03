@@ -225,7 +225,7 @@ function TermsOfService({ onNavigate }) {
                 We encourage users to resolve disputes amicably. For unresolved issues:
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Contact our support team at shafiuabdullahi.sa3@gmail.com</li>
+                <li>Contact support at globaldoctorconnect@gmail.com</li>
                 <li>Medical disputes may involve independent review</li>
                 <li>Payment disputes are handled through our payment processor</li>
                 <li>Legal disputes will be resolved in competent courts</li>
@@ -250,7 +250,7 @@ function TermsOfService({ onNavigate }) {
                 For questions about these Terms or our services:
               </p>
               <div className="bg-slate-50 p-4 rounded-lg">
-                <p className="text-slate-700"><strong>Email:</strong> shafiuabdullahi.sa3@gmail.com</p>
+                <p className="text-slate-700"><strong>Email:</strong> globaldoctorconnect@gmail.com</p>
                 <p className="text-slate-700"><strong>Emergency Support:</strong> Available 24/7</p>
                 <p className="text-slate-700"><strong>Address:</strong> GlobalDoc Connect, Telehealth Services Worldwide</p>
               </div>
@@ -276,7 +276,7 @@ function TermsOfService({ onNavigate }) {
         </div>
       </main>
 
-      <Footer />
+      <Footer onNavigate={onNavigate} />
     </div>
   )
 }

@@ -33,7 +33,7 @@ function Contact({ onNavigate }) {
       // Simulate form submission
       await new Promise(resolve => setTimeout(resolve, 2000))
 
-      setSubmitMessage('Thank you for your message! We\'ll get back to you within 24 hours.')
+      setSubmitMessage('Thank you for your message! Support replies within 24 hours.')
       setFormData({
         name: '',
         email: '',
@@ -81,7 +81,7 @@ function Contact({ onNavigate }) {
               <div>
                 <h2 className="text-xl font-semibold text-slate-900 mb-4">Get in Touch</h2>
                 <p className="text-slate-700 mb-6">
-                  We're here to help! Whether you have questions about our services, need technical support, or want to partner with us, don't hesitate to reach out.
+                  Support is available for questions, technical help, and partnership requests. Reach out anytime.
                 </p>
               </div>
 
@@ -97,7 +97,7 @@ function Contact({ onNavigate }) {
                     <a href="mailto:globaldoctorconnect@gmail.com" className="text-brand-600 hover:text-brand-700 block">
                       globaldoctorconnect@gmail.com
                     </a>
-                    <p className="text-sm text-slate-600 mt-1">We respond within 24 hours</p>
+                    <p className="text-sm text-slate-600 mt-1">Response within 24 hours</p>
                   </div>
                 </div>
 
@@ -153,7 +153,7 @@ function Contact({ onNavigate }) {
               <div className="bg-blue-50 p-6 rounded-lg">
                 <h3 className="font-semibold text-blue-900 mb-2">Need Immediate Help?</h3>
                 <p className="text-blue-800 text-sm mb-3">
-                  For medical emergencies or urgent healthcare needs, our platform provides 24/7 access to qualified healthcare professionals.
+                  For medical emergencies or urgent healthcare needs, 24/7 access is available to qualified healthcare professionals.
                 </p>
                 <button className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
                   Start Emergency Consultation
@@ -165,7 +165,7 @@ function Contact({ onNavigate }) {
           {/* Contact Form */}
           <div className="bg-white rounded-2xl shadow-lg p-8">
             <h2 className="text-2xl font-bold text-slate-900 mb-6">
-              Send us a Message
+              Send a Message
             </h2>
 
             {submitMessage && (
@@ -287,38 +287,38 @@ function Contact({ onNavigate }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div>
               <h3 className="font-semibold text-slate-900 mb-2">How quickly do you respond?</h3>
-              <p className="text-slate-700 text-sm">We respond to all inquiries within 24 hours, with technical support responding within 12 hours.</p>
+              <p className="text-slate-700 text-sm">Most inquiries receive a reply within 24 hours; technical support within 12 hours.</p>
             </div>
 
             <div>
               <h3 className="font-semibold text-slate-900 mb-2">Do you offer phone support?</h3>
-              <p className="text-slate-700 text-sm">Currently, we provide support through email and our platform messaging system for the best documentation.</p>
+              <p className="text-slate-700 text-sm">Support is available through email and in-platform messaging for better documentation.</p>
             </div>
 
             <div>
               <h3 className="font-semibold text-slate-900 mb-2">What languages do you support?</h3>
-              <p className="text-slate-700 text-sm">We support English, Arabic, Swahili, Hindi, French, and Spanish for our global community.</p>
+              <p className="text-slate-700 text-sm">English, Arabic, Swahili, Hindi, French, and Spanish are supported for the global community.</p>
             </div>
 
             <div>
               <h3 className="font-semibold text-slate-900 mb-2">How do I report a problem?</h3>
-              <p className="text-slate-700 text-sm">Use the contact form above or email us directly. Include screenshots and detailed descriptions for faster resolution.</p>
+              <p className="text-slate-700 text-sm">Use the contact form above or email directly. Include screenshots and detailed descriptions for faster resolution.</p>
             </div>
 
             <div>
               <h3 className="font-semibold text-slate-900 mb-2">Can I request a feature?</h3>
-              <p className="text-slate-700 text-sm">Absolutely! We love hearing from users. Share your ideas through the contact form or email.</p>
+              <p className="text-slate-700 text-sm">Feature requests are welcome—share ideas through the contact form or email.</p>
             </div>
 
             <div>
               <h3 className="font-semibold text-slate-900 mb-2">How do I become a healthcare partner?</h3>
-              <p className="text-slate-700 text-sm">Contact us with your credentials and experience. We'll guide you through our verification process.</p>
+              <p className="text-slate-700 text-sm">Send credentials and experience by email. A verification workflow follows after review.</p>
             </div>
           </div>
         </div>
       </main>
 
-      <Footer />
+      <Footer onNavigate={onNavigate} />
     </div>
   )
 }

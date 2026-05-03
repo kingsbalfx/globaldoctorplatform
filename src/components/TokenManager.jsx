@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+import { API_BASE } from '../lib/apiBase'
 
 function TokenManager({ patient, onTokensUpdated }) {
   const [tokens, setTokens] = useState(0)
@@ -10,6 +9,7 @@ function TokenManager({ patient, onTokensUpdated }) {
   const [minSubscriptionUSD, setMinSubscriptionUSD] = useState(10)
   const [loading, setLoading] = useState(false)
   const [hasPurchasedBefore, setHasPurchasedBefore] = useState(false)
+  const [pendingPurchase, setPendingPurchase] = useState(null)
 
   useEffect(() => {
     if (patient) {
@@ -64,63 +64,58 @@ function TokenManager({ patient, onTokensUpdated }) {
 
   const handlePurchaseTokens = async () => {
     setLoading(true)
-    // Rate logic: 1st purchase $10=100 tokens, Repurchase $10=75 tokens
-    const tokensToReward = hasPurchasedBefore ? (purchaseUSD * 7.5) : (purchaseUSD * 10)
     try {
-      // Integrate with Kora Payments
-      const paymentData = {
-        amount: purchaseUSD,
-        currency: 'USD',
-        description: `${tokensToReward} GlobalDoc Tokens`,
-        customer: {
-          email: patient.email,
-          name: patient.name,
-          phone: patient.phone
-        }
-      }
-
-      const response = await fetch(`${API_BASE}/api/payments/kora/initialize`, {
+      const response = await fetch(`${API_BASE}/api/patients/${patient.id}/tokens/purchase/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(paymentData),
+        body: JSON.stringify({ amountUSD: purchaseUSD }),
       })
 
       if (!response.ok) {
-        throw new Error('Payment initialization failed')
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.error || 'Payment initialization failed')
       }
 
       const result = await response.json()
 
-      // Redirect to Kora payment page (in real implementation)
-      if (result.checkout_url) {
-        alert(`Redirecting to Kora... Reference: ${result.reference}`)
-        // window.location.href = result.checkout_url;
-      }
+      setPendingPurchase({
+        reference: result.reference,
+        tokensExpected: result.tokensExpected,
+        checkoutUrl: result.checkout_url,
+      })
 
-      // Simulate payment success and add tokens
-      await addTokensToAccount(tokensToReward)
+      if (result.checkout_url) {
+        window.open(result.checkout_url, '_blank', 'noopener,noreferrer')
+      }
     } catch (error) {
       alert('Payment failed: ' + error.message)
     } finally {
       setLoading(false)
-      setShowPurchase(false)
     }
   }
 
-  const addTokensToAccount = async (amount) => {
+  const confirmPurchase = async () => {
+    if (!pendingPurchase?.reference) return
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${patient.id}/tokens/add`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount }),
-      })
+      setLoading(true)
+      const response = await fetch(`${API_BASE}/api/payments/kora/verify/${encodeURIComponent(pendingPurchase.reference)}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to verify payment')
 
-      if (response.ok) {
-        await fetchTokenBalance()
-        alert(`Successfully added ${amount} tokens to your account!`)
+      if (data.status !== 'success') {
+        alert(`Payment status: ${data.status || 'pending'}. Please retry in a moment.`)
+        return
       }
+
+      await fetchTokenBalance()
+      setPendingPurchase(null)
+      setShowPurchase(false)
+      alert(`Tokens credited successfully.`)
     } catch (error) {
       console.error('Failed to add tokens:', error)
+      alert(error.message)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -250,12 +245,37 @@ function TokenManager({ patient, onTokensUpdated }) {
             <h3 className="text-xl font-semibold text-slate-900 mb-4">Buy Tokens</h3>
 
             <div className="space-y-4">
+              {pendingPurchase ? (
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
+                  <p className="text-sm text-slate-700 font-semibold">Payment started</p>
+                  <p className="text-xs text-slate-500 mt-1">Reference: {pendingPurchase.reference}</p>
+                  <p className="text-xs text-slate-500 mt-1">Expected tokens: {pendingPurchase.tokensExpected}</p>
+                  <div className="flex gap-3 mt-4">
+                    <button
+                      onClick={() => pendingPurchase.checkoutUrl && window.open(pendingPurchase.checkoutUrl, '_blank', 'noopener,noreferrer')}
+                      className="flex-1 bg-slate-100 text-slate-700 py-3 px-4 rounded-2xl font-semibold hover:bg-slate-200 transition"
+                    >
+                      Open Checkout
+                    </button>
+                    <button
+                      onClick={confirmPurchase}
+                      disabled={loading}
+                      className="flex-1 bg-brand-700 text-white py-3 px-4 rounded-2xl font-semibold hover:bg-brand-600 transition disabled:opacity-50"
+                    >
+                      {loading ? 'Checking...' : 'I have paid'}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-3">
+                    Tokens are credited after payment verification.
+                  </p>
+                </div>
+              ) : (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Select Deposit Amount (USD)
                 </label>
                 <div className="grid grid-cols-3 gap-3">
-                  {[10, 25, 50].map(usd => (
+                  {[10, 20, 50].map(usd => (
                     <button
                       key={usd}
                       onClick={() => setPurchaseUSD(usd)}
@@ -289,7 +309,10 @@ function TokenManager({ patient, onTokensUpdated }) {
 
               <div className="flex space-x-3">
                 <button
-                  onClick={() => setShowPurchase(false)}
+                  onClick={() => {
+                    setPendingPurchase(null)
+                    setShowPurchase(false)
+                  }}
                   className="flex-1 bg-slate-100 text-slate-700 py-3 px-4 rounded-2xl font-semibold hover:bg-slate-200 transition"
                 >
                   Cancel
@@ -302,6 +325,7 @@ function TokenManager({ patient, onTokensUpdated }) {
                   {loading ? 'Processing...' : 'Pay with Kora'}
                 </button>
               </div>
+              )}
             </div>
           </div>
         </div>

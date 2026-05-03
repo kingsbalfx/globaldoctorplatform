@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+import { API_BASE } from '../lib/apiBase'
 
 function ReferralManager() {
   const [showReferralForm, setShowReferralForm] = useState(false)
@@ -14,7 +13,7 @@ function ReferralManager() {
     notes: '',
   })
 
-  const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practice']
+  const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
 
   const loadReferrals = async () => {
     try {
@@ -48,7 +47,7 @@ function ReferralManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           patientId: selectedPatientId,
-          fromSpecialty: 'General Practice',
+          fromSpecialty: 'General Practitioner',
           toSpecialty: referralData.targetSpecialty,
           reason: referralData.reason,
           notes: referralData.notes,

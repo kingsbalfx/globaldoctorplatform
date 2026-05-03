@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { API_BASE } from '../lib/apiBase'
 
 const SDK_URL = 'https://unpkg.com/@daily-co/daily-js@0.22.1/dist/daily-js.min.js'
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
 
 function VideoChatPanel({ consultationId, userId, userType }) {
   const videoRef = useRef(null)

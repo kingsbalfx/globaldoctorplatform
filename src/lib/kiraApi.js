@@ -1,13 +1,4 @@
-let API_BASE = import.meta.env.VITE_API_BASE || '';
-
-// Senior Programmer Fix: Prevent production crashes if .env points to localhost
-if (import.meta.env.PROD) {
-  if (!API_BASE || API_BASE.includes('localhost')) {
-    API_BASE = window.location.origin;
-  }
-} else if (!API_BASE) {
-  API_BASE = 'http://localhost:4000';
-}
+import { API_BASE as APP_API_BASE } from './apiBase'
 
 export async function fetchDoctors({ specialty, minRating, availability, query }) {
   const params = new URLSearchParams()
@@ -16,7 +7,7 @@ export async function fetchDoctors({ specialty, minRating, availability, query }
   if (availability) params.set('availability', availability)
   if (query) params.set('query', query)
 
-  const response = await fetch(`${API_BASE}/api/doctors?${params.toString()}`)
+  const response = await fetch(`${APP_API_BASE}/api/doctors?${params.toString()}`)
   if (!response.ok) {
     console.error('Failed to fetch doctors', await response.text())
     return []
@@ -26,7 +17,7 @@ export async function fetchDoctors({ specialty, minRating, availability, query }
 }
 
 export async function submitReview(reviewData) {
-  const response = await fetch(`${API_BASE}/api/reviews`, {
+  const response = await fetch(`${APP_API_BASE}/api/reviews`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(reviewData),
@@ -40,7 +31,7 @@ export async function submitReview(reviewData) {
 }
 
 export async function createPaymentSession(paymentData) {
-  const response = await fetch(`${API_BASE}/api/payments`, {
+  const response = await fetch(`${APP_API_BASE}/api/payments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(paymentData),

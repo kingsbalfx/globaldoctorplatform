@@ -10,8 +10,7 @@ import CalendarScheduler from '../components/CalendarScheduler'
 import TokenManager from '../components/TokenManager'
 import PatientReferralPanel from '../components/PatientReferralPanel'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+import { API_BASE } from '../lib/apiBase'
 
 function PatientDashboard() {
   const [currentStep, setCurrentStep] = useState('auth') // auth -> doctor -> calendar -> dashboard
@@ -27,7 +26,7 @@ function PatientDashboard() {
   const [loading, setLoading] = useState(false)
   const [selectedConsultationId, setSelectedConsultationId] = useState('')
 
-  const currentSpecialty = selectedDoctor?.specialty || 'General Practice'
+  const currentSpecialty = selectedDoctor?.specialty || 'General Practitioner'
   const specialtyInfo = getSpecialtyInfo(currentSpecialty)
   const patientDashboardStyle = {
     backgroundImage: `radial-gradient(circle at top left, ${specialtyInfo.color}20, transparent 35%), radial-gradient(circle at bottom right, ${specialtyInfo.color}10, transparent 25%)`,
@@ -70,9 +69,8 @@ function PatientDashboard() {
 
   const handleAuth = (authResult) => {
     if (authResult.type === 'register') {
-      // New patient - start with 50 free tokens
-      setPatient({ ...authResult.patient, tokens: 50 })
-      setTokens(50)
+      setPatient({ ...authResult.patient, tokens: 0 })
+      setTokens(0)
     } else {
       setPatient(authResult.patient)
       setTokens(authResult.patient.tokens || 0)
