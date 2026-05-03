@@ -162,39 +162,40 @@ function LandingPage() {
                 </div>
               </div>
             </div>
-          <div className="rounded-3xl bg-slate-50 p-8 shadow-inner shadow-slate-200/80">
-            <div className="rounded-3xl border border-slate-200 bg-white p-6">
-              <h2 className="text-xl font-semibold text-slate-900">Search doctors</h2>
-              <form id="search" onSubmit={handleSearch} className="mt-6 space-y-4">
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700">Search by name or city</label>
-                  <input value={query} onChange={(e) => setQuery(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500" placeholder="e.g. Dr. Sarah or Nairobi" />
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block text-sm font-medium text-slate-700">
-                    Specialities
-                    <select value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500">
-                      <option value="">Specialities</option>
-                      {specialties.map((item) => <option key={item} value={item}>{item}</option>)}
-                    </select>
-                  </label>
-                  <label className="block text-sm font-medium text-slate-700">
-                    Minimum rating
-                    <select value={minRating} onChange={(e) => setMinRating(Number(e.target.value))} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500">
-                      {[4, 4.2, 4.5, 4.8, 5].map((rating) => <option key={rating} value={rating}>{rating}+</option>)}
-                    </select>
-                  </label>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-slate-700">Availability</label>
-                  <input value={availability} onChange={(e) => setAvailability(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500" placeholder="Available now, Book for tomorrow" />
-                </div>
-                <button type="submit" className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Filter doctors</button>
-              </form>
+
+            <div className="rounded-3xl bg-slate-50 p-8 shadow-inner shadow-slate-200/80">
+              <div className="rounded-3xl border border-slate-200 bg-white p-6">
+                <h2 className="text-xl font-semibold text-slate-900">Search doctors</h2>
+                <form id="search" onSubmit={handleSearch} className="mt-6 space-y-4">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-slate-700">Search by name or city</label>
+                    <input value={query} onChange={(e) => setQuery(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500" placeholder="e.g. Dr. Sarah or Nairobi" />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block text-sm font-medium text-slate-700">
+                      Specialities
+                      <select value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500">
+                        <option value="">Specialities</option>
+                        {specialties.map((item) => <option key={item} value={item}>{item}</option>)}
+                      </select>
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Minimum rating
+                      <select value={minRating} onChange={(e) => setMinRating(Number(e.target.value))} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500">
+                        {[4, 4.2, 4.5, 4.8, 5].map((rating) => <option key={rating} value={rating}>{rating}+</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-slate-700">Availability</label>
+                    <input value={availability} onChange={(e) => setAvailability(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500" placeholder="Available now, Book for tomorrow" />
+                  </div>
+                  <button type="submit" className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Filter doctors</button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
-      </div>
       </section>
 
       <section className="mt-12 grid gap-8 lg:grid-cols-3">
