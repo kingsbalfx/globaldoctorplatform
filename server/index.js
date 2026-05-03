@@ -2,12 +2,16 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import axios from 'axios'
+import { RtcTokenBuilder, RtcRole } from 'agora-access-token'
 
 dotenv.config()
 
 const app = express()
 app.use(cors())
 app.use(express.json())
+
+const AGORA_APP_ID = process.env.AGORA_APP_ID
+const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE
 
 const doctors = [
   {
@@ -77,6 +81,31 @@ const payments = [] // Payment transactions
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' })
+})
+
+// ============ VIDEO SDK ENDPOINT ============
+app.get('/api/video/token', (req, res) => {
+  const channelName = req.query.channelName
+  if (!channelName) return res.status(400).json({ error: 'channelName is required' })
+  if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
+    return res.status(500).json({ error: 'Video SDK not configured on server' })
+  }
+
+  const uid = 0
+  const role = RtcRole.PUBLISHER
+  const expirationTimeInSeconds = 3600
+  const currentTimestamp = Math.floor(Date.now() / 1000)
+  const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds
+
+  const token = RtcTokenBuilder.buildTokenWithUid(
+    AGORA_APP_ID,
+    AGORA_APP_CERTIFICATE,
+    channelName,
+    uid,
+    role,
+    privilegeExpiredTs
+  )
+  res.json({ token, appId: AGORA_APP_ID })
 })
 
 app.post('/api/doctors/register', (req, res) => {
@@ -236,6 +265,33 @@ app.get('/api/patients/:patientId/tokens', (req, res) => {
   }
 
   res.json({ tokens: tokenRecord.balance })
+})
+
+app.post('/api/doctors/:doctorId/withdraw', (req, res) => {
+  const { doctorId } = req.params
+  const doctor = doctorsAuth.find(d => d.id === doctorId) || doctors.find(d => d.id === doctorId)
+
+  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+  
+  const tokens = doctor.earningsTokens || 0
+  // Minimum $5 (50 tokens)
+  if (tokens < 50) {
+    return res.status(400).json({ error: 'Minimum withdrawal is 50 tokens ($5)' })
+  }
+
+  if (!doctor.bankAccount || !doctor.bankCode) {
+    return res.status(400).json({ error: 'Please update your bank details in your profile first' })
+  }
+
+  const amountInUSD = tokens / 10
+
+  // Mock Kora Payout
+  doctor.earningsTokens = 0
+  res.json({ 
+    message: `Withdrawal of $${amountInUSD.toFixed(2)} initiated successfully to ${doctor.bankAccount}`,
+    amount: amountInUSD,
+    reference: `WD-${Date.now()}`
+  })
 })
 
 app.post('/api/patients/:patientId/tokens/add', (req, res) => {

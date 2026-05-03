@@ -7,7 +7,7 @@ import NotificationCenter from '../components/NotificationCenter'
 import AdminSettings from '../components/AdminSettings'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? '' : 'http://localhost:4000')
 
 function AdminDashboard({ doctor, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview')
