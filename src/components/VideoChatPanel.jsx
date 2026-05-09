@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { API_BASE } from '../lib/apiBase'
+import VitalParametersMonitor from './VitalParametersMonitor'
 
 const SDK_URL = 'https://unpkg.com/@daily-co/daily-js@0.22.1/dist/daily-js.min.js'
 
-function VideoChatPanel({ consultationId, userId, userType }) {
+function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId }) {
   const videoRef = useRef(null)
   const [roomUrl, setRoomUrl] = useState('https://demo.daily.co/meeting-room')
   const [loading, setLoading] = useState(false)
@@ -114,6 +115,16 @@ function VideoChatPanel({ consultationId, userId, userType }) {
       <div className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200/40">
         <div ref={videoRef} className="h-[420px] rounded-3xl bg-slate-900/5 overflow-hidden" />
       </div>
+
+      {/* Vital Parameters Monitor - Available during call */}
+      {callStarted && (
+        <VitalParametersMonitor
+          consultationId={consultationId}
+          patientId={patientId}
+          doctorId={doctorId}
+          userType={userType}
+        />
+      )}
     </div>
   )
 }

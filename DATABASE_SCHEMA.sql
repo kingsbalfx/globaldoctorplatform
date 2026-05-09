@@ -235,6 +235,39 @@ CREATE TABLE IF NOT EXISTS admins (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
+-- Vital Parameters for Telehealth Consultations
+CREATE TABLE IF NOT EXISTS vital_parameters (
+  id SERIAL PRIMARY KEY,
+  consultation_id TEXT,
+  patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id TEXT REFERENCES doctors(id) ON DELETE SET NULL,
+  parameter_name TEXT NOT NULL,
+  parameter_value TEXT NOT NULL,
+  unit TEXT,
+  measured_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  device_type TEXT DEFAULT 'smartphone',
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+CREATE INDEX idx_vital_parameters_patient ON vital_parameters(patient_id);
+CREATE INDEX idx_vital_parameters_consultation ON vital_parameters(consultation_id);
+CREATE INDEX idx_vital_parameters_measured_at ON vital_parameters(measured_at DESC);
+
+-- Vital Parameters History View
+CREATE OR REPLACE VIEW vital_parameters_summary AS
+SELECT 
+  vp.patient_id,
+  vp.parameter_name,
+  vp.parameter_value,
+  vp.measured_at,
+  p.name as patient_name,
+  d.name as doctor_name
+FROM vital_parameters vp
+LEFT JOIN patients p ON vp.patient_id = p.id
+LEFT JOIN doctors d ON vp.doctor_id = d.id
+ORDER BY vp.measured_at DESC;
+
 -- Seed Admin Account
 INSERT INTO admins (email, password, name)
 VALUES ('shafiuabdullahi.sa3@gmail.com', '014/Pt/014', 'System Administrator')
