@@ -4,6 +4,8 @@ import dotenv from 'dotenv'
 import axios from 'axios'
 import { RtcTokenBuilder, RtcRole } from 'agora-access-token'
 import crypto from 'crypto'
+import { fileURLToPath } from 'url'
+import { resolve } from 'path'
 
 dotenv.config()
 
@@ -1025,14 +1027,15 @@ app.get('/api/doctors/:doctorId/availability', (req, res) => {
 })
 
 app.get('/api/doctors', (req, res) => {
-  const { specialty, minRating, availability, query, online } = req.query
+  const { specialty, minRating, availability, query, online, language } = req.query
   const filtered = doctors.filter((doctor) => {
     const matchesSpecialty = !specialty || doctor.specialty === specialty
+    const matchesLanguage = !language || (Array.isArray(doctor.languages) && doctor.languages.includes(String(language)))
     const matchesRating = !minRating || doctor.rating >= Number(minRating)
     const matchesAvailability = !availability || doctor.availability.toLowerCase().includes(String(availability).toLowerCase())
     const matchesQuery = !query || [doctor.name, doctor.location, doctor.specialty].some((field) => field.toLowerCase().includes(String(query).toLowerCase()))
     const matchesOnline = online === undefined || online === '' || String(doctor.isOnline) === String(online)
-    return matchesSpecialty && matchesRating && matchesAvailability && matchesQuery && matchesOnline
+    return matchesSpecialty && matchesLanguage && matchesRating && matchesAvailability && matchesQuery && matchesOnline
   })
   res.json({ doctors: filtered })
 })
@@ -1612,8 +1615,9 @@ const port = process.env.PORT || 4000
 // For Vercel serverless functions, export the app
 export default app
 
-// For local development, keep the listen call
-if (process.env.NODE_ENV !== 'production') {
+// For local development, keep the listen call (only when executed directly)
+const isDirectRun = Boolean(process.argv?.[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (isDirectRun) {
   app.listen(port, () => {
     console.log(`Server listening on http://localhost:${port}`)
   })

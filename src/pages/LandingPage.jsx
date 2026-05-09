@@ -1,16 +1,29 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchDoctors, submitReview, createPaymentSession } from '../lib/kiraApi'
 
-const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Neurology', 'General Practitioner', 'Urology']
+const specialties = [
+  'Cardiology',
+  'Dermatology',
+  'Psychiatry',
+  'Pediatrics',
+  'Oncology',
+  'Neurology',
+  'General Practitioner',
+  'Urology',
+]
+
 const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French']
 
 function LandingPage() {
   const [query, setQuery] = useState('')
   const [specialty, setSpecialty] = useState('')
+  const [language, setLanguage] = useState('')
   const [minRating, setMinRating] = useState(4)
   const [availability, setAvailability] = useState('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
+
   const [selectedDoctor, setSelectedDoctor] = useState(null)
   const [showReviewForm, setShowReviewForm] = useState(false)
   const [showPaymentForm, setShowPaymentForm] = useState(false)
@@ -19,16 +32,18 @@ function LandingPage() {
   const [processingPayment, setProcessingPayment] = useState(false)
 
   useEffect(() => {
-    loadDoctors()
+    void loadDoctors()
   }, [])
 
   const loadDoctors = async () => {
     setLoading(true)
+    setLoadError('')
     try {
       const doctors = await fetchDoctors({})
       setResults(doctors)
     } catch (error) {
       console.error('Failed to load doctors:', error)
+      setLoadError('We could not load the directory right now. Please try again.')
       setResults([])
     } finally {
       setLoading(false)
@@ -36,23 +51,42 @@ function LandingPage() {
   }
 
   const filteredDoctors = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    const normalizedAvailability = availability.trim().toLowerCase()
+
     return results.filter((doctor) => {
-      const matchesQuery = query.length === 0 || doctor.name.toLowerCase().includes(query.toLowerCase()) || doctor.location.toLowerCase().includes(query.toLowerCase())
-      const matchesSpecialty = specialty === '' || doctor.specialty === specialty
-      const matchesRating = doctor.rating >= minRating
-      const matchesAvailability = availability === '' || doctor.availability.toLowerCase().includes(availability.toLowerCase())
-      return matchesQuery && matchesSpecialty && matchesRating && matchesAvailability
+      const name = String(doctor?.name || '').toLowerCase()
+      const location = String(doctor?.location || '').toLowerCase()
+      const doctorAvailability = String(doctor?.availability || '').toLowerCase()
+      const doctorSpecialty = String(doctor?.specialty || '')
+      const doctorLanguages = Array.isArray(doctor?.languages) ? doctor.languages : []
+      const doctorRating = Number(doctor?.rating || 0)
+
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        name.includes(normalizedQuery) ||
+        location.includes(normalizedQuery) ||
+        doctorSpecialty.toLowerCase().includes(normalizedQuery)
+
+      const matchesSpecialty = specialty === '' || doctorSpecialty === specialty
+      const matchesLanguage = language === '' || doctorLanguages.includes(language)
+      const matchesRating = doctorRating >= minRating
+      const matchesAvailability = normalizedAvailability === '' || doctorAvailability.includes(normalizedAvailability)
+
+      return matchesQuery && matchesSpecialty && matchesLanguage && matchesRating && matchesAvailability
     })
-  }, [query, specialty, minRating, availability, results])
+  }, [availability, language, minRating, query, results, specialty])
 
   const handleSearch = async (event) => {
     event.preventDefault()
     setLoading(true)
+    setLoadError('')
     try {
-      const doctors = await fetchDoctors({ specialty, minRating, availability, query })
+      const doctors = await fetchDoctors({ specialty, language, minRating, availability, query })
       setResults(doctors)
     } catch (error) {
       console.error('Search failed:', error)
+      setLoadError('Search failed. Please try again.')
       setResults([])
     } finally {
       setLoading(false)
@@ -71,17 +105,17 @@ function LandingPage() {
     if (!selectedDoctor) return
 
     try {
-      const result = await submitReview({
+      await submitReview({
         doctorId: selectedDoctor.id,
-        patientId: 'patient-demo', // In real app, get from auth
+        patientId: 'patient-demo',
         rating: reviewData.rating,
         comment: reviewData.comment,
-        verifiedPatient: true, // In real app, check verification status
+        verifiedPatient: true,
       })
+
       alert('Review submitted successfully!')
       setShowReviewForm(false)
       setReviewData({ rating: 5, comment: '' })
-      // Reload doctors to get updated ratings
       await loadDoctors()
     } catch (error) {
       alert('Failed to submit review: ' + error.message)
@@ -94,17 +128,15 @@ function LandingPage() {
 
     setProcessingPayment(true)
     try {
-      // Create Kora payment session via backend
       const result = await createPaymentSession({
-        patientId: 'patient-demo', // In real app, get from auth
+        patientId: 'patient-demo',
         doctorId: selectedDoctor.id,
         amount: selectedDoctor.fee,
         type: paymentData.type,
       })
 
       if (result.checkout_url) {
-        alert(`Redirecting to Kora for payment: ${result.transaction?.id || result.id}`)
-        window.location.href = result.checkout_url;
+        window.location.href = result.checkout_url
         setShowPaymentForm(false)
         setPaymentData({ type: 'priority_access' })
       }
@@ -115,84 +147,183 @@ function LandingPage() {
     }
   }
 
+  const resetFilters = () => {
+    setQuery('')
+    setSpecialty('')
+    setLanguage('')
+    setMinRating(4)
+    setAvailability('')
+    void loadDoctors()
+  }
+
   return (
     <main className="relative mx-auto max-w-7xl px-6 pb-16 sm:px-8">
-      <section className="relative overflow-hidden rounded-3xl bg-white/95 px-6 py-10 shadow-xl shadow-slate-200/60 sm:px-10" style={heroBackgroundStyle}>
-        <div className="pointer-events-none absolute inset-0 opacity-30">
-          <div className="absolute inset-0 bg-white/80" />
-          <img src="/background.png" alt="landing background" className="h-full w-full object-cover" />
+      <section
+        className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white px-6 py-10 shadow-xl shadow-slate-200/60 sm:px-10"
+        style={heroBackgroundStyle}
+      >
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/95 via-white/85 to-white/70" />
+          <div className="absolute -left-16 top-6 h-52 w-52 rounded-full bg-brand-300/30 blur-3xl" />
+          <div className="absolute right-0 top-20 h-64 w-64 rounded-full bg-slate-300/25 blur-3xl" />
         </div>
-        <div className="absolute -left-12 top-10 h-40 w-40 rounded-full bg-brand-300/20 blur-3xl animate-pulse" />
-        <div className="absolute right-0 top-24 h-56 w-56 rounded-full bg-slate-300/20 blur-3xl animate-pulse" />
-        <div className="relative z-10">
-          <div className="mb-8 flex items-center gap-4 rounded-3xl bg-white/90 p-4 shadow-lg shadow-slate-200/40">
-            <img src="/logo.png" alt="GlobalDoc Connect logo" className="h-12 w-12 rounded-full object-cover shadow-sm" />
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-700">GlobalDoc Connect</p>
-              <p className="text-xs text-slate-500">Verified clinicians, clear specialties, and fast booking—built for global care.</p>
+
+        <div className="relative z-10 grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200/60 backdrop-blur">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Verified profiles • Secure consultations • Fast booking
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-700 text-white shadow-md shadow-brand-700/30">
+                <span className="text-2xl font-bold">G</span>
+              </div>
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.28em] text-slate-500">GlobalDoc Connect</p>
+                <h1 className="mt-1 text-3xl font-bold text-slate-900 sm:text-5xl">Care that travels with you</h1>
+              </div>
+            </div>
+
+            <p className="max-w-xl text-lg leading-8 text-slate-700">
+              Find specialists across borders, compare verified reviews, and book consultations without the back-and-forth.
+            </p>
+
+            <div className="flex flex-wrap gap-3">
+              <a
+                href="#search"
+                className="rounded-full bg-brand-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/30 hover:bg-brand-600"
+              >
+                Find a doctor
+              </a>
+              <a
+                href="#how-it-works"
+                className="rounded-full border border-slate-200 bg-white/70 px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-white"
+              >
+                See how it works
+              </a>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[
+                { title: 'Trusted directory', body: 'Profiles reviewed to reduce impersonation risk.' },
+                { title: 'Privacy minded', body: 'Designed for patient confidentiality and safety.' },
+                { title: 'Global access', body: 'Search by specialty, location, and language.' },
+              ].map((item) => (
+                <div key={item.title} className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 shadow-sm backdrop-blur">
+                  <p className="text-xs font-semibold text-slate-900">{item.title}</p>
+                  <p className="mt-1 text-xs text-slate-600">{item.body}</p>
+                </div>
+              ))}
             </div>
           </div>
-          <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
-            <div className="flex flex-col justify-end lg:min-h-[420px]">
-              <span className="inline-flex w-fit rounded-full bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700">Global care, anywhere</span>
-              <h1 className="mt-10 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
-                Quality care that fits your life.
-              </h1>
-              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-600">
-                Search verified doctors by specialty, language, and availability—then book a consultation in minutes.
-              </p>
-              <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-                <a href="#search" className="inline-flex items-center justify-center rounded-full bg-brand-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Search doctors</a>
-                <a href="#for-doctors" className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">For clinicians</a>
+
+          <div className="rounded-3xl bg-white/70 p-4 shadow-inner shadow-slate-200/80 ring-1 ring-slate-200/60 backdrop-blur">
+            <div className="rounded-3xl bg-white p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">Search doctors</h2>
+                  <p className="mt-2 text-sm text-slate-600">Filter by specialty, rating, availability, and language.</p>
+                </div>
+                <a href="#directory" className="text-sm font-semibold text-brand-700 hover:text-brand-600">
+                  View directory
+                </a>
               </div>
 
-              {/* Ads / Trust strip */}
-              <div className="mt-10 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm">
-                  <p className="text-xs font-semibold text-slate-900">Pay securely</p>
-                  <p className="mt-1 text-xs text-slate-500">Protected checkout and verified payments.</p>
+              <form id="search" onSubmit={handleSearch} className="mt-6 space-y-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-slate-700">Search by name or city</label>
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    placeholder="e.g. Dr. Amina or Nairobi"
+                  />
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm">
-                  <p className="text-xs font-semibold text-slate-900">Verified clinicians</p>
-                  <p className="mt-1 text-xs text-slate-500">Profiles screened to reduce impersonation.</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm">
-                  <p className="text-xs font-semibold text-slate-900">Fast booking</p>
-                  <p className="mt-1 text-xs text-slate-500">Choose time, channel, and preference.</p>
-                </div>
-              </div>
-            </div>
 
-            <div className="rounded-3xl bg-slate-50 p-8 shadow-inner shadow-slate-200/80">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6">
-                <h2 className="text-xl font-semibold text-slate-900">Search doctors</h2>
-                <form id="search" onSubmit={handleSearch} className="mt-6 space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-slate-700">Search by name or city</label>
-                    <input value={query} onChange={(e) => setQuery(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500" placeholder="e.g. Dr. Sarah or Nairobi" />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Specialty
+                    <select
+                      value={specialty}
+                      onChange={(e) => setSpecialty(e.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    >
+                      <option value="">All specialties</option>
+                      {specialties.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    Language
+                    <select
+                      value={language}
+                      onChange={(e) => setLanguage(e.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    >
+                      <option value="">Any language</option>
+                      {languages.map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Minimum rating
+                    <select
+                      value={minRating}
+                      onChange={(e) => setMinRating(Number(e.target.value))}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    >
+                      {[4, 4.2, 4.5, 4.8, 5].map((rating) => (
+                        <option key={rating} value={rating}>
+                          {rating}+
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    Availability
+                    <input
+                      value={availability}
+                      onChange={(e) => setAvailability(e.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                      placeholder="Available now, Book for tomorrow"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="submit"
+                    className="flex-1 rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600"
+                  >
+                    Filter doctors
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Reset
+                  </button>
+                </div>
+
+                {loadError && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {loadError}
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block text-sm font-medium text-slate-700">
-                      Specialities
-                      <select value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500">
-                        <option value="">Specialities</option>
-                        {specialties.map((item) => <option key={item} value={item}>{item}</option>)}
-                      </select>
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Minimum rating
-                      <select value={minRating} onChange={(e) => setMinRating(Number(e.target.value))} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500">
-                        {[4, 4.2, 4.5, 4.8, 5].map((rating) => <option key={rating} value={rating}>{rating}+</option>)}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-slate-700">Availability</label>
-                    <input value={availability} onChange={(e) => setAvailability(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500" placeholder="Available now, Book for tomorrow" />
-                  </div>
-                  <button type="submit" className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Filter doctors</button>
-                </form>
-              </div>
+                )}
+              </form>
             </div>
           </div>
         </div>
@@ -201,7 +332,7 @@ function LandingPage() {
       <section className="mt-12 grid gap-8 lg:grid-cols-3">
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <h3 className="text-xl font-semibold text-slate-900">Verified global directory</h3>
-          <p className="mt-3 text-slate-600">Indexed by location, specialty and language so patients can choose the right doctor no matter where they are.</p>
+          <p className="mt-3 text-slate-600">Search by location, specialty, and language so patients can choose with confidence.</p>
         </article>
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <h3 className="text-xl font-semibold text-slate-900">Secure consultations</h3>
@@ -209,7 +340,7 @@ function LandingPage() {
         </article>
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
           <h3 className="text-xl font-semibold text-slate-900">Patient reviews</h3>
-          <p className="mt-3 text-slate-600">A verified rating system keeps reviews authentic and protects against bot or fake feedback.</p>
+          <p className="mt-3 text-slate-600">Verified reviews encourage authenticity and reduce bot or fake feedback.</p>
         </article>
       </section>
 
@@ -218,19 +349,23 @@ function LandingPage() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-700">How it works</p>
             <h2 className="mt-4 text-3xl font-bold text-slate-900">Patient-first experience</h2>
+            <p className="mt-4 text-slate-600">
+              Compare specialists, book quickly, and keep care organised—without juggling multiple apps.
+            </p>
           </div>
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-semibold text-slate-900">Search globally</h3>
-              <p className="mt-2 text-slate-600">Filter by specialty, rating, availability and languages to locate the best doctor fast.</p>
-            </div>
-            <div>
-              <h3 className="text-xl font-semibold text-slate-900">Book with confidence</h3>
-              <p className="mt-2 text-slate-600">Book a consultation, share notes ahead of time, and get reminders automatically.</p>
-            </div>
-            <div>
-              <h3 className="text-xl font-semibold text-slate-900">Review only verified clinicians</h3>
-              <p className="mt-2 text-slate-600">Only verified patients can submit ratings, and doctors can earn a verified badge when license documents are confirmed.</p>
+          <div className="space-y-6 lg:col-span-2">
+            <div className="grid gap-6 sm:grid-cols-3">
+              {[
+                { step: '01', title: 'Search globally', body: 'Filter by specialty, rating, language, and location.' },
+                { step: '02', title: 'Book confidently', body: 'Choose consultation type and confirm in one flow.' },
+                { step: '03', title: 'Review safely', body: 'Verified patients keep ratings more authentic.' },
+              ].map((item) => (
+                <div key={item.step} className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
+                  <p className="text-xs font-semibold text-brand-700">{item.step}</p>
+                  <h3 className="mt-3 text-lg font-semibold text-slate-900">{item.title}</h3>
+                  <p className="mt-2 text-sm text-slate-600">{item.body}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -257,8 +392,8 @@ function LandingPage() {
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {[
-                { title: 'Search by speciality', body: 'Filter by location, language, availability, and rating.' },
-                { title: 'Book in minutes', body: 'Choose a time that works and confirm with one flow.' },
+                { title: 'Search by specialty', body: 'Filter by location, language, availability, and rating.' },
+                { title: 'Book in minutes', body: 'Choose a time that works and confirm in one flow.' },
                 { title: 'Talk securely', body: 'Use in-app chat and video for consultations.' },
                 { title: 'Stay on track', body: 'Reminders and follow-ups help keep care consistent.' },
               ].map((item) => (
@@ -278,60 +413,104 @@ function LandingPage() {
             <h2 className="text-2xl font-bold text-slate-900">Need help choosing a doctor?</h2>
             <p className="mt-3 max-w-2xl text-slate-600">Reach the support team and get guidance on specialties, bookings, and next steps.</p>
           </div>
-          <div className="rounded-3xl bg-slate-50 p-6 border border-slate-200">
+          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
             <p className="text-sm font-semibold text-slate-900">Contact</p>
-            <p className="mt-2 text-sm text-slate-600">Email: <a className="text-brand-700 hover:text-brand-600 font-semibold" href="mailto:globaldoctorconnect@gmail.com">globaldoctorconnect@gmail.com</a></p>
+            <p className="mt-2 text-sm text-slate-600">
+              Email:{' '}
+              <a className="font-semibold text-brand-700 hover:text-brand-600" href="mailto:globaldoctorconnect@gmail.com">
+                globaldoctorconnect@gmail.com
+              </a>
+            </p>
             <p className="mt-2 text-xs text-slate-500">Support replies within 24 hours.</p>
           </div>
         </div>
       </section>
 
-      <section className="mt-12 rounded-3xl bg-slate-900 px-8 py-10 text-white">
-        <h2 className="text-xl font-semibold">Available doctors</h2>
-        {loading && <p className="mt-4 text-slate-300">Loading doctors...</p>}
-        <div className="mt-8 grid gap-6 xl:grid-cols-3">
-          {filteredDoctors.map((doctor) => (
-            <div key={doctor.id} className="rounded-3xl bg-slate-950/80 p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-300">{doctor.specialty}</p>
-                  <h3 className="mt-2 text-xl font-bold">{doctor.name}</h3>
-                </div>
-                <span className="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-900">{doctor.verified ? 'Verified' : 'Pending'}</span>
-              </div>
-              <p className="mt-4 text-sm text-slate-300">{doctor.location}</p>
-              <p className="mt-3 text-sm text-slate-300">Languages: {doctor.languages.join(', ')}</p>
-              <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-300">
-                <span className="rounded-full bg-slate-800 px-3 py-1">{doctor.availability}</span>
-                <span className="rounded-full bg-slate-800 px-3 py-1">Rating {doctor.rating}</span>
-                <span className="rounded-full bg-slate-800 px-3 py-1">${doctor.fee}/consult</span>
-              </div>
-              <div className="mt-6 flex gap-3">
-                <button
-                  onClick={() => {
-                    setSelectedDoctor(doctor)
-                    setShowReviewForm(true)
-                  }}
-                  className="flex-1 rounded-full bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
-                >
-                  Leave Review
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedDoctor(doctor)
-                    setShowPaymentForm(true)
-                  }}
-                  className="flex-1 rounded-full bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600"
-                >
-                  Book Now
-                </button>
-              </div>
-            </div>
-          ))}
+      <section className="mt-12 rounded-3xl bg-slate-900 px-8 py-10 text-white" id="directory">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Available doctors</h2>
+            <p className="mt-1 text-sm text-slate-300">Browse, review, and book securely.</p>
+          </div>
+          <a href="#search" className="text-sm font-semibold text-brand-300 hover:text-brand-200">
+            Update filters
+          </a>
         </div>
+
+        {loading && (
+          <div className="mt-8 grid gap-6 xl:grid-cols-3">
+            {[0, 1, 2].map((item) => (
+              <div key={item} className="rounded-3xl bg-slate-950/70 p-6 animate-pulse">
+                <div className="h-4 w-24 rounded bg-slate-800" />
+                <div className="mt-3 h-7 w-48 rounded bg-slate-800" />
+                <div className="mt-6 space-y-2">
+                  <div className="h-4 w-40 rounded bg-slate-800" />
+                  <div className="h-4 w-56 rounded bg-slate-800" />
+                </div>
+                <div className="mt-6 flex gap-3">
+                  <div className="h-10 flex-1 rounded-full bg-slate-800" />
+                  <div className="h-10 flex-1 rounded-full bg-slate-800" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!loading && filteredDoctors.length === 0 && (
+          <div className="mt-6 rounded-3xl border border-slate-700 bg-slate-950/40 p-6">
+            <p className="text-sm text-slate-200">No doctors match your filters yet.</p>
+            <p className="mt-2 text-sm text-slate-400">Try widening the specialty, language, or rating filters.</p>
+          </div>
+        )}
+
+        {!loading && filteredDoctors.length > 0 && (
+          <div className="mt-8 grid gap-6 xl:grid-cols-3">
+            {filteredDoctors.map((doctor) => (
+              <div key={doctor.id} className="rounded-3xl bg-slate-950/80 p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-300">{doctor.specialty}</p>
+                    <h3 className="mt-2 text-xl font-bold">{doctor.name}</h3>
+                  </div>
+                  <span className="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-900">
+                    {doctor.verified ? 'Verified' : 'Pending'}
+                  </span>
+                </div>
+                <p className="mt-4 text-sm text-slate-300">{doctor.location}</p>
+                <p className="mt-3 text-sm text-slate-300">Languages: {Array.isArray(doctor.languages) ? doctor.languages.join(', ') : '—'}</p>
+                <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-300">
+                  <span className="rounded-full bg-slate-800 px-3 py-1">{doctor.availability}</span>
+                  <span className="rounded-full bg-slate-800 px-3 py-1">Rating {doctor.rating}</span>
+                  <span className="rounded-full bg-slate-800 px-3 py-1">${doctor.fee}/consult</span>
+                </div>
+                <div className="mt-6 flex gap-3">
+                  <button
+                    onClick={() => {
+                      setSelectedDoctor(doctor)
+                      setShowReviewForm(true)
+                      setShowPaymentForm(false)
+                    }}
+                    className="flex-1 rounded-full bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+                  >
+                    Leave Review
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedDoctor(doctor)
+                      setShowPaymentForm(true)
+                      setShowReviewForm(false)
+                    }}
+                    className="flex-1 rounded-full bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600"
+                  >
+                    Book Now
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* Review Modal */}
       {showReviewForm && selectedDoctor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-3xl bg-white p-6">
@@ -345,7 +524,9 @@ function LandingPage() {
                   className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900"
                 >
                   {[5, 4, 3, 2, 1].map((rating) => (
-                    <option key={rating} value={rating}>{rating} stars</option>
+                    <option key={rating} value={rating}>
+                      {rating} stars
+                    </option>
                   ))}
                 </select>
               </div>
@@ -360,7 +541,10 @@ function LandingPage() {
                 />
               </div>
               <div className="flex gap-3">
-                <button type="submit" className="flex-1 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600">
+                <button
+                  type="submit"
+                  className="flex-1 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600"
+                >
                   Submit Review
                 </button>
                 <button
@@ -376,7 +560,6 @@ function LandingPage() {
         </div>
       )}
 
-      {/* Payment Modal */}
       {showPaymentForm && selectedDoctor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-3xl bg-white p-6">
@@ -384,7 +567,7 @@ function LandingPage() {
             <div className="mt-4 rounded-2xl bg-slate-50 p-4">
               <p className="text-sm text-slate-600">Specialty: {selectedDoctor.specialty}</p>
               <p className="text-sm text-slate-600">Location: {selectedDoctor.location}</p>
-              <p className="text-lg font-semibold text-slate-900 mt-2">${selectedDoctor.fee}</p>
+              <p className="mt-2 text-lg font-semibold text-slate-900">${selectedDoctor.fee}</p>
             </div>
             <form onSubmit={handlePayment} className="mt-6 space-y-4">
               <div>
@@ -399,8 +582,12 @@ function LandingPage() {
                 </select>
               </div>
               <div className="flex gap-3">
-                <button type="submit" className="flex-1 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600">
-                  Pay ${selectedDoctor.fee}
+                <button
+                  type="submit"
+                  disabled={processingPayment}
+                  className="flex-1 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {processingPayment ? 'Processing…' : `Pay $${selectedDoctor.fee}`}
                 </button>
                 <button
                   type="button"
