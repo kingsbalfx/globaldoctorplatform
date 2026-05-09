@@ -270,61 +270,63 @@ function TokenManager({ patient, onTokensUpdated }) {
                   </p>
                 </div>
               ) : (
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Select Deposit Amount (USD)
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[10, 20, 50].map(usd => (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Select Deposit Amount (USD)
+                    </label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[10, 20, 50].map(usd => (
+                        <button
+                          key={usd}
+                          onClick={() => setPurchaseUSD(usd)}
+                          className={`p-3 rounded-2xl text-sm font-medium transition ${
+                            purchaseUSD === usd
+                              ? 'bg-brand-700 text-white'
+                              : 'bg-slate-100 text-slate-900 hover:bg-slate-200'
+                          }`}
+                        >
+                          ${usd}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-2xl p-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600">You will receive:</span>
+                      <span className="font-semibold text-slate-900">
+                        {hasPurchasedBefore ? purchaseUSD * 7.5 : purchaseUSD * 10} tokens
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center mt-2">
+                      <span className="text-slate-600">Price:</span>
+                      <span className="font-semibold text-brand-700">${purchaseUSD.toFixed(2)}</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-2 italic">
+                      {hasPurchasedBefore ? 'Repurchase rate: $10 = 75 tokens' : 'First-time bonus: $10 = 100 tokens!'}
+                    </p>
+                  </div>
+
+                  <div className="flex space-x-3">
                     <button
-                      key={usd}
-                      onClick={() => setPurchaseUSD(usd)}
-                      className={`p-3 rounded-2xl text-sm font-medium transition ${
-                        purchaseUSD === usd
-                          ? 'bg-brand-700 text-white'
-                          : 'bg-slate-100 text-slate-900 hover:bg-slate-200'
-                      }`}
+                      onClick={() => {
+                        setPendingPurchase(null)
+                        setShowPurchase(false)
+                      }}
+                      className="flex-1 bg-slate-100 text-slate-700 py-3 px-4 rounded-2xl font-semibold hover:bg-slate-200 transition"
                     >
-                      ${usd}
+                      Cancel
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-slate-50 rounded-2xl p-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-600">You will receive:</span>
-                  <span className="font-semibold text-slate-900">
-                    {hasPurchasedBefore ? purchaseUSD * 7.5 : purchaseUSD * 10} tokens
-                  </span>
-                </div>
-                <div className="flex justify-between items-center mt-2">
-                  <span className="text-slate-600">Price:</span>
-                  <span className="font-semibold text-brand-700">${purchaseUSD.toFixed(2)}</span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-2 italic">
-                  {hasPurchasedBefore ? 'Repurchase rate: $10 = 75 tokens' : 'First-time bonus: $10 = 100 tokens!'}
-                </p>
-              </div>
-
-              <div className="flex space-x-3">
-                <button
-                  onClick={() => {
-                    setPendingPurchase(null)
-                    setShowPurchase(false)
-                  }}
-                  className="flex-1 bg-slate-100 text-slate-700 py-3 px-4 rounded-2xl font-semibold hover:bg-slate-200 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handlePurchaseTokens}
-                  disabled={loading}
-                  className="flex-1 bg-brand-700 text-white py-3 px-4 rounded-2xl font-semibold hover:bg-brand-600 transition disabled:opacity-50"
-                >
-                  {loading ? 'Processing...' : 'Pay with Kora'}
-                </button>
-              </div>
+                    <button
+                      onClick={handlePurchaseTokens}
+                      disabled={loading}
+                      className="flex-1 bg-brand-700 text-white py-3 px-4 rounded-2xl font-semibold hover:bg-brand-600 transition disabled:opacity-50"
+                    >
+                      {loading ? 'Processing...' : 'Pay with Kora'}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
