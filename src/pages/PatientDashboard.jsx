@@ -9,6 +9,7 @@ import DoctorSelection from '../components/DoctorSelection'
 import CalendarScheduler from '../components/CalendarScheduler'
 import TokenManager from '../components/TokenManager'
 import PatientReferralPanel from '../components/PatientReferralPanel'
+import AnnouncementBanner from '../components/AnnouncementBanner'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { API_BASE } from '../lib/apiBase'
 
@@ -153,6 +154,7 @@ function PatientDashboard() {
   return (
     <section className="relative mx-auto mt-16 max-w-7xl px-6 pb-20 sm:px-8" style={patientDashboardStyle}>
       <div className="absolute inset-x-0 top-0 h-72 bg-white/80 blur-xl opacity-40" />
+      <AnnouncementBanner audience="patient" />
       <div className="rounded-3xl border border-white/60 bg-white/95 px-8 py-10 shadow-xl shadow-slate-200/40 mb-8 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-transparent to-white/80 opacity-80" />
         <div className="relative grid gap-6 lg:grid-cols-[1.8fr_1fr] lg:items-center">

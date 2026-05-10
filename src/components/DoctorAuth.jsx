@@ -31,7 +31,22 @@ function DoctorAuth({ onAuth }) {
       }
 
       const result = await response.json()
-      onAuth({ type: isLogin ? 'login' : 'register', ...result.doctor })
+
+      if (result?.admin) {
+        onAuth({
+          type: 'admin-login',
+          admin: result.admin,
+          credentials: { email: formData.email, password: formData.password },
+        })
+        return
+      }
+
+      if (result?.doctor) {
+        onAuth({ type: isLogin ? 'login' : 'register', ...result.doctor })
+        return
+      }
+
+      throw new Error('Unexpected authentication response')
     } catch (error) {
       alert('Authentication failed: ' + error.message)
     } finally {

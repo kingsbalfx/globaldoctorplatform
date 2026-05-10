@@ -63,7 +63,11 @@ const doctors = [
 
 const reviews = []
 const admins = [
-  { email: 'shafiuabdullahi.sa3@gmail.com', password: '014/Pt/014', name: 'System Admin' }
+  {
+    email: String(process.env.ADMIN_EMAIL || 'shafiuabdullahi.sa3@gmail.com').trim(),
+    password: String(process.env.ADMIN_PASSWORD || '014/Pt/014').trim(),
+    name: 'System Admin',
+  },
 ]
 const doctorsAuth = [] // In production, use a proper database
 const referrals = [] // Patient referrals
@@ -72,6 +76,7 @@ const patients = [] // Patient management
 const patientFiles = []
 const appointments = []
 const notifications = []
+const announcements = [] // Broadcast messages (landing/patient/doctor)
 const chatMessages = []
 const appointmentReminders = []
 const emergencyRequests = []
@@ -92,9 +97,33 @@ const payouts = [] // Doctor withdrawals / payouts
 const KORA_SECRET_KEY = process.env.KORA_SECRET_KEY
 const KORA_BASE_URL = process.env.KORA_BASE_URL || 'https://api.korapay.com'
 
+function normalizeAppBaseUrl(rawValue) {
+  const value = String(rawValue || '').trim().replace(/\/+$/, '')
+  if (!value) return ''
+
+  // Never trust localhost in deployed environments (it's a common misconfiguration on Vercel).
+  if (value.includes('localhost') || value.includes('127.0.0.1')) return ''
+
+  const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`
+  try {
+    const url = new URL(candidate)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+    return url.origin
+  } catch {
+    return ''
+  }
+}
+
 function getApiOrigin(req) {
-  const configured = process.env.APP_BASE_URL || process.env.VITE_APP_BASE || process.env.VITE_API_BASE
-  if (configured && configured.trim()) return configured.replace(/\/+$/, '')
+  const configured =
+    process.env.APP_BASE_URL ||
+    process.env.VITE_APP_BASE ||
+    process.env.VITE_API_BASE ||
+    process.env.VERCEL_URL
+
+  const normalized = normalizeAppBaseUrl(configured)
+  if (normalized) return normalized
+
   const proto = (req.headers['x-forwarded-proto'] || 'http').toString().split(',')[0].trim()
   const host = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0].trim()
   if (!host) return ''
@@ -104,6 +133,13 @@ function getApiOrigin(req) {
 function safeNumber(value) {
   const parsed = typeof value === 'string' ? Number(value) : value
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function isPlatformAdminRequest(req) {
+  const email = String(req.headers['x-admin-email'] || '').trim()
+  const password = String(req.headers['x-admin-password'] || '').trim()
+  if (!email || !password) return false
+  return admins.some((admin) => admin.email === email && admin.password === password)
 }
 
 function roundMoney(amount) {
@@ -157,6 +193,98 @@ function guessCurrencyFromLocation(location) {
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' })
+})
+
+app.get('/api/config', (req, res) => {
+  const origin = getApiOrigin(req)
+  res.json({
+    status: 'ok',
+    origin,
+    configured: {
+      kora: Boolean(KORA_SECRET_KEY),
+      agora: Boolean(AGORA_APP_ID && AGORA_APP_CERTIFICATE),
+      adminEnv: Boolean(process.env.ADMIN_EMAIL || process.env.ADMIN_PASSWORD),
+    },
+  })
+})
+
+// ============ ANNOUNCEMENTS (BROADCAST MESSAGES) ============
+
+app.get('/api/announcements', (req, res) => {
+  const audience = String(req.query.audience || 'all').trim().toLowerCase()
+  const now = Date.now()
+
+  const items = announcements
+    .filter((item) => {
+      if (item.is_active === false) return false
+      if (item.expires_at && new Date(item.expires_at).getTime() <= now) return false
+      if (!audience || audience === 'all') return true
+      return item.audience === audience
+    })
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+  res.json({ announcements: items })
+})
+
+app.post('/api/admin/announcements', (req, res) => {
+  if (!isPlatformAdminRequest(req)) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+
+  const title = String(req.body?.title || '').trim()
+  const message = String(req.body?.message || '').trim()
+  const audience = String(req.body?.audience || '').trim().toLowerCase()
+  const severity = String(req.body?.severity || 'info').trim().toLowerCase()
+  const expiresAtRaw = req.body?.expires_at ?? req.body?.expiresAt ?? null
+
+  const allowedAudiences = new Set(['landing', 'patient', 'doctor'])
+  const allowedSeverities = new Set(['info', 'warning', 'urgent'])
+
+  if (!title || !message) {
+    return res.status(400).json({ error: 'title and message are required' })
+  }
+  if (!allowedAudiences.has(audience)) {
+    return res.status(400).json({ error: 'audience must be one of: landing, patient, doctor' })
+  }
+  if (!allowedSeverities.has(severity)) {
+    return res.status(400).json({ error: 'severity must be one of: info, warning, urgent' })
+  }
+
+  let expires_at = null
+  if (expiresAtRaw) {
+    const parsed = new Date(expiresAtRaw)
+    if (Number.isNaN(parsed.getTime())) {
+      return res.status(400).json({ error: 'expires_at must be a valid date (ISO string)' })
+    }
+    expires_at = parsed.toISOString()
+  }
+
+  const announcement = {
+    id: `ann-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    audience,
+    severity,
+    title,
+    message,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    expires_at,
+  }
+
+  announcements.unshift(announcement)
+  res.status(201).json({ announcement, message: 'Announcement published' })
+})
+
+app.delete('/api/admin/announcements/:announcementId', (req, res) => {
+  if (!isPlatformAdminRequest(req)) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+
+  const { announcementId } = req.params
+  const index = announcements.findIndex((item) => item.id === announcementId)
+  if (index === -1) return res.status(404).json({ error: 'Announcement not found' })
+
+  const removed = announcements.splice(index, 1)
+  res.json({ announcement: removed[0], message: 'Announcement deleted' })
 })
 
 // ============ VIDEO SDK ENDPOINT ============

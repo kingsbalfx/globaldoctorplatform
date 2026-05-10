@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchDoctors, submitReview, createPaymentSession } from '../lib/kiraApi'
+import AnnouncementBanner from '../components/AnnouncementBanner'
 
 const specialties = [
   'Cardiology',
@@ -158,6 +159,7 @@ function LandingPage() {
 
   return (
     <main className="relative mx-auto max-w-7xl px-6 pb-16 sm:px-8">
+      <AnnouncementBanner audience="landing" />
       <section
         className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white px-6 py-10 shadow-xl shadow-slate-200/60 sm:px-10"
         style={heroBackgroundStyle}

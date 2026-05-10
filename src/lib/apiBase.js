@@ -1,12 +1,29 @@
-let apiBase = String(import.meta.env.VITE_API_BASE || '').trim()
+function normalizeApiBase(rawValue) {
+  const value = String(rawValue || '').trim()
+  if (!value) return ''
+  if (value.includes('localhost') || value.includes('127.0.0.1')) return ''
 
-if (import.meta.env.PROD) {
-  if (!apiBase || apiBase.includes('localhost') || apiBase.includes('127.0.0.1')) {
-    apiBase = ''
+  const tryParse = (candidate) => {
+    try {
+      const url = new URL(candidate)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+      return url.origin
+    } catch {
+      return ''
+    }
   }
-} else if (!apiBase) {
+
+  const absolute = tryParse(value)
+  if (absolute) return absolute
+
+  // Allow values like "my-app.vercel.app" (Vercel's `VERCEL_URL` has no protocol).
+  return tryParse(`https://${value}`)
+}
+
+let apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE)
+
+if (!import.meta.env.PROD && !apiBase) {
   apiBase = 'http://localhost:4000'
 }
 
 export const API_BASE = apiBase.replace(/\/+$/, '')
-

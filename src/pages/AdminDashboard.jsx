@@ -5,6 +5,7 @@ import ReferralManager from '../components/ReferralManager'
 import FileManager from '../components/FileManager'
 import NotificationCenter from '../components/NotificationCenter'
 import AdminSettings from '../components/AdminSettings'
+import AnnouncementBanner from '../components/AnnouncementBanner'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { API_BASE } from '../lib/apiBase'
 
@@ -98,6 +99,7 @@ function AdminDashboard({ doctor, onLogout }) {
 
   return (
     <section className="mx-auto mt-16 max-w-7xl px-6 pb-20 sm:px-8">
+      <AnnouncementBanner audience="doctor" />
       {/* Header */}
       <div className="rounded-3xl px-8 py-10 text-white shadow-xl shadow-brand-700/20 mb-8" style={adminHeaderStyle}>
         <div className="flex items-center justify-between">

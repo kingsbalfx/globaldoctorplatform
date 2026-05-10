@@ -2,6 +2,7 @@ import { useState } from 'react'
 import LandingPage from './pages/LandingPage'
 import AdminDashboard from './pages/AdminDashboard'
 import PatientDashboard from './pages/PatientDashboard'
+import PlatformAdminDashboard from './pages/PlatformAdminDashboard'
 import DoctorAuth from './components/DoctorAuth'
 import TermsOfService from './pages/TermsOfService'
 import PrivacyPolicy from './pages/PrivacyPolicy'
@@ -9,18 +10,28 @@ import Contact from './pages/Contact'
 import Footer from './components/Footer'
 
 function App() {
-  const [currentView, setCurrentView] = useState('landing') // 'landing', 'patient', 'doctor-auth', 'admin', 'terms', 'privacy', 'contact'
+  const [currentView, setCurrentView] = useState('landing') // 'landing', 'patient', 'doctor-auth', 'admin', 'platform-admin', 'terms', 'privacy', 'contact'
   const [authDoctor, setAuthDoctor] = useState(null)
+  const [authAdmin, setAuthAdmin] = useState(null)
 
   const handleAuth = (authData) => {
+    if (authData.type === 'admin-login') {
+      setAuthAdmin(authData)
+      setAuthDoctor(null)
+      setCurrentView('platform-admin')
+      return
+    }
+
     if (authData.type === 'login' || authData.type === 'register') {
       setAuthDoctor(authData)
+      setAuthAdmin(null)
       setCurrentView('admin')
     }
   }
 
   const handleLogout = () => {
     setAuthDoctor(null)
+    setAuthAdmin(null)
     setCurrentView('landing')
   }
 
@@ -50,7 +61,15 @@ function App() {
           >
             Doctor Portal
           </button>
-          {authDoctor && (
+          {authAdmin && (
+            <button
+              onClick={() => setCurrentView('platform-admin')}
+              className={`hover:text-brand-700 ${currentView === 'platform-admin' ? 'text-brand-700' : ''}`}
+            >
+              Platform Admin
+            </button>
+          )}
+          {(authDoctor || authAdmin) && (
             <button
               onClick={handleLogout}
               className="text-red-600 hover:text-red-700"
@@ -65,6 +84,7 @@ function App() {
       {currentView === 'patient' && <PatientDashboard />}
       {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
       {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
+      {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
       {currentView === 'terms' && <TermsOfService onNavigate={setCurrentView} />}
       {currentView === 'privacy' && <PrivacyPolicy onNavigate={setCurrentView} />}
       {currentView === 'contact' && <Contact onNavigate={setCurrentView} />}
