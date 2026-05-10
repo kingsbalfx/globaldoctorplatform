@@ -6,6 +6,7 @@ import { RtcTokenBuilder, RtcRole } from 'agora-access-token'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { resolve } from 'path'
+import { calculateConsultationSplitNgn, calculateLabCommissionNgn } from '../src/lib/ngPricing.js'
 
 dotenv.config()
 
@@ -77,6 +78,17 @@ const patientFiles = []
 const appointments = []
 const notifications = []
 const announcements = [] // Broadcast messages (landing/patient/doctor)
+const facilities = [] // Facilities: private clinics, PHCs, labs
+const facilityWallets = [] // Facility NGN wallets
+const facilityWalletTx = [] // Facility wallet transactions
+const facilityReferrals = [] // Referral codes redeemed by facilities
+const consultationsNg = [] // NGN consultations (hospital pack)
+const revenueSplitsNg = [] // NGN revenue splits per consultation
+const labOrders = [] // Lab orders
+const labPayments = [] // Lab payments + commissions
+const auditLogs = [] // Audit trail for all money/critical ops
+let platformBalanceNgn = 0
+let dataFundBalanceNgn = 0
 const chatMessages = []
 const appointmentReminders = []
 const emergencyRequests = []
@@ -140,6 +152,119 @@ function isPlatformAdminRequest(req) {
   const password = String(req.headers['x-admin-password'] || '').trim()
   if (!email || !password) return false
   return admins.some((admin) => admin.email === email && admin.password === password)
+}
+
+function auditLog({ event, actor_type, actor_id, entity_type, entity_id, meta }) {
+  auditLogs.unshift({
+    id: `audit-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    event: String(event || '').trim(),
+    actor_type: actor_type ? String(actor_type) : null,
+    actor_id: actor_id ? String(actor_id) : null,
+    entity_type: entity_type ? String(entity_type) : null,
+    entity_id: entity_id ? String(entity_id) : null,
+    meta: meta && typeof meta === 'object' ? meta : null,
+    created_at: new Date().toISOString(),
+  })
+}
+
+function getFacilityById(facilityId) {
+  return facilities.find((f) => f.id === facilityId) || null
+}
+
+function getOrCreateFacilityWallet(facilityId) {
+  let wallet = facilityWallets.find((w) => w.facility_id === facilityId)
+  if (!wallet) {
+    wallet = { facility_id: facilityId, balance_ngn: 0, updated_at: new Date().toISOString() }
+    facilityWallets.push(wallet)
+  }
+  return wallet
+}
+
+function recordFacilityWalletTx({ facilityId, direction, amountNgn, reason, ref_type, ref_id, meta }) {
+  const amount = Math.max(0, Math.round(Number(amountNgn) || 0))
+  facilityWalletTx.unshift({
+    id: `fwtx-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    facility_id: facilityId,
+    direction, // 'credit' | 'debit'
+    amount_ngn: amount,
+    reason: String(reason || '').trim() || null,
+    ref_type: ref_type ? String(ref_type) : null,
+    ref_id: ref_id ? String(ref_id) : null,
+    meta: meta && typeof meta === 'object' ? meta : null,
+    created_at: new Date().toISOString(),
+  })
+}
+
+function creditFacilityWallet(facilityId, amountNgn, details = {}) {
+  const wallet = getOrCreateFacilityWallet(facilityId)
+  const amount = Math.max(0, Math.round(Number(amountNgn) || 0))
+  wallet.balance_ngn += amount
+  wallet.updated_at = new Date().toISOString()
+  recordFacilityWalletTx({ facilityId, direction: 'credit', amountNgn: amount, ...details })
+  auditLog({
+    event: 'facility_wallet_credited',
+    actor_type: 'system',
+    actor_id: null,
+    entity_type: 'facility_wallet',
+    entity_id: facilityId,
+    meta: {
+      facility_id: facilityId,
+      direction: 'credit',
+      amount_ngn: amount,
+      balance_ngn: wallet.balance_ngn,
+      reason: details?.reason ? String(details.reason) : null,
+      ref_type: details?.ref_type ? String(details.ref_type) : null,
+      ref_id: details?.ref_id ? String(details.ref_id) : null,
+      meta: details?.meta && typeof details.meta === 'object' ? details.meta : null,
+    },
+  })
+  return wallet.balance_ngn
+}
+
+function debitFacilityWallet(facilityId, amountNgn, details = {}) {
+  const wallet = getOrCreateFacilityWallet(facilityId)
+  const amount = Math.max(0, Math.round(Number(amountNgn) || 0))
+  if (wallet.balance_ngn < amount) {
+    return { ok: false, balance_ngn: wallet.balance_ngn, required_ngn: amount }
+  }
+  wallet.balance_ngn -= amount
+  wallet.updated_at = new Date().toISOString()
+  recordFacilityWalletTx({ facilityId, direction: 'debit', amountNgn: amount, ...details })
+  auditLog({
+    event: 'facility_wallet_debited',
+    actor_type: 'system',
+    actor_id: null,
+    entity_type: 'facility_wallet',
+    entity_id: facilityId,
+    meta: {
+      facility_id: facilityId,
+      direction: 'debit',
+      amount_ngn: amount,
+      balance_ngn: wallet.balance_ngn,
+      reason: details?.reason ? String(details.reason) : null,
+      ref_type: details?.ref_type ? String(details.ref_type) : null,
+      ref_id: details?.ref_id ? String(details.ref_id) : null,
+      meta: details?.meta && typeof details.meta === 'object' ? details.meta : null,
+    },
+  })
+  return { ok: true, balance_ngn: wallet.balance_ngn }
+}
+
+function creditDoctorEarningsNgn(doctorId, amountNgn) {
+  const amount = Math.max(0, Math.round(Number(amountNgn) || 0))
+  const updated = updateDoctorEverywhere(doctorId, {
+    earningsNGN: Math.max(0, Math.round(Number(resolveDoctor(doctorId)?.earningsNGN || 0))) + amount,
+    updatedAt: new Date().toISOString(),
+  })
+  auditLog({
+    event: 'doctor_earnings_credited',
+    actor_type: 'system',
+    actor_id: null,
+    entity_type: 'doctor',
+    entity_id: doctorId,
+    meta: { amount_ngn: amount, earnings_ngn: updated?.earningsNGN ?? null },
+  })
+  return updated?.earningsNGN ?? 0
 }
 
 function roundMoney(amount) {
@@ -285,6 +410,498 @@ app.delete('/api/admin/announcements/:announcementId', (req, res) => {
 
   const removed = announcements.splice(index, 1)
   res.json({ announcement: removed[0], message: 'Announcement deleted' })
+})
+
+// ============ NIGERIA HOSPITAL PACK (FACILITIES + SPLITS + LABS) ============
+
+function generateSixDigitPin() {
+  const pin = crypto.randomInt(0, 1000000).toString().padStart(6, '0')
+  return pin
+}
+
+function isFacilityAuthValid(facilityId, pin) {
+  const facility = getFacilityById(facilityId)
+  if (!facility) return false
+  if (!facility.pin) return false
+  return String(facility.pin) === String(pin)
+}
+
+function requireFacilityAuth(req, res) {
+  const facilityId = String(req.headers['x-facility-id'] || '').trim()
+  const pin = String(req.headers['x-facility-pin'] || '').trim()
+  if (!facilityId || !pin || !isFacilityAuthValid(facilityId, pin)) {
+    res.status(401).json({ error: 'Unauthorized facility' })
+    return null
+  }
+  return { facilityId }
+}
+
+app.post('/api/facilities', (req, res) => {
+  if (!isPlatformAdminRequest(req)) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+
+  const type = String(req.body?.type || '').trim().toLowerCase()
+  const name = String(req.body?.name || '').trim()
+  const state = String(req.body?.state || '').trim()
+  const lga = String(req.body?.lga || '').trim()
+  const address = String(req.body?.address || '').trim()
+  const phone = String(req.body?.phone || '').trim()
+  const email = String(req.body?.email || '').trim()
+  const referralPayout = Math.max(0, Math.round(Number(req.body?.referral_payout_ngn ?? req.body?.referralPayoutNgn ?? 0) || 0))
+
+  const allowed = new Set(['private_clinic', 'phc', 'lab'])
+  if (!allowed.has(type)) {
+    return res.status(400).json({ error: 'type must be one of: private_clinic, phc, lab' })
+  }
+  if (!name) return res.status(400).json({ error: 'name is required' })
+
+  const facility = {
+    id: `fac-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    type,
+    name,
+    state: state || null,
+    lga: lga || null,
+    address: address || null,
+    phone: phone || null,
+    email: email || null,
+    pin: String(req.body?.pin || '').trim() || generateSixDigitPin(),
+    referral_payout_ngn:
+      referralPayout ||
+      (type === 'private_clinic' ? 500 : type === 'phc' ? 200 : 0),
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+
+  facilities.unshift(facility)
+  getOrCreateFacilityWallet(facility.id)
+
+  auditLog({
+    event: 'facility_created',
+    actor_type: 'platform_admin',
+    actor_id: String(req.headers['x-admin-email'] || ''),
+    entity_type: 'facility',
+    entity_id: facility.id,
+    meta: { type: facility.type, name: facility.name },
+  })
+
+  return res.status(201).json({ facility, message: 'Facility created' })
+})
+
+app.get('/api/facilities', (req, res) => {
+  const type = String(req.query?.type || '').trim().toLowerCase()
+  const filtered = type ? facilities.filter((f) => f.type === type) : facilities.slice()
+
+  const isAdmin = isPlatformAdminRequest(req)
+  const result = filtered.map((f) => {
+    const wallet = getOrCreateFacilityWallet(f.id)
+    return {
+      ...f,
+      pin: isAdmin ? f.pin : undefined,
+      wallet_balance_ngn: wallet.balance_ngn,
+    }
+  })
+
+  res.json({ facilities: result })
+})
+
+app.post('/api/facilities/auth', (req, res) => {
+  const facilityId = String(req.body?.facilityId || '').trim()
+  const pin = String(req.body?.pin || '').trim()
+  if (!facilityId || !pin) return res.status(400).json({ error: 'facilityId and pin are required' })
+  if (!isFacilityAuthValid(facilityId, pin)) return res.status(401).json({ error: 'Invalid facility credentials' })
+
+  const facility = getFacilityById(facilityId)
+  const wallet = getOrCreateFacilityWallet(facilityId)
+  const tx = facilityWalletTx.filter((t) => t.facility_id === facilityId).slice(0, 20)
+  return res.json({ facility: { ...facility, pin: undefined }, wallet, transactions: tx })
+})
+
+app.post('/api/admin/facilities/:facilityId/fund', (req, res) => {
+  if (!isPlatformAdminRequest(req)) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+
+  const { facilityId } = req.params
+  const facility = getFacilityById(facilityId)
+  if (!facility) return res.status(404).json({ error: 'Facility not found' })
+
+  const amountNgn = Math.max(0, Math.round(Number(req.body?.amount_ngn ?? req.body?.amountNgn ?? 0) || 0))
+  if (amountNgn <= 0) return res.status(400).json({ error: 'amount_ngn must be > 0' })
+
+  creditFacilityWallet(facilityId, amountNgn, {
+    reason: 'Admin funding',
+    ref_type: 'admin_fund',
+    ref_id: String(req.headers['x-admin-email'] || ''),
+  })
+
+  auditLog({
+    event: 'facility_wallet_funded',
+    actor_type: 'platform_admin',
+    actor_id: String(req.headers['x-admin-email'] || ''),
+    entity_type: 'facility_wallet',
+    entity_id: facilityId,
+    meta: { amount_ngn: amountNgn },
+  })
+
+  return res.json({ facilityId, balance_ngn: getOrCreateFacilityWallet(facilityId).balance_ngn, message: 'Wallet funded' })
+})
+
+app.get('/api/admin/audit-logs', (req, res) => {
+  if (!isPlatformAdminRequest(req)) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  res.json({ auditLogs: auditLogs.slice(0, 500) })
+})
+
+app.post('/api/consultations/start', (req, res) => {
+  const patientId = String(req.body?.patientId || '').trim()
+  const doctorId = String(req.body?.doctorId || '').trim()
+  const channel = String(req.body?.channel || '').trim()
+  const track = String(req.body?.track || '').trim().toLowerCase()
+  const facilityId = req.body?.facilityId ? String(req.body.facilityId).trim() : null
+  const durationMin = safeNumber(req.body?.durationMin) ?? 15
+
+  const allowedChannels = new Set(['direct_home', 'facility_private', 'facility_phc'])
+  if (!patientId || !doctorId || !allowedChannels.has(channel)) {
+    return res.status(400).json({ error: 'patientId, doctorId and valid channel are required' })
+  }
+
+  if (channel === 'direct_home' && !['economy', 'premium'].includes(track)) {
+    return res.status(400).json({ error: 'track must be economy or premium for direct_home' })
+  }
+
+  if (channel !== 'direct_home') {
+    if (!facilityId) return res.status(400).json({ error: 'facilityId is required for facility channels' })
+    const facility = getFacilityById(facilityId)
+    if (!facility) return res.status(404).json({ error: 'Facility not found' })
+    if (channel === 'facility_private' && facility.type !== 'private_clinic') {
+      return res.status(400).json({ error: 'facilityId must be a private_clinic for facility_private' })
+    }
+    if (channel === 'facility_phc' && facility.type !== 'phc') {
+      return res.status(400).json({ error: 'facilityId must be a phc for facility_phc' })
+    }
+  }
+
+  const split = calculateConsultationSplitNgn({ channel, track, durationMin })
+
+  const consultation = {
+    id: `cng-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    patient_id: patientId,
+    doctor_id: doctorId,
+    facility_id: facilityId,
+    channel: split.channel,
+    track: split.track,
+    duration_min: split.durationMin,
+    blocks: split.blocks,
+    total_ngn: split.total_ngn,
+    status: 'in_progress',
+    created_at: new Date().toISOString(),
+    completed_at: null,
+  }
+
+  consultationsNg.unshift(consultation)
+
+  auditLog({
+    event: 'consultation_started',
+    actor_type: 'system',
+    actor_id: null,
+    entity_type: 'consultation',
+    entity_id: consultation.id,
+    meta: { channel: consultation.channel, track: consultation.track, total_ngn: consultation.total_ngn },
+  })
+
+  res.status(201).json({ consultation, split })
+})
+
+app.post('/api/consultations/end', (req, res) => {
+  const consultationId = String(req.body?.consultationId || '').trim()
+  if (!consultationId) return res.status(400).json({ error: 'consultationId is required' })
+
+  const consultation = consultationsNg.find((c) => c.id === consultationId)
+  if (!consultation) return res.status(404).json({ error: 'Consultation not found' })
+  if (consultation.status === 'completed') return res.json({ consultation, message: 'Already completed' })
+
+  // Recalculate in case duration changed at end.
+  const finalDurationMin = safeNumber(req.body?.durationMin) ?? consultation.duration_min
+  const split = calculateConsultationSplitNgn({
+    channel: consultation.channel,
+    track: consultation.track,
+    durationMin: finalDurationMin,
+  })
+
+  // PHC topup is funded from PHC wallet (pre-funded by admin/state).
+  if (split.channel === 'facility_phc' && consultation.facility_id) {
+    const debitResult = debitFacilityWallet(consultation.facility_id, split.facility_topup_ngn, {
+      reason: 'PHC consult topup funding',
+      ref_type: 'consultation',
+      ref_id: consultation.id,
+      meta: { patient_copay_ngn: split.patient_copay_ngn },
+    })
+    if (!debitResult.ok) {
+      return res.status(400).json({
+        error: 'PHC wallet has insufficient balance for topup funding',
+        facility_id: consultation.facility_id,
+        balance_ngn: debitResult.balance_ngn,
+        required_ngn: debitResult.required_ngn,
+      })
+    }
+  }
+
+  // Credit facility share (if any).
+  if (consultation.facility_id && split.facility_ngn > 0) {
+    creditFacilityWallet(consultation.facility_id, split.facility_ngn, {
+      reason: 'Facility share from consultation',
+      ref_type: 'consultation',
+      ref_id: consultation.id,
+      meta: { channel: split.channel },
+    })
+  }
+
+  // Credit doctor earnings.
+  if (split.doctor_ngn > 0) {
+    creditDoctorEarningsNgn(consultation.doctor_id, split.doctor_ngn)
+  }
+
+  // Platform + data fund ledgers.
+  platformBalanceNgn += Math.max(0, split.platform_ngn || 0)
+  dataFundBalanceNgn += Math.max(0, split.data_fee_ngn || 0)
+
+  const revenueSplit = {
+    id: `rsng-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    consultation_id: consultation.id,
+    channel: split.channel,
+    track: split.track,
+    total_ngn: split.total_ngn,
+    doctor_ngn: split.doctor_ngn,
+    platform_ngn: split.platform_ngn,
+    facility_ngn: split.facility_ngn || 0,
+    data_fee_ngn: split.data_fee_ngn,
+    patient_copay_ngn: split.patient_copay_ngn || 0,
+    facility_topup_ngn: split.facility_topup_ngn || 0,
+    created_at: new Date().toISOString(),
+  }
+
+  revenueSplitsNg.unshift(revenueSplit)
+
+  consultation.status = 'completed'
+  consultation.duration_min = split.durationMin
+  consultation.blocks = split.blocks
+  consultation.total_ngn = split.total_ngn
+  consultation.completed_at = new Date().toISOString()
+
+  auditLog({
+    event: 'consultation_completed',
+    actor_type: 'system',
+    actor_id: null,
+    entity_type: 'consultation',
+    entity_id: consultation.id,
+    meta: revenueSplit,
+  })
+
+  res.json({
+    consultation,
+    split: revenueSplit,
+    ledgers: { platformBalanceNgn, dataFundBalanceNgn },
+    message: 'Consultation completed and split recorded',
+  })
+})
+
+app.post('/api/referrals/facility/create', (req, res) => {
+  const doctorId = String(req.body?.doctorId || '').trim()
+  const patientId = String(req.body?.patientId || '').trim()
+  const facilityId = String(req.body?.facilityId || '').trim()
+  const reason = String(req.body?.reason || '').trim()
+  const notes = String(req.body?.notes || '').trim()
+
+  if (!doctorId || !patientId || !facilityId || !reason) {
+    return res.status(400).json({ error: 'doctorId, patientId, facilityId and reason are required' })
+  }
+
+  const facility = getFacilityById(facilityId)
+  if (!facility) return res.status(404).json({ error: 'Facility not found' })
+
+  const code = `GD-${facility.type.toUpperCase().slice(0, 3)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`
+
+  const referral = {
+    id: `fref-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    code,
+    from_doctor_id: doctorId,
+    patient_id: patientId,
+    facility_id: facilityId,
+    facility_type: facility.type,
+    reason,
+    notes: notes || null,
+    payout_ngn: facility.referral_payout_ngn || 0,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    redeemed_at: null,
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  }
+
+  facilityReferrals.unshift(referral)
+
+  auditLog({
+    event: 'facility_referral_created',
+    actor_type: 'doctor',
+    actor_id: doctorId,
+    entity_type: 'facility_referral',
+    entity_id: referral.id,
+    meta: { code, facility_id: facilityId, payout_ngn: referral.payout_ngn },
+  })
+
+  res.status(201).json({ referral, referralCode: code, message: 'Facility referral created' })
+})
+
+app.get('/api/referrals/facility', (req, res) => {
+  const doctorId = req.query?.doctorId ? String(req.query.doctorId).trim() : ''
+  const facilityId = req.query?.facilityId ? String(req.query.facilityId).trim() : ''
+  const patientId = req.query?.patientId ? String(req.query.patientId).trim() : ''
+
+  let items = facilityReferrals.slice()
+  if (doctorId) items = items.filter((r) => r.from_doctor_id === doctorId)
+  if (facilityId) items = items.filter((r) => r.facility_id === facilityId)
+  if (patientId) items = items.filter((r) => r.patient_id === patientId)
+
+  res.json({ referrals: items.slice(0, 200) })
+})
+
+app.post('/api/referrals/facility/redeem', (req, res) => {
+  const facilityId = String(req.body?.facilityId || '').trim()
+  const pin = String(req.body?.pin || '').trim()
+  const code = String(req.body?.code || '').trim().toUpperCase()
+
+  if (!facilityId || !pin || !code) return res.status(400).json({ error: 'facilityId, pin and code are required' })
+  if (!isFacilityAuthValid(facilityId, pin)) return res.status(401).json({ error: 'Invalid facility credentials' })
+
+  const referral = facilityReferrals.find((r) => r.code === code)
+  if (!referral) return res.status(404).json({ error: 'Referral code not found' })
+  if (referral.status !== 'pending') return res.status(400).json({ error: `Referral is ${referral.status}` })
+  if (referral.facility_id !== facilityId) return res.status(403).json({ error: 'Referral code is not assigned to this facility' })
+
+  if (referral.expires_at && new Date(referral.expires_at).getTime() <= Date.now()) {
+    referral.status = 'expired'
+    return res.status(400).json({ error: 'Referral code has expired' })
+  }
+
+  referral.status = 'redeemed'
+  referral.redeemed_at = new Date().toISOString()
+
+  if (referral.payout_ngn > 0) {
+    creditFacilityWallet(facilityId, referral.payout_ngn, {
+      reason: 'Referral payout',
+      ref_type: 'facility_referral',
+      ref_id: referral.id,
+      meta: { code: referral.code, from_doctor_id: referral.from_doctor_id, patient_id: referral.patient_id },
+    })
+    platformBalanceNgn = Math.max(0, platformBalanceNgn - referral.payout_ngn)
+  }
+
+  auditLog({
+    event: 'facility_referral_redeemed',
+    actor_type: 'facility',
+    actor_id: facilityId,
+    entity_type: 'facility_referral',
+    entity_id: referral.id,
+    meta: { code: referral.code, payout_ngn: referral.payout_ngn },
+  })
+
+  res.json({
+    referral,
+    wallet_balance_ngn: getOrCreateFacilityWallet(facilityId).balance_ngn,
+    message: 'Referral redeemed successfully',
+  })
+})
+
+app.post('/api/labs/order', (req, res) => {
+  const consultationId = String(req.body?.consultationId || '').trim()
+  const patientId = String(req.body?.patientId || '').trim()
+  const doctorId = String(req.body?.doctorId || '').trim()
+  const facilityId = String(req.body?.facilityId || '').trim() // lab facility id
+  const tests = Array.isArray(req.body?.tests) ? req.body.tests.map((t) => String(t).trim()).filter(Boolean) : []
+  const totalPriceNgn = Math.max(0, Math.round(Number(req.body?.total_price_ngn ?? req.body?.totalPriceNgn ?? 0) || 0))
+
+  if (!patientId || !doctorId || !facilityId || tests.length === 0 || totalPriceNgn <= 0) {
+    return res.status(400).json({ error: 'patientId, doctorId, facilityId, tests[], total_price_ngn are required' })
+  }
+
+  const facility = getFacilityById(facilityId)
+  if (!facility || facility.type !== 'lab') return res.status(400).json({ error: 'facilityId must be a lab facility' })
+
+  const order = {
+    id: `labord-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    consultation_id: consultationId || null,
+    patient_id: patientId,
+    doctor_id: doctorId,
+    facility_id: facilityId,
+    tests,
+    total_price_ngn: totalPriceNgn,
+    status: 'ordered',
+    created_at: new Date().toISOString(),
+    paid_at: null,
+  }
+
+  labOrders.unshift(order)
+
+  auditLog({
+    event: 'lab_order_created',
+    actor_type: 'doctor',
+    actor_id: doctorId,
+    entity_type: 'lab_order',
+    entity_id: order.id,
+    meta: { facility_id: facilityId, total_price_ngn: totalPriceNgn, tests },
+  })
+
+  res.status(201).json({ order, message: 'Lab order created' })
+})
+
+app.post('/api/labs/pay', (req, res) => {
+  const orderId = String(req.body?.orderId || '').trim()
+  const amountPaidNgn = Math.max(0, Math.round(Number(req.body?.amount_paid_ngn ?? req.body?.amountPaidNgn ?? 0) || 0))
+  const method = String(req.body?.method || 'cash').trim().toLowerCase()
+
+  if (!orderId || amountPaidNgn <= 0) return res.status(400).json({ error: 'orderId and amount_paid_ngn are required' })
+
+  const order = labOrders.find((o) => o.id === orderId)
+  if (!order) return res.status(404).json({ error: 'Lab order not found' })
+  if (order.status === 'paid') return res.json({ order, message: 'Already paid' })
+
+  const commission = calculateLabCommissionNgn(amountPaidNgn)
+
+  platformBalanceNgn += commission.platform_commission_ngn
+  creditFacilityWallet(order.facility_id, commission.facility_net_ngn, {
+    reason: 'Lab payment (net)',
+    ref_type: 'lab_order',
+    ref_id: order.id,
+    meta: { method },
+  })
+
+  const payment = {
+    id: `labpay-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    order_id: order.id,
+    facility_id: order.facility_id,
+    amount_paid_ngn: commission.total_ngn,
+    platform_commission_ngn: commission.platform_commission_ngn,
+    facility_net_ngn: commission.facility_net_ngn,
+    method,
+    created_at: new Date().toISOString(),
+  }
+
+  labPayments.unshift(payment)
+  order.status = 'paid'
+  order.paid_at = payment.created_at
+
+  auditLog({
+    event: 'lab_payment_recorded',
+    actor_type: 'system',
+    actor_id: null,
+    entity_type: 'lab_payment',
+    entity_id: payment.id,
+    meta: payment,
+  })
+
+  res.json({ order, payment, message: 'Lab payment recorded' })
 })
 
 // ============ VIDEO SDK ENDPOINT ============

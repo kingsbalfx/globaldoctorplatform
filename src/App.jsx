@@ -3,6 +3,7 @@ import LandingPage from './pages/LandingPage'
 import AdminDashboard from './pages/AdminDashboard'
 import PatientDashboard from './pages/PatientDashboard'
 import PlatformAdminDashboard from './pages/PlatformAdminDashboard'
+import FacilityPortal from './pages/FacilityPortal'
 import DoctorAuth from './components/DoctorAuth'
 import TermsOfService from './pages/TermsOfService'
 import PrivacyPolicy from './pages/PrivacyPolicy'
@@ -10,7 +11,7 @@ import Contact from './pages/Contact'
 import Footer from './components/Footer'
 
 function App() {
-  const [currentView, setCurrentView] = useState('landing') // 'landing', 'patient', 'doctor-auth', 'admin', 'platform-admin', 'terms', 'privacy', 'contact'
+  const [currentView, setCurrentView] = useState('landing') // 'landing', 'patient', 'doctor-auth', 'admin', 'platform-admin', 'facility', 'terms', 'privacy', 'contact'
   const [authDoctor, setAuthDoctor] = useState(null)
   const [authAdmin, setAuthAdmin] = useState(null)
 
@@ -61,6 +62,12 @@ function App() {
           >
             Doctor Portal
           </button>
+          <button
+            onClick={() => setCurrentView('facility')}
+            className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}
+          >
+            Facility Portal
+          </button>
           {authAdmin && (
             <button
               onClick={() => setCurrentView('platform-admin')}
@@ -85,6 +92,7 @@ function App() {
       {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
       {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
       {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
+      {currentView === 'facility' && <FacilityPortal />}
       {currentView === 'terms' && <TermsOfService onNavigate={setCurrentView} />}
       {currentView === 'privacy' && <PrivacyPolicy onNavigate={setCurrentView} />}
       {currentView === 'contact' && <Contact onNavigate={setCurrentView} />}
