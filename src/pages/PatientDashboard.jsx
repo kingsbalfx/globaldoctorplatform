@@ -40,6 +40,23 @@ function PatientDashboard() {
     }
   }, [patient, currentStep])
 
+  // Auto-restore patient session from OAuth callback (or previous session).
+  useEffect(() => {
+    if (currentStep !== 'auth') return
+    try {
+      const stored = window.localStorage.getItem('gd_patient_session')
+      if (!stored) return
+      const parsed = JSON.parse(stored)
+      if (parsed?.id) {
+        setPatient(parsed)
+        setTokens(parsed.tokens || 0)
+        setCurrentStep('doctor')
+      }
+    } catch {
+      // ignore
+    }
+  }, [currentStep])
+
   const loadOverview = async () => {
     setLoading(true)
     try {

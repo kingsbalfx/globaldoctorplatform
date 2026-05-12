@@ -1,10 +1,12 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import DoctorManagement from '../components/DoctorManagement'
 import PatientReviewManager from '../components/PatientReviewManager'
 import ReferralManager from '../components/ReferralManager'
+import FacilityReferralManager from '../components/FacilityReferralManager'
 import FileManager from '../components/FileManager'
 import NotificationCenter from '../components/NotificationCenter'
 import AdminSettings from '../components/AdminSettings'
+import PatientRecordReview from '../components/PatientRecordReview'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { API_BASE } from '../lib/apiBase'
@@ -122,14 +124,15 @@ function AdminDashboard({ doctor, onLogout }) {
       {/* Navigation Tabs */}
       <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
         {[
-          { id: 'overview', label: 'Overview', icon: '📊' },
-          { id: 'doctors', label: 'Doctors', icon: '👨‍⚕️' },
-          { id: 'reviews', label: 'Reviews', icon: '⭐' },
-          { id: 'referrals', label: 'Referrals', icon: '🔄' },
-          { id: 'settings', label: 'Settings', icon: '⚙️' },
-          { id: 'files', label: 'Files', icon: '📎' },
-          { id: 'wallet', label: 'Financials', icon: '💰' },
-          { id: 'notifications', label: 'Notifications', icon: '🔔' },
+          { id: 'overview', label: 'Overview', icon: 'ðŸ“Š' },
+          { id: 'doctors', label: 'Doctors', icon: 'ðŸ‘¨â€âš•ï¸' },
+          { id: 'reviews', label: 'Reviews', icon: 'â­' },
+          { id: 'referrals', label: 'Referrals', icon: 'ðŸ”„' },
+          { id: 'patients', label: 'Patients', icon: '🗂️' },
+          { id: 'settings', label: 'Settings', icon: 'âš™ï¸' },
+          { id: 'files', label: 'Files', icon: 'ðŸ“Ž' },
+          { id: 'wallet', label: 'Financials', icon: 'ðŸ’°' },
+          { id: 'notifications', label: 'Notifications', icon: 'ðŸ””' },
         ].map(tab => (
           <button
             key={tab.id}
@@ -344,10 +347,10 @@ function AdminDashboard({ doctor, onLogout }) {
             <div className="mt-8 p-6 bg-blue-50 rounded-2xl border border-blue-100">
               <h4 className="text-blue-900 font-semibold mb-2">Withdrawal Policy</h4>
               <ul className="text-blue-800 text-sm space-y-1">
-                <li>• Conversion rate: 10 Tokens = $1 USD.</li>
-                <li>• Minimum withdrawal amount is 50 Tokens ($5).</li>
-                <li>• Payouts are processed via Kora when configured.</li>
-                <li>• Ensure payout details match your registered identity.</li>
+                <li>â€¢ Conversion rate: 10 Tokens = $1 USD.</li>
+                <li>â€¢ Minimum withdrawal amount is 50 Tokens ($5).</li>
+                <li>â€¢ Payouts are processed via Kora when configured.</li>
+                <li>â€¢ Ensure payout details match your registered identity.</li>
               </ul>
             </div>
           </div>
@@ -361,7 +364,15 @@ function AdminDashboard({ doctor, onLogout }) {
       {activeTab === 'reviews' && <PatientReviewManager />}
 
       {/* Referrals Tab */}
-      {activeTab === 'referrals' && <ReferralManager />}
+      {activeTab === 'referrals' && (
+        <div className="space-y-8">
+          <ReferralManager />
+          <FacilityReferralManager doctor={doctor} />
+        </div>
+      )}
+
+      {/* Patients Tab */}
+      {activeTab === 'patients' && <PatientRecordReview />}
 
       {/* Files Tab */}
       {activeTab === 'files' && <FileManager />}

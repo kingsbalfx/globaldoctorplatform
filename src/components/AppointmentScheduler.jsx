@@ -17,9 +17,10 @@ function AppointmentScheduler({ patientId, onScheduled }) {
   const fetchDoctors = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/doctors`)
-      const data = await response.json()
-      setDoctors(data)
-      if (data.length > 0) setDoctorId(data[0].id)
+      const data = await response.json().catch(() => ({}))
+      const list = Array.isArray(data.doctors) ? data.doctors : []
+      setDoctors(list)
+      if (list.length > 0) setDoctorId(list[0].id)
     } catch (err) {
       console.error('Failed to fetch doctors', err)
     }

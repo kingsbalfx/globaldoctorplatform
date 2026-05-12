@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { API_BASE } from '../lib/apiBase'
+import { supabase } from '../lib/supabaseClient'
 
 function DoctorAuth({ onAuth }) {
   const [isLogin, setIsLogin] = useState(true)
@@ -12,6 +13,20 @@ function DoctorAuth({ onAuth }) {
     licenseNumber: '',
   })
   const [loading, setLoading] = useState(false)
+
+  const handleGoogleSignIn = async () => {
+    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
+      alert('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY to enable Google sign-in.')
+      return
+    }
+
+    const redirectTo = `${window.location.origin}/auth/callback?role=doctor&next=${encodeURIComponent('/doctor/dashboard')}`
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
+    })
+    if (error) alert(error.message || 'Google sign-in failed')
+  }
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -67,6 +82,19 @@ function DoctorAuth({ onAuth }) {
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl p-8">
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Continue with Google
+          </button>
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-slate-200" />
+            <span className="text-xs font-semibold text-slate-500">OR</span>
+            <div className="h-px flex-1 bg-slate-200" />
+          </div>
+
           <div className="flex mb-6">
             <button
               onClick={() => setIsLogin(true)}

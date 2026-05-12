@@ -561,6 +561,7 @@ app.post('/api/consultations/start', (req, res) => {
   const channel = String(req.body?.channel || '').trim()
   const track = String(req.body?.track || '').trim().toLowerCase()
   const facilityId = req.body?.facilityId ? String(req.body.facilityId).trim() : null
+  const facilityPin = String(req.body?.facilityPin || req.body?.pin || '').trim()
   const durationMin = safeNumber(req.body?.durationMin) ?? 15
 
   const allowedChannels = new Set(['direct_home', 'facility_private', 'facility_phc'])
@@ -568,12 +569,22 @@ app.post('/api/consultations/start', (req, res) => {
     return res.status(400).json({ error: 'patientId, doctorId and valid channel are required' })
   }
 
+  const patient = patients.find((p) => p.id === patientId) || null
+  if (!patient) return res.status(404).json({ error: 'Patient not found' })
+
+  const doctor = resolveDoctor(doctorId)
+  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+
   if (channel === 'direct_home' && !['economy', 'premium'].includes(track)) {
     return res.status(400).json({ error: 'track must be economy or premium for direct_home' })
   }
 
   if (channel !== 'direct_home') {
     if (!facilityId) return res.status(400).json({ error: 'facilityId is required for facility channels' })
+    if (!facilityPin) return res.status(400).json({ error: 'facilityPin is required for facility channels' })
+    if (!isFacilityAuthValid(facilityId, facilityPin)) {
+      return res.status(401).json({ error: 'Invalid facility credentials' })
+    }
     const facility = getFacilityById(facilityId)
     if (!facility) return res.status(404).json({ error: 'Facility not found' })
     if (channel === 'facility_private' && facility.type !== 'private_clinic') {
@@ -622,6 +633,15 @@ app.post('/api/consultations/end', (req, res) => {
   const consultation = consultationsNg.find((c) => c.id === consultationId)
   if (!consultation) return res.status(404).json({ error: 'Consultation not found' })
   if (consultation.status === 'completed') return res.json({ consultation, message: 'Already completed' })
+
+  // Facility-linked consultations require facility PIN to close (prevents unauthorized wallet movements).
+  if (consultation.facility_id) {
+    const facilityPin = String(req.body?.facilityPin || req.body?.pin || '').trim()
+    if (!facilityPin) return res.status(400).json({ error: 'facilityPin is required to complete facility consultations' })
+    if (!isFacilityAuthValid(consultation.facility_id, facilityPin)) {
+      return res.status(401).json({ error: 'Invalid facility credentials' })
+    }
+  }
 
   // Recalculate in case duration changed at end.
   const finalDurationMin = safeNumber(req.body?.durationMin) ?? consultation.duration_min
@@ -1015,6 +1035,94 @@ app.post('/api/doctors/login', (req, res) => {
   res.json({ doctor: doctorResponse, message: 'Login successful' })
 })
 
+// OAuth bridge (client-auth via Supabase/Google -> local in-memory profile)
+// NOTE: This is a lightweight bridge for the current in-memory demo. When moving fully to Supabase,
+// replace this with server-side JWT verification and profile reads from Supabase tables.
+app.post('/api/auth/oauth/bridge', (req, res) => {
+  const role = String(req.body?.role || '').trim().toLowerCase()
+  const email = String(req.body?.email || '').trim().toLowerCase()
+  const name = String(req.body?.name || '').trim()
+
+  if (!email) return res.status(400).json({ error: 'email is required' })
+  if (!['patient', 'doctor'].includes(role)) return res.status(400).json({ error: 'role must be patient or doctor' })
+
+  if (role === 'patient') {
+    let patient = patients.find((p) => (p.email || '').toLowerCase() === email) || null
+    if (!patient) {
+      patient = {
+        id: `patient-${patients.length + 1}`,
+        email,
+        password: null,
+        portal_pin: null,
+        name: name || email.split('@')[0],
+        dateOfBirth: null,
+        phone: null,
+        country: 'NG',
+        language: 'English',
+        tokens: 0,
+        isOnline: true,
+        registered_via: 'oauth',
+        facility_id: null,
+        facility_type: null,
+        createdAt: new Date().toISOString(),
+      }
+      patients.push(patient)
+
+      // Ensure token wallet exists
+      getPatientTokenRecord(patient.id)
+
+      auditLog({
+        event: 'patient_oauth_bridged',
+        actor_type: 'system',
+        actor_id: null,
+        entity_type: 'patient',
+        entity_id: patient.id,
+        meta: { email },
+      })
+    } else {
+      patient.isOnline = true
+    }
+
+    return res.json({ patient: sanitizePatientForResponse(patient), message: 'Patient session ready' })
+  }
+
+  // doctor
+  let doctor = doctorsAuth.find((d) => (d.email || '').toLowerCase() === email) || null
+  if (!doctor) {
+    doctor = {
+      id: `doc-${doctorsAuth.length + 1}`,
+      email,
+      password: null,
+      name: name || email.split('@')[0],
+      specialty: 'General Practitioner',
+      location: 'Nigeria',
+      licenseNumber: 'PENDING',
+      payoutMethod: 'bank_account',
+      currency: 'NGN',
+      earningsTokens: 0,
+      earningsNGN: 0,
+      verified: false,
+      isOnline: true,
+      createdAt: new Date().toISOString(),
+    }
+    doctorsAuth.push(doctor)
+
+    auditLog({
+      event: 'doctor_oauth_bridged',
+      actor_type: 'system',
+      actor_id: null,
+      entity_type: 'doctor',
+      entity_id: doctor.id,
+      meta: { email },
+    })
+  } else {
+    doctor.isOnline = true
+  }
+
+  const { password: _pw, ...doctorResponse } = doctor
+  return res.json({ doctor: doctorResponse, message: 'Doctor session ready' })
+})
+
 // ============ PATIENT AUTHENTICATION ENDPOINTS ============
 
 app.post('/api/patients/register', (req, res) => {
@@ -1083,6 +1191,121 @@ app.post('/api/patients/login', (req, res) => {
   res.json({ patient: patientResponse, message: 'Login successful' })
 })
 
+function sanitizePatientForResponse(patient) {
+  if (!patient) return null
+  const { password: _password, portal_pin: _portalPin, ...rest } = patient
+  return rest
+}
+
+// Facility-registered patients (PHC/Clinic): no email required, login with a 6-digit PIN.
+app.post('/api/patients/facility/register', (req, res) => {
+  const facilityId = String(req.body?.facilityId || '').trim()
+  const facilityPin = String(req.body?.facilityPin || req.body?.pin || '').trim()
+  const fullName = String(req.body?.name || req.body?.fullName || '').trim()
+  const patientPin = String(req.body?.patientPin || req.body?.portalPin || '').trim()
+  const phone = String(req.body?.phone || '').trim()
+
+  if (!facilityId || !facilityPin) return res.status(400).json({ error: 'facilityId and facilityPin are required' })
+  if (!isFacilityAuthValid(facilityId, facilityPin)) return res.status(401).json({ error: 'Invalid facility credentials' })
+  if (!fullName) return res.status(400).json({ error: 'name is required' })
+  if (!/^[0-9]{6}$/.test(patientPin)) return res.status(400).json({ error: 'patientPin must be a 6-digit number' })
+
+  const existing = patients.find((p) => p.portal_pin === patientPin && p.name?.toLowerCase?.() === fullName.toLowerCase())
+  if (existing) {
+    return res.status(409).json({ error: 'Patient already exists with this name and PIN. Use login.' })
+  }
+
+  const facility = getFacilityById(facilityId)
+  const newPatient = {
+    id: `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+    email: null,
+    password: null,
+    portal_pin: patientPin,
+    name: fullName,
+    dateOfBirth: null,
+    phone: phone || null,
+    country: 'NG',
+    language: 'English',
+    tokens: 0,
+    isOnline: false,
+    registered_via: 'facility',
+    facility_id: facilityId,
+    facility_type: facility?.type || null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+
+  patients.push(newPatient)
+
+  // Initialize token balance
+  patientTokens.push({
+    patientId: newPatient.id,
+    balance: 0,
+    transactions: [
+      {
+        id: `txn-${Date.now()}`,
+        type: 'account_created',
+        amount: 0,
+        description: 'Token wallet created',
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  })
+
+  auditLog({
+    event: 'patient_registered_via_facility',
+    actor_type: 'facility',
+    actor_id: facilityId,
+    entity_type: 'patient',
+    entity_id: newPatient.id,
+    meta: { name: fullName, facility_type: facility?.type || null },
+  })
+
+  return res.status(201).json({
+    patient: sanitizePatientForResponse(newPatient),
+    login: { patientId: newPatient.id, pin: patientPin },
+    message: 'Patient registered via facility',
+  })
+})
+
+app.post('/api/patients/facility/login', (req, res) => {
+  const patientId = String(req.body?.patientId || '').trim()
+  const fullName = String(req.body?.name || req.body?.fullName || '').trim()
+  const patientPin = String(req.body?.patientPin || req.body?.pin || '').trim()
+
+  if (!patientPin || !/^[0-9]{6}$/.test(patientPin)) {
+    return res.status(400).json({ error: 'pin must be a 6-digit number' })
+  }
+
+  let patient = null
+  if (patientId) {
+    patient = patients.find((p) => p.id === patientId && String(p.portal_pin || '') === patientPin) || null
+  } else if (fullName) {
+    const matches = patients.filter(
+      (p) => p.name?.toLowerCase?.() === fullName.toLowerCase() && String(p.portal_pin || '') === patientPin
+    )
+    if (matches.length > 1) {
+      return res.status(409).json({ error: 'Multiple matches. Please use patientId to login.' })
+    }
+    patient = matches[0] || null
+  }
+
+  if (!patient) return res.status(401).json({ error: 'Invalid credentials' })
+
+  patient.isOnline = true
+
+  auditLog({
+    event: 'patient_logged_in_facility_mode',
+    actor_type: 'patient',
+    actor_id: patient.id,
+    entity_type: 'patient',
+    entity_id: patient.id,
+    meta: { registered_via: patient.registered_via || null, facility_id: patient.facility_id || null },
+  })
+
+  return res.json({ patient: sanitizePatientForResponse(patient), message: 'Login successful' })
+})
+
 // ============ TOKEN MANAGEMENT ENDPOINTS ============
 
 app.get('/api/patients/:patientId/tokens', (req, res) => {
@@ -1103,6 +1326,35 @@ app.get('/api/patients/:patientId/tokens/history', (req, res) => {
     return res.status(404).json({ error: 'Token record not found' })
   }
   res.json({ transactions: tokenRecord.transactions || [] })
+})
+
+// Patient record aggregation for doctor/facility review (in-memory today; future-ready for Supabase).
+app.get('/api/patients/:patientId/record', (req, res) => {
+  const { patientId } = req.params
+  const patient = patients.find((p) => p.id === patientId)
+  if (!patient) return res.status(404).json({ error: 'Patient not found' })
+
+  const tokenRecord = patientTokens.find((t) => t.patientId === patientId) || { balance: 0, transactions: [] }
+  const files = patientFiles.filter((f) => f.patientId === patientId)
+  const specialtyReferrals = referrals.filter((r) => r.patientId === patientId)
+  const facilityReferralHistory = facilityReferrals.filter((r) => r.patient_id === patientId)
+  const appointmentHistory = appointments.filter((a) => a.patientId === patientId)
+  const consultations = consultationsNg.filter((c) => c.patient_id === patientId)
+  const labOrderHistory = labOrders.filter((o) => o.patient_id === patientId)
+  const labPaymentHistory = labPayments.filter((p) => {
+    const order = labOrders.find((o) => o.id === p.order_id)
+    return order?.patient_id === patientId
+  })
+
+  return res.json({
+    patient: sanitizePatientForResponse(patient),
+    tokens: { balance: tokenRecord.balance || 0, transactions: tokenRecord.transactions || [] },
+    files,
+    referrals: { specialty: specialtyReferrals, facility: facilityReferralHistory },
+    appointments: appointmentHistory,
+    consultations_ng: consultations,
+    labs: { orders: labOrderHistory, payments: labPaymentHistory },
+  })
 })
 
 app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res) => {

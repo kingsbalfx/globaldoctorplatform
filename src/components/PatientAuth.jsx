@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { API_BASE } from '../lib/apiBase'
+import { supabase } from '../lib/supabaseClient'
 
 function PatientAuth({ onAuth }) {
+  const [mode, setMode] = useState('email') // 'email' | 'facility'
   const [isLogin, setIsLogin] = useState(true)
   const [formData, setFormData] = useState({
     email: '',
@@ -12,13 +14,52 @@ function PatientAuth({ onAuth }) {
     country: '',
     language: 'English',
   })
+  const [facilityLogin, setFacilityLogin] = useState({
+    patientId: '',
+    fullName: '',
+    pin: '',
+  })
   const [loading, setLoading] = useState(false)
+
+  const handleGoogleSignIn = async () => {
+    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
+      alert('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY to enable Google sign-in.')
+      return
+    }
+    const redirectTo = `${window.location.origin}/auth/callback?role=patient&next=${encodeURIComponent('/patient')}`
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
+    })
+    if (error) alert(error.message || 'Google sign-in failed')
+  }
 
   const handleSubmit = async (event) => {
     event.preventDefault()
     setLoading(true)
 
     try {
+      if (mode === 'facility') {
+        const response = await fetch(`${API_BASE}/api/patients/facility/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            patientId: facilityLogin.patientId.trim() || undefined,
+            fullName: facilityLogin.fullName.trim() || undefined,
+            pin: facilityLogin.pin.trim(),
+          }),
+        })
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}))
+          throw new Error(error.error || 'Authentication failed')
+        }
+
+        const result = await response.json()
+        onAuth({ type: 'login', ...result.patient })
+        return
+      }
+
       const endpoint = isLogin ? '/api/patients/login' : '/api/patients/register'
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
@@ -53,27 +94,61 @@ function PatientAuth({ onAuth }) {
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl p-8">
-          <div className="flex mb-6">
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Continue with Google
+          </button>
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-slate-200" />
+            <span className="text-xs font-semibold text-slate-500">OR</span>
+            <div className="h-px flex-1 bg-slate-200" />
+          </div>
+
+          <div className="flex mb-6 gap-2">
             <button
-              onClick={() => setIsLogin(true)}
+              onClick={() => setMode('email')}
               className={`flex-1 py-2 px-4 rounded-2xl font-semibold transition ${
-                isLogin ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-600'
+                mode === 'email' ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-600'
               }`}
             >
-              Login
+              Email
             </button>
             <button
-              onClick={() => setIsLogin(false)}
-              className={`flex-1 py-2 px-4 rounded-2xl font-semibold transition ml-2 ${
-                !isLogin ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-600'
+              onClick={() => setMode('facility')}
+              className={`flex-1 py-2 px-4 rounded-2xl font-semibold transition ${
+                mode === 'facility' ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-600'
               }`}
             >
-              Sign Up
+              Clinic / PHC PIN
             </button>
           </div>
 
+          {mode === 'email' && (
+            <div className="flex mb-6">
+              <button
+                onClick={() => setIsLogin(true)}
+                className={`flex-1 py-2 px-4 rounded-2xl font-semibold transition ${
+                  isLogin ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                Login
+              </button>
+              <button
+                onClick={() => setIsLogin(false)}
+                className={`flex-1 py-2 px-4 rounded-2xl font-semibold transition ml-2 ${
+                  !isLogin ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                Sign Up
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
-            {!isLogin && (
+            {mode === 'email' && !isLogin && (
               <>
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Full Name</label>
@@ -149,34 +224,75 @@ function PatientAuth({ onAuth }) {
               </>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Email</label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => handleChange('email', e.target.value)}
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                required
-              />
-            </div>
+            {mode === 'email' ? (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Email</label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => handleChange('email', e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    required
+                  />
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Password</label>
-              <input
-                type="password"
-                value={formData.password}
-                onChange={(e) => handleChange('password', e.target.value)}
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                required
-              />
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Password</label>
+                  <input
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) => handleChange('password', e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    required
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Patient ID (recommended)</label>
+                  <input
+                    type="text"
+                    value={facilityLogin.patientId}
+                    onChange={(e) => setFacilityLogin((prev) => ({ ...prev, patientId: e.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500"
+                    placeholder="patient-123 or patient-171..."
+                  />
+                  <p className="mt-2 text-xs text-slate-500">If you don&apos;t have your Patient ID, use Full Name + PIN.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Full Name</label>
+                  <input
+                    type="text"
+                    value={facilityLogin.fullName}
+                    onChange={(e) => setFacilityLogin((prev) => ({ ...prev, fullName: e.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500"
+                    placeholder="Your name"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">6-digit PIN</label>
+                  <input
+                    inputMode="numeric"
+                    value={facilityLogin.pin}
+                    onChange={(e) => setFacilityLogin((prev) => ({ ...prev, pin: e.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500"
+                    placeholder="123456"
+                    required
+                  />
+                </div>
+              </>
+            )}
 
             <button
               type="submit"
               disabled={loading}
               className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Processing...' : (isLogin ? 'Login' : 'Create Account')}
+              {loading ? 'Processing...' : (mode === 'facility' ? 'Login' : (isLogin ? 'Login' : 'Create Account'))}
             </button>
           </form>
 
