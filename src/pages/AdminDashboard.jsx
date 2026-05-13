@@ -8,6 +8,7 @@ import NotificationCenter from '../components/NotificationCenter'
 import AdminSettings from '../components/AdminSettings'
 import PatientRecordReview from '../components/PatientRecordReview'
 import AnnouncementBanner from '../components/AnnouncementBanner'
+import ManualDownload from '../components/ManualDownload'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { API_BASE } from '../lib/apiBase'
 
@@ -132,6 +133,7 @@ function AdminDashboard({ doctor, onLogout }) {
           { id: 'settings', label: 'Settings', icon: 'âš™ï¸' },
           { id: 'files', label: 'Files', icon: 'ðŸ“Ž' },
           { id: 'wallet', label: 'Financials', icon: 'ðŸ’°' },
+          { id: 'manuals', label: 'Manuals & Guides', icon: '📘' },
           { id: 'notifications', label: 'Notifications', icon: 'ðŸ””' },
         ].map(tab => (
           <button
@@ -202,6 +204,22 @@ function AdminDashboard({ doctor, onLogout }) {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-blue-50 border border-blue-100 p-8 shadow-sm">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-700">Doctor Support</p>
+                <h3 className="mt-3 text-2xl font-semibold text-slate-900">Download the Doctor Guide</h3>
+                <p className="mt-2 text-sm text-slate-600">Access onboarding manuals, quick-start guides, and best practices for patient support.</p>
+              </div>
+              <button
+                onClick={() => setActiveTab('manuals')}
+                className="rounded-full bg-blue-700 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-800"
+              >
+                Open manuals
+              </button>
             </div>
           </div>
 
@@ -356,6 +374,8 @@ function AdminDashboard({ doctor, onLogout }) {
           </div>
         </div>
       )}
+
+      {activeTab === 'manuals' && <ManualDownload userType="doctor" />}
 
       {/* Doctors Tab */}
       {activeTab === 'doctors' && <DoctorManagement />}

@@ -28,6 +28,7 @@ For Google sign-in and OAuth callback to work, register each redirect URL in Sup
 ### Required redirect URLs
 
 - `http://localhost:5173/auth/callback`
+- `https://globaldoctorplatform.vercel.app/auth/callback`
 - `https://<your-production-domain>/auth/callback`
 
 If you have other environments or routes, add them too.
@@ -51,6 +52,7 @@ This ensures OAuth flow returns users to the correct origin.
 ### Common Google redirect URLs
 
 - `http://localhost:5173/auth/callback`
+- `https://globaldoctorplatform.vercel.app/auth/callback`
 - `https://<your-production-domain>/auth/callback`
 
 ## 6. How the app uses redirect URLs
@@ -76,6 +78,7 @@ In Supabase project settings, also verify:
 - If the callback page shows no `code`, confirm the redirect URL is exactly the same as the one configured in Supabase.
 - If `Failed to fetch` appears, check CORS and ensure the frontend origin is listed in Supabase Auth settings.
 - If `Supabase is not configured` appears in the app, verify `.env` is loaded and the values are present in `import.meta.env`.
+- Do not share your personal login email or password in public documentation or chat messages. Treat your Supabase credentials as private.
 
 ## 9. Recommended redirect URL list
 

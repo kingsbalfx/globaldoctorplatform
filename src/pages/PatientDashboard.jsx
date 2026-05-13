@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import AppointmentScheduler from '../components/AppointmentScheduler'
 import PatientFileManager from '../components/PatientFileManager'
 import NotificationCenter from '../components/NotificationCenter'
@@ -12,6 +13,7 @@ import PatientReferralPanel from '../components/PatientReferralPanel'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import ManualDownload from '../components/ManualDownload'
 import AccessibilityPanel from '../components/AccessibilityPanel'
+import LanguageSelector from '../components/LanguageSelector'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { API_BASE } from '../lib/apiBase'
 
@@ -29,6 +31,7 @@ function PatientDashboard() {
   const [loading, setLoading] = useState(false)
   const [selectedConsultationId, setSelectedConsultationId] = useState('')
   const [showAccessibilityPanel, setShowAccessibilityPanel] = useState(false)
+  const { t } = useTranslation()
 
   const currentSpecialty = selectedDoctor?.specialty || 'General Practitioner'
   const specialtyInfo = getSpecialtyInfo(currentSpecialty)
@@ -184,6 +187,22 @@ function PatientDashboard() {
             <div className="mt-4 inline-flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 shadow-sm">
               <span className="text-lg">{specialtyInfo.logo}</span>
               <span>{currentSpecialty} care experience</span>
+            </div>
+            <div className="mt-6 grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] items-center">
+              <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
+                <p className="text-xs uppercase tracking-[0.24em] text-blue-700">Patient guide</p>
+                <p className="mt-2 text-sm text-slate-700">Your preferred language: <strong>{patient?.language || 'English'}</strong></p>
+                <p className="mt-2 text-sm text-slate-600">Download step-by-step instructions and accessibility guides for your dashboard.</p>
+              </div>
+              <div className="flex flex-wrap gap-3 items-center">
+                <LanguageSelector />
+                <button
+                  onClick={() => setActiveTab('manuals')}
+                  className="rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600"
+                >
+                  {t('manuals.downloadManual')}
+                </button>
+              </div>
             </div>
           </div>
           <div className="rounded-3xl bg-gradient-to-r from-white to-slate-100 p-6 shadow-lg shadow-slate-200/50">
