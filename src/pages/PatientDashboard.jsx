@@ -10,6 +10,8 @@ import CalendarScheduler from '../components/CalendarScheduler'
 import TokenManager from '../components/TokenManager'
 import PatientReferralPanel from '../components/PatientReferralPanel'
 import AnnouncementBanner from '../components/AnnouncementBanner'
+import ManualDownload from '../components/ManualDownload'
+import AccessibilityPanel from '../components/AccessibilityPanel'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { API_BASE } from '../lib/apiBase'
 
@@ -26,6 +28,7 @@ function PatientDashboard() {
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedConsultationId, setSelectedConsultationId] = useState('')
+  const [showAccessibilityPanel, setShowAccessibilityPanel] = useState(false)
 
   const currentSpecialty = selectedDoctor?.specialty || 'General Practitioner'
   const specialtyInfo = getSpecialtyInfo(currentSpecialty)
@@ -207,6 +210,8 @@ function PatientDashboard() {
           { id: 'video', label: 'Video Call' },
           { id: 'notifications', label: 'Notifications' },
           { id: 'tokens', label: 'Tokens & Subscription' },
+          { id: 'manuals', label: 'Help & Manuals' },
+          { id: 'accessibility', label: 'Accessibility' },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -327,6 +332,60 @@ function PatientDashboard() {
       )}
 
       {activeTab === 'tokens' && <TokenManager patient={patient} onTokensUpdated={handleTokensUpdated} />}
+
+      {activeTab === 'manuals' && <ManualDownload userType="patient" />}
+
+      {activeTab === 'accessibility' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Accessibility Settings</h2>
+              <p className="text-sm text-gray-600 mt-1">Customize your experience for better accessibility</p>
+            </div>
+            <button
+              onClick={() => setShowAccessibilityPanel(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Open Settings
+            </button>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <h3 className="font-medium text-gray-900">Available Features</h3>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li>• Voice commands for navigation</li>
+                <li>• Screen reader support</li>
+                <li>• High contrast mode</li>
+                <li>• Large text options</li>
+                <li>• Audio descriptions</li>
+                <li>• Visual guides</li>
+              </ul>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="font-medium text-gray-900">Emergency Access</h3>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm text-red-800 mb-3">
+                  Quick access to emergency services and visual communication aids.
+                </p>
+                <button
+                  onClick={handleEmergencyCall}
+                  className="w-full bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  Emergency Support
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AccessibilityPanel
+        isOpen={showAccessibilityPanel}
+        onClose={() => setShowAccessibilityPanel(false)}
+        userType="patient"
+      />
     </section>
   )
 }

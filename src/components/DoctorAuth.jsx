@@ -1,8 +1,12 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { API_BASE } from '../lib/apiBase'
 import { supabase } from '../lib/supabaseClient'
+import { useError } from './ErrorHandler'
 
 function DoctorAuth({ onAuth }) {
+  const { t } = useTranslation()
+  const { addError } = useError()
   const [isLogin, setIsLogin] = useState(true)
   const [formData, setFormData] = useState({
     email: '',
@@ -16,7 +20,7 @@ function DoctorAuth({ onAuth }) {
 
   const handleGoogleSignIn = async () => {
     if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
-      alert('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY to enable Google sign-in.')
+      addError(t('errors.server'), 'error')
       return
     }
 
@@ -25,7 +29,7 @@ function DoctorAuth({ onAuth }) {
       provider: 'google',
       options: { redirectTo },
     })
-    if (error) alert(error.message || 'Google sign-in failed')
+    if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
 
   const handleSubmit = async (event) => {
@@ -33,6 +37,39 @@ function DoctorAuth({ onAuth }) {
     setLoading(true)
 
     try {
+      if (!formData.email || !formData.password) {
+        throw new Error('Please enter your email and password.')
+      }
+
+      if (isLogin) {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        })
+        if (authError) {
+          throw authError
+        }
+      } else {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: {
+              full_name: formData.name,
+              specialty: formData.specialty,
+              location: formData.location,
+              license_number: formData.licenseNumber,
+            },
+          },
+        })
+        if (signUpError) {
+          throw signUpError
+        }
+        if (!signUpData?.user) {
+          throw new Error('Could not create doctor account. Please try again.')
+        }
+      }
+
       const endpoint = isLogin ? '/api/doctors/login' : '/api/doctors/register'
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
@@ -41,7 +78,7 @@ function DoctorAuth({ onAuth }) {
       })
 
       if (!response.ok) {
-        const error = await response.json()
+        const error = await response.json().catch(() => ({}))
         throw new Error(error.error || 'Authentication failed')
       }
 
@@ -63,7 +100,7 @@ function DoctorAuth({ onAuth }) {
 
       throw new Error('Unexpected authentication response')
     } catch (error) {
-      alert('Authentication failed: ' + error.message)
+      addError(error.message || t('auth.authFailed'), 'error')
     } finally {
       setLoading(false)
     }

@@ -23,6 +23,14 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
     let cancelled = false
 
     const run = async () => {
+      const url = new URL(window.location.href)
+      const providerError = url.searchParams.get('error_description') || url.searchParams.get('error')
+      if (providerError) {
+        setError(providerError)
+        setStatus('')
+        return
+      }
+
       if (!isSupabaseConfigured()) {
         setError('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.')
         setStatus('')
@@ -33,7 +41,15 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         if (params.code) {
           setStatus('Finalizing session...')
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(params.code)
-          if (exchangeError) throw exchangeError
+          if (exchangeError) {
+            throw exchangeError
+          }
+        } else if (supabase.auth.getSessionFromUrl) {
+          setStatus('Retrieving session from callback URL...')
+          const { error: urlError } = await supabase.auth.getSessionFromUrl({ storeSession: true })
+          if (urlError) {
+            throw urlError
+          }
         }
 
         setStatus('Loading profile...')

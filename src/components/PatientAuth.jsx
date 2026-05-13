@@ -1,8 +1,12 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { API_BASE } from '../lib/apiBase'
 import { supabase } from '../lib/supabaseClient'
+import { useError } from './ErrorHandler'
 
 function PatientAuth({ onAuth }) {
+  const { t } = useTranslation()
+  const { addError } = useError()
   const [mode, setMode] = useState('email') // 'email' | 'facility'
   const [isLogin, setIsLogin] = useState(true)
   const [formData, setFormData] = useState({
@@ -23,7 +27,7 @@ function PatientAuth({ onAuth }) {
 
   const handleGoogleSignIn = async () => {
     if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
-      alert('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY to enable Google sign-in.')
+      addError(t('errors.server'), 'error')
       return
     }
     const redirectTo = `${window.location.origin}/auth/callback?role=patient&next=${encodeURIComponent('/patient')}`
@@ -31,7 +35,7 @@ function PatientAuth({ onAuth }) {
       provider: 'google',
       options: { redirectTo },
     })
-    if (error) alert(error.message || 'Google sign-in failed')
+    if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
 
   const handleSubmit = async (event) => {
@@ -60,6 +64,40 @@ function PatientAuth({ onAuth }) {
         return
       }
 
+      if (!formData.email || !formData.password) {
+        throw new Error('Please enter your email and password.')
+      }
+
+      if (isLogin) {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        })
+        if (authError) {
+          throw authError
+        }
+      } else {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: {
+              full_name: formData.name,
+              date_of_birth: formData.dateOfBirth,
+              phone: formData.phone,
+              country: formData.country,
+              preferred_language: formData.language,
+            },
+          },
+        })
+        if (signUpError) {
+          throw signUpError
+        }
+        if (!signUpData?.user) {
+          throw new Error('Could not create patient account. Please try again.')
+        }
+      }
+
       const endpoint = isLogin ? '/api/patients/login' : '/api/patients/register'
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
@@ -68,14 +106,14 @@ function PatientAuth({ onAuth }) {
       })
 
       if (!response.ok) {
-        const error = await response.json()
+        const error = await response.json().catch(() => ({}))
         throw new Error(error.error || 'Authentication failed')
       }
 
       const result = await response.json()
       onAuth({ type: isLogin ? 'login' : 'register', ...result.patient })
     } catch (error) {
-      alert('Authentication failed: ' + error.message)
+      addError(error.message || t('auth.authFailed'), 'error')
     } finally {
       setLoading(false)
     }

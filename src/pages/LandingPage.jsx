@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { fetchDoctors, submitReview, createPaymentSession } from '../lib/kiraApi'
 import AnnouncementBanner from '../components/AnnouncementBanner'
+import LanguageSelector from '../components/LanguageSelector'
 
 const specialties = [
   'Cardiology',
@@ -16,6 +18,7 @@ const specialties = [
 const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French']
 
 function LandingPage() {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [specialty, setSpecialty] = useState('')
   const [language, setLanguage] = useState('')
@@ -34,6 +37,28 @@ function LandingPage() {
 
   useEffect(() => {
     void loadDoctors()
+
+    // Initialize Google Translate
+    const addGoogleTranslateScript = () => {
+      if (!document.querySelector('#google-translate-script')) {
+        const script = document.createElement('script')
+        script.id = 'google-translate-script'
+        script.src = '//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit'
+        script.async = true
+        document.head.appendChild(script)
+
+        window.googleTranslateElementInit = () => {
+          new window.google.translate.TranslateElement({
+            pageLanguage: 'en',
+            includedLanguages: 'en,ha,yo,sw,ar,fr',
+            layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE,
+            autoDisplay: false
+          }, 'google_translate_element')
+        }
+      }
+    }
+
+    addGoogleTranslateScript()
   }, [])
 
   const loadDoctors = async () => {
@@ -172,6 +197,11 @@ function LandingPage() {
 
         <div className="relative z-10 grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
           <div className="space-y-6">
+            {/* Language Selector */}
+            <div className="flex justify-end">
+              <LanguageSelector />
+            </div>
+
             <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200/60 backdrop-blur">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
               Verified profiles • Secure consultations • Fast booking
@@ -183,12 +213,12 @@ function LandingPage() {
               </div>
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.28em] text-slate-500">GlobalDoc Connect</p>
-                <h1 className="mt-1 text-3xl font-bold text-slate-900 sm:text-5xl">Care that travels with you</h1>
+                <h1 className="mt-1 text-3xl font-bold text-slate-900 sm:text-5xl">{t('landing.heroTitle')}</h1>
               </div>
             </div>
 
             <p className="max-w-xl text-lg leading-8 text-slate-700">
-              Find specialists across borders, compare verified reviews, and book consultations without the back-and-forth.
+              {t('landing.heroSubtitle')}
             </p>
 
             <div className="flex flex-wrap gap-3">
@@ -196,7 +226,7 @@ function LandingPage() {
                 href="#search"
                 className="rounded-full bg-brand-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/30 hover:bg-brand-600"
               >
-                Find a doctor
+                {t('landing.getStarted')}
               </a>
               <a
                 href="#how-it-works"
@@ -204,6 +234,10 @@ function LandingPage() {
               >
                 See how it works
               </a>
+            </div>
+            <div className="mt-6 rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+              <p className="text-sm font-medium text-slate-700 mb-2">Translate this page</p>
+              <div id="google_translate_element" className="min-h-[44px]" />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">

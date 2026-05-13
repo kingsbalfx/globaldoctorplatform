@@ -10,6 +10,8 @@ import TermsOfService from './pages/TermsOfService'
 import PrivacyPolicy from './pages/PrivacyPolicy'
 import Contact from './pages/Contact'
 import Footer from './components/Footer'
+import { ErrorProvider } from './components/ErrorHandler'
+import './lib/i18n' // Initialize i18n
 
 function viewFromPath(pathname) {
   const path = String(pathname || '/')
@@ -126,7 +128,8 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <ErrorProvider>
+      <div className="min-h-screen bg-slate-50 text-slate-900">
       <nav className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-6 sm:px-8">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="GlobalDoc Connect logo" className="h-10 w-10 rounded-full shadow-sm object-cover" />
@@ -190,6 +193,7 @@ function App() {
       {/* Footer - only show on landing page */}
       {currentView === 'landing' && <Footer onNavigate={setCurrentView} />}
     </div>
+    </ErrorProvider>
   )
 }
 
