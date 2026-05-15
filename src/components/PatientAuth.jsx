@@ -43,6 +43,12 @@ function PatientAuth({ onAuth }) {
     setLoading(true)
 
     try {
+      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
+        throw new Error(
+          'Supabase auth is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.'
+        )
+      }
+
       if (mode === 'facility') {
         const response = await fetch(`${API_BASE}/api/patients/facility/login`, {
           method: 'POST',

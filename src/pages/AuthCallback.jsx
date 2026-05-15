@@ -38,29 +38,42 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
       }
 
       try {
-        if (params.code) {
-          setStatus('Finalizing session...')
+        if (supabase.auth.getSessionFromUrl) {
+          setStatus('Finalizing OAuth session...')
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSessionFromUrl({
+            storeSession: true,
+          })
+          if (sessionError) {
+            if (sessionError.message?.includes('PKCE code verifier not found')) {
+              setError('Authentication session expired. Please sign in again from the same browser.')
+              setStatus('')
+              return
+            }
+            throw sessionError
+          }
+
+          if (!sessionData?.session && params.code) {
+            setStatus('Finalizing session with authorization code...')
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(params.code)
+            if (exchangeError) {
+              if (exchangeError.message?.includes('PKCE code verifier not found')) {
+                setError('Authentication session expired. Please sign in again from the same browser.')
+                setStatus('')
+                return
+              }
+              throw exchangeError
+            }
+          }
+        } else if (params.code) {
+          setStatus('Finalizing session with authorization code...')
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(params.code)
           if (exchangeError) {
-            // Handle PKCE verifier not found error specifically
             if (exchangeError.message?.includes('PKCE code verifier not found')) {
-              setError('Authentication session expired. Please try signing in again.')
+              setError('Authentication session expired. Please sign in again from the same browser.')
               setStatus('')
               return
             }
             throw exchangeError
-          }
-        } else if (supabase.auth.getSessionFromUrl) {
-          setStatus('Retrieving session from callback URL...')
-          const { error: urlError } = await supabase.auth.getSessionFromUrl({ storeSession: true })
-          if (urlError) {
-            // Handle PKCE verifier not found error specifically
-            if (urlError.message?.includes('PKCE code verifier not found')) {
-              setError('Authentication session expired. Please try signing in again.')
-              setStatus('')
-              return
-            }
-            throw urlError
           }
         }
 
