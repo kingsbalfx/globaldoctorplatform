@@ -63,9 +63,6 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
             throw urlError
           }
         }
-            throw urlError
-          }
-        }
 
         setStatus('Loading profile...')
         const { data: userData, error: userError } = await supabase.auth.getUser()

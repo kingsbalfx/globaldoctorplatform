@@ -68,6 +68,12 @@ function PatientAuth({ onAuth }) {
         throw new Error('Please enter your email and password.')
       }
 
+      let endpoint = '/api/patients/login'
+      let payload = {
+        email: formData.email,
+        password: formData.password,
+      }
+
       if (isLogin) {
         const { error: authError } = await supabase.auth.signInWithPassword({
           email: formData.email,
@@ -76,19 +82,36 @@ function PatientAuth({ onAuth }) {
         if (authError) {
           throw authError
         }
-
-        // Only send email and password for login
-        const loginPayload = {
+      } else {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
+          options: {
+            data: {
+              full_name: formData.name,
+              date_of_birth: formData.dateOfBirth,
+              phone: formData.phone,
+              country: formData.country,
+              preferred_language: formData.language,
+            },
+          },
+        })
+        if (signUpError) {
+          throw signUpError
+        }
+        if (!signUpData?.user) {
+          throw new Error('Could not create patient account. Please try again.')
         }
 
-        const endpoint = '/api/patients/login'
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(loginPayload),
-        })
+        endpoint = '/api/patients/register'
+        payload = formData
+      }
+
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
