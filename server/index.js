@@ -2,11 +2,12 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import axios from 'axios'
-import { RtcTokenBuilder, RtcRole } from 'agora-access-token'
 import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 import { resolve } from 'path'
 import { calculateConsultationSplitNgn, calculateLabCommissionNgn } from '../src/lib/ngPricing.js'
+import pkg from 'agora-access-token'
+const { RtcTokenBuilder, RtcRole } = pkg
 
 dotenv.config()
 

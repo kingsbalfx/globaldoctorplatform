@@ -42,12 +42,27 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
           setStatus('Finalizing session...')
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(params.code)
           if (exchangeError) {
+            // Handle PKCE verifier not found error specifically
+            if (exchangeError.message?.includes('PKCE code verifier not found')) {
+              setError('Authentication session expired. Please try signing in again.')
+              setStatus('')
+              return
+            }
             throw exchangeError
           }
         } else if (supabase.auth.getSessionFromUrl) {
           setStatus('Retrieving session from callback URL...')
           const { error: urlError } = await supabase.auth.getSessionFromUrl({ storeSession: true })
           if (urlError) {
+            // Handle PKCE verifier not found error specifically
+            if (urlError.message?.includes('PKCE code verifier not found')) {
+              setError('Authentication session expired. Please try signing in again.')
+              setStatus('')
+              return
+            }
+            throw urlError
+          }
+        }
             throw urlError
           }
         }

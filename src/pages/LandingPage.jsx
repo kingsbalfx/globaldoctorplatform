@@ -15,7 +15,7 @@ const specialties = [
   'Urology',
 ]
 
-const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French']
+const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French', 'Hausa', 'Yoruba', 'Swahili', 'Igbo']
 
 function LandingPage() {
   const { t } = useTranslation()
@@ -50,7 +50,7 @@ function LandingPage() {
         window.googleTranslateElementInit = () => {
           new window.google.translate.TranslateElement({
             pageLanguage: 'en',
-            includedLanguages: 'en,ha,yo,sw,ar,fr',
+            includedLanguages: 'en,ha,yo,sw,ar,fr,ig',
             layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE,
             autoDisplay: false
           }, 'google_translate_element')

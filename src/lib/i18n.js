@@ -9,7 +9,8 @@ export const SUPPORTED_LANGUAGES = [
   { code: 'yo', name: 'Yoruba', nativeName: 'Yorùbá' },
   { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili' },
   { code: 'ar', name: 'Arabic', nativeName: 'العربية', rtl: true },
-  { code: 'fr', name: 'French', nativeName: 'Français' }
+  { code: 'fr', name: 'French', nativeName: 'Français' },
+  { code: 'ig', name: 'Igbo', nativeName: 'Igbo' }
 ];
 
 // Translation resources

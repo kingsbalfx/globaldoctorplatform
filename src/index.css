@@ -14,3 +14,54 @@ body {
 button, input, textarea, select {
   @apply outline-none;
 }
+
+/* Google Translate Widget Styling */
+#google_translate_element {
+  @apply inline-block;
+}
+
+#google_translate_element .goog-te-gadget-simple {
+  @apply bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors;
+  border-radius: 0.5rem;
+  font-family: inherit;
+}
+
+#google_translate_element .goog-te-gadget-simple .goog-te-menu-value {
+  @apply text-slate-700;
+}
+
+#google_translate_element .goog-te-gadget-simple .goog-te-menu-value span {
+  @apply text-slate-700;
+}
+
+#google_translate_element .goog-te-gadget-simple .goog-te-menu-value span:first-child {
+  @apply text-slate-700;
+}
+
+#google_translate_element .goog-te-menu-frame {
+  @apply border-slate-200 shadow-lg rounded-lg;
+}
+
+.goog-te-banner-frame {
+  display: none !important;
+}
+
+.goog-te-menu-frame.skiptranslate {
+  @apply border-slate-200 shadow-lg rounded-lg;
+}
+
+.goog-te-menu-frame.skiptranslate .goog-te-menu2 {
+  @apply bg-white rounded-lg;
+}
+
+.goog-te-menu-frame.skiptranslate .goog-te-menu2-item {
+  @apply text-slate-700 hover:bg-slate-100 px-3 py-2;
+}
+
+.goog-te-menu-frame.skiptranslate .goog-te-menu2-item:hover {
+  @apply bg-slate-100;
+}
+
+.goog-te-menu-frame.skiptranslate .goog-te-menu2-item-selected {
+  @apply bg-brand-50 text-brand-700;
+}

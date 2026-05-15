@@ -49,33 +49,19 @@ function DoctorAuth({ onAuth }) {
         if (authError) {
           throw authError
         }
-      } else {
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+
+        // Only send email and password for login
+        const loginPayload = {
           email: formData.email,
           password: formData.password,
-          options: {
-            data: {
-              full_name: formData.name,
-              specialty: formData.specialty,
-              location: formData.location,
-              license_number: formData.licenseNumber,
-            },
-          },
-        })
-        if (signUpError) {
-          throw signUpError
         }
-        if (!signUpData?.user) {
-          throw new Error('Could not create doctor account. Please try again.')
-        }
-      }
 
-      const endpoint = isLogin ? '/api/doctors/login' : '/api/doctors/register'
-      const response = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      })
+        const endpoint = '/api/doctors/login'
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(loginPayload),
+        })
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
