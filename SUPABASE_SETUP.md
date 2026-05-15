@@ -1,53 +1,64 @@
 # Supabase Setup for GlobalDoc Platform
 
-## 1. Supabase Project Configuration
+> 📖 **Complete Setup Guide**: See [`SUPABASE_COMPLETE_SETUP_GUIDE.md`](SUPABASE_COMPLETE_SETUP_GUIDE.md) for detailed step-by-step instructions.
 
-1. Go to https://app.supabase.com and sign in.
-2. Create a new project for your GlobalDoc platform.
-3. In the project dashboard, go to `Settings` > `API` and note these values:
-   - `Project URL`
-   - `anon/public API key`
+## Quick Setup
 
-These values are used in your frontend environment variables.
+### 1. Get Your Supabase Keys
 
-## 2. Environment Variables
+1. Go to [https://app.supabase.com](https://app.supabase.com)
+2. Select your project → Settings → API
+3. Copy:
+   - **Project URL**: `https://your-project-id.supabase.co`
+   - **anon/public key**: `eyJ...` (starts with `eyJ`)
 
-In the frontend project root, create or update `.env` with:
+### 2. Environment Variables
+
+Create `.env` in your project root:
 
 ```env
-VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
-VITE_SUPABASE_KEY=<your-anon-public-api-key>
+VITE_SUPABASE_URL=https://your-project-id.supabase.co
+VITE_SUPABASE_KEY=eyJ...your-anon-public-key...
 ```
 
-If your project also uses a backend service with Supabase, keep the keys secure and do not commit them.
+### 3. Vercel Deployment
 
-## 3. Allowed Redirect URLs
+In Vercel dashboard → Project Settings → Environment Variables:
 
-For Google sign-in and OAuth callback to work, register each redirect URL in Supabase.
+- `VITE_SUPABASE_URL`: `https://your-project-id.supabase.co`
+- `VITE_SUPABASE_KEY`: `eyJ...your-anon-public-key...`
 
-### Required redirect URLs
+### 4. Configure Redirect URLs
 
-- `http://localhost:5173/auth/callback`
-- `https://globaldoctorplatform.vercel.app/auth/callback`
-- `https://<your-production-domain>/auth/callback`
+In Supabase → Authentication → Settings:
 
-If you have other environments or routes, add them too.
+**Site URL**: `https://globaldoctorplatform.vercel.app`
 
-## 4. Site URL
+**Redirect URLs**:
+```
+https://globaldoctorplatform.vercel.app/auth/callback
+http://localhost:5173/auth/callback
+```
 
-Set the Site URL in Supabase to match your app root, for example:
+### 5. Enable Google OAuth
 
-- `http://localhost:5173`
-- `https://<your-production-domain>`
+In Supabase → Authentication → Providers:
 
-This ensures OAuth flow returns users to the correct origin.
+- Enable Google
+- Add your Google Client ID & Secret
+- Ensure Google Cloud Console has the redirect URI: `https://your-project-id.supabase.co/auth/v1/callback`
 
-## 5. OAuth Provider Setup (Google)
+## Troubleshooting
 
-1. In Supabase, go to `Authentication` > `Providers`.
-2. Enable `Google`.
-3. Provide the required `Client ID` and `Client Secret` from Google Cloud Console.
-4. In the Google Cloud Console OAuth consent screen, add the same redirect URLs.
+- **"Invalid API key"**: Check `VITE_SUPABASE_KEY` is the **anon/public** key (not service_role)
+- **"Session expired"**: Verify redirect URLs match your domain exactly
+- **Google OAuth fails**: Check Google Cloud Console redirect URI matches Supabase callback URL
+
+## Security Notes
+
+- 🔒 Never commit `.env` files to Git
+- 🔒 Only use anon/public keys in frontend code
+- 🔒 Keep service_role keys server-side only
 
 ### Common Google redirect URLs
 
