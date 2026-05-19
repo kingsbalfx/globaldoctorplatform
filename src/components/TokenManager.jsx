@@ -24,7 +24,7 @@ function TokenManager({ patient, onTokensUpdated }) {
       const response = await fetch(`${API_BASE}/api/settings`)
       if (response.ok) {
         const data = await response.json()
-        setMinSubscriptionUSD(data.settings.minimumSubscriptionUSD || 5)
+        setMinSubscriptionUSD(data.settings.minimumSubscriptionUSD || 10)
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error)
@@ -68,7 +68,7 @@ function TokenManager({ patient, onTokensUpdated }) {
       const response = await fetch(`${API_BASE}/api/patients/${patient.id}/tokens/purchase/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amountUSD: purchaseUSD }),
+        body: JSON.stringify({ amountUSD: Math.max(10, Math.round(Number(purchaseUSD) || 10)), email: patient.email, name: patient.name }),
       })
 
       if (!response.ok) {
@@ -84,9 +84,7 @@ function TokenManager({ patient, onTokensUpdated }) {
         checkoutUrl: result.checkout_url,
       })
 
-      if (result.checkout_url) {
-        window.open(result.checkout_url, '_blank', 'noopener,noreferrer')
-      }
+      if (result.checkout_url) window.location.href = result.checkout_url
     } catch (error) {
       alert('Payment failed: ' + error.message)
     } finally {
@@ -125,8 +123,10 @@ function TokenManager({ patient, onTokensUpdated }) {
       const subscriptionData = {
         plan,
         patientId: patient.id,
-        price: plan === 'monthly' ? 500 : plan === 'yearly' ? 5000 : minSubscriptionUSD,
-        tokensIncluded: plan === 'monthly' ? 500 : plan === 'yearly' ? 6000 : 100
+        price: plan === 'monthly' ? 50 : plan === 'yearly' ? 500 : Math.max(10, Math.round(Number(purchaseUSD) || minSubscriptionUSD)),
+        tokensIncluded: plan === 'monthly' ? 500 : plan === 'yearly' ? 6000 : Math.max(10, Math.round(Number(purchaseUSD) || minSubscriptionUSD)) * 10,
+        email: patient.email,
+        name: patient.name,
       }
 
       const response = await fetch(`${API_BASE}/api/subscriptions`, {
@@ -199,8 +199,16 @@ function TokenManager({ patient, onTokensUpdated }) {
         <div className="grid md:grid-cols-3 gap-4">
           <div className="border border-slate-200 rounded-2xl p-4 hover:border-brand-300 transition">
             <h4 className="font-semibold text-slate-900">Pay-per-Use</h4>
-            <p className="text-sm text-slate-600 mt-1">100 tokens</p>
-            <p className="text-lg font-bold text-brand-700 mt-2">${minSubscriptionUSD}</p>
+            <p className="text-sm text-slate-600 mt-1">Choose your amount, minimum $10</p>
+            <input
+              type="number"
+              min="10"
+              step="1"
+              value={purchaseUSD}
+              onChange={(event) => setPurchaseUSD(event.target.value)}
+              className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500"
+            />
+            <p className="text-lg font-bold text-brand-700 mt-2">${Math.max(10, Number(purchaseUSD) || minSubscriptionUSD)}</p>
             <button
               onClick={() => handleSubscribe('payperuse')}
               disabled={loading}
@@ -225,7 +233,7 @@ function TokenManager({ patient, onTokensUpdated }) {
 
           <div className="border border-slate-200 rounded-2xl p-4 hover:border-brand-300 transition">
             <h4 className="font-semibold text-slate-900">Yearly</h4>
-            <p className="text-sm text-slate-600 mt-1">600 tokens/year</p>
+            <p className="text-sm text-slate-600 mt-1">6000 tokens/year</p>
             <p className="text-lg font-bold text-brand-700 mt-2">$500</p>
             <button
               onClick={() => handleSubscribe('yearly')}
@@ -290,18 +298,27 @@ function TokenManager({ patient, onTokensUpdated }) {
                         </button>
                       ))}
                     </div>
+                    <input
+                      type="number"
+                      min="10"
+                      step="1"
+                      value={purchaseUSD}
+                      onChange={(event) => setPurchaseUSD(event.target.value)}
+                      className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
+                      placeholder="Enter custom amount"
+                    />
                   </div>
 
                   <div className="bg-slate-50 rounded-2xl p-4">
                     <div className="flex justify-between items-center">
                       <span className="text-slate-600">You will receive:</span>
                       <span className="font-semibold text-slate-900">
-                        {hasPurchasedBefore ? purchaseUSD * 7.5 : purchaseUSD * 10} tokens
+                        {hasPurchasedBefore ? Math.max(10, Number(purchaseUSD) || 10) * 7.5 : Math.max(10, Number(purchaseUSD) || 10) * 10} tokens
                       </span>
                     </div>
                     <div className="flex justify-between items-center mt-2">
                       <span className="text-slate-600">Price:</span>
-                      <span className="font-semibold text-brand-700">${purchaseUSD.toFixed(2)}</span>
+                      <span className="font-semibold text-brand-700">${Math.max(10, Number(purchaseUSD) || 10).toFixed(2)}</span>
                     </div>
                     <p className="text-[10px] text-slate-400 mt-2 italic">
                       {hasPurchasedBefore ? 'Repurchase rate: $10 = 75 tokens' : 'First-time bonus: $10 = 100 tokens!'}

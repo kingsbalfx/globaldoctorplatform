@@ -35,6 +35,12 @@ function buildFallbackProfile(user, role) {
   }
 }
 
+function hasRequiredProfile(user, role) {
+  const data = user?.user_metadata || {}
+  if (role === 'doctor') return Boolean(data.full_name && data.specialty && data.location && data.license_number)
+  return Boolean(data.full_name && data.date_of_birth && data.phone && data.country)
+}
+
 function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
   const [status, setStatus] = useState('Processing sign-in...')
   const [error, setError] = useState('')
@@ -109,6 +115,23 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         }
 
         const role = params.role === 'doctor' ? 'doctor' : 'patient'
+
+        if (!hasRequiredProfile(user, role)) {
+          const key = role === 'doctor' ? 'gd_pending_doctor_profile' : 'gd_pending_patient_profile'
+          window.localStorage.setItem(
+            key,
+            JSON.stringify({
+              email: user.email,
+              name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0],
+            })
+          )
+          setStatus('Profile needs a few more details before the dashboard opens.')
+          window.setTimeout(() => {
+            if (role === 'doctor') onNavigate?.('doctor-auth')
+            else onPatientNavigate?.()
+          }, 900)
+          return
+        }
 
         setStatus('Preparing dashboard...')
         let response

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Eye, EyeOff } from 'lucide-react'
 import { API_BASE } from '../lib/apiBase'
@@ -20,6 +20,29 @@ function DoctorAuth({ onAuth }) {
   })
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [completingExistingUser, setCompletingExistingUser] = useState(false)
+
+  useEffect(() => {
+    try {
+      const pending = JSON.parse(window.localStorage.getItem('gd_pending_doctor_profile') || 'null')
+      if (!pending?.email) return
+      setCompletingExistingUser(true)
+      setIsLogin(false)
+      setFormData((prev) => ({
+        ...prev,
+        email: pending.email,
+        name: pending.name || prev.name,
+      }))
+      window.localStorage.removeItem('gd_pending_doctor_profile')
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const isDoctorProfileComplete = (user) => {
+    const data = user?.user_metadata || {}
+    return Boolean(data.full_name && data.specialty && data.location && data.license_number)
+  }
 
   const handleGoogleSignIn = async () => {
     if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
@@ -58,7 +81,7 @@ function DoctorAuth({ onAuth }) {
         )
       }
 
-      if (!formData.email || !formData.password) {
+      if (!formData.email || (isLogin && !formData.password)) {
         throw new Error('Please enter your email and password.')
       }
 
@@ -98,26 +121,52 @@ function DoctorAuth({ onAuth }) {
           throw authError
         }
         supabaseUser = authData?.user || null
+        if (!isDoctorProfileComplete(supabaseUser)) {
+          setCompletingExistingUser(true)
+          setIsLogin(false)
+          setFormData((prev) => ({
+            ...prev,
+            name: supabaseUser?.user_metadata?.full_name || prev.name,
+            specialty: supabaseUser?.user_metadata?.specialty || prev.specialty,
+            location: supabaseUser?.user_metadata?.location || prev.location,
+            licenseNumber: supabaseUser?.user_metadata?.license_number || prev.licenseNumber,
+          }))
+          addError('Complete your doctor profile before entering the dashboard.', 'warning', 8000)
+          return
+        }
       } else {
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-          options: {
+        if (completingExistingUser) {
+          const { data: updateData, error: updateError } = await supabase.auth.updateUser({
             data: {
               full_name: formData.name,
               specialty: formData.specialty,
               location: formData.location,
               license_number: formData.licenseNumber,
             },
-          },
-        })
-        if (signUpError) {
-          throw signUpError
+          })
+          if (updateError) throw updateError
+          supabaseUser = updateData?.user || supabaseUser
+        } else {
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email: formData.email,
+            password: formData.password,
+            options: {
+              data: {
+                full_name: formData.name,
+                specialty: formData.specialty,
+                location: formData.location,
+                license_number: formData.licenseNumber,
+              },
+            },
+          })
+          if (signUpError) {
+            throw signUpError
+          }
+          if (!signUpData?.user) {
+            throw new Error('Could not create doctor account. Please try again.')
+          }
+          supabaseUser = signUpData.user
         }
-        if (!signUpData?.user) {
-          throw new Error('Could not create doctor account. Please try again.')
-        }
-        supabaseUser = signUpData.user
 
         endpoint = '/api/doctors/register'
         payload = formData
@@ -132,7 +181,7 @@ function DoctorAuth({ onAuth }) {
         })
       } catch {
         if (supabaseUser) {
-          onAuth({ type: isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
+          onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
           return
         }
         throw new Error('Could not reach the app server. Please check the API URL and internet connection.')
@@ -140,8 +189,8 @@ function DoctorAuth({ onAuth }) {
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
-        if (supabaseUser && response.status === 401) {
-          onAuth({ type: isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
+        if (supabaseUser && [401, 409].includes(response.status)) {
+          onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
           return
         }
         throw new Error(error.error || 'Authentication failed')
@@ -159,7 +208,7 @@ function DoctorAuth({ onAuth }) {
       }
 
       if (result?.doctor) {
-        onAuth({ type: isLogin ? 'login' : 'register', ...result.doctor })
+        onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', ...result.doctor })
         return
       }
 
@@ -217,6 +266,11 @@ function DoctorAuth({ onAuth }) {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {!isLogin && completingExistingUser && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Complete your profile details. Your Supabase session is active, so password is optional here.
+              </div>
+            )}
             {!isLogin && (
               <>
                 <div>
@@ -292,7 +346,7 @@ function DoctorAuth({ onAuth }) {
                   onChange={(e) => handleChange('password', e.target.value)}
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:border-brand-500"
                   autoComplete={isLogin ? 'current-password' : 'new-password'}
-                  required
+                  required={!completingExistingUser}
                 />
                 <button
                   type="button"
@@ -311,7 +365,7 @@ function DoctorAuth({ onAuth }) {
               disabled={loading}
               className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Processing...' : (isLogin ? 'Login' : 'Register')}
+              {loading ? 'Processing...' : (isLogin ? 'Login' : completingExistingUser ? 'Complete Profile' : 'Register')}
             </button>
           </form>
 

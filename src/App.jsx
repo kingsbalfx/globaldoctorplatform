@@ -5,6 +5,7 @@ import PatientDashboard from './pages/PatientDashboard'
 import PlatformAdminDashboard from './pages/PlatformAdminDashboard'
 import FacilityPortal from './pages/FacilityPortal'
 import AuthCallback from './pages/AuthCallback'
+import PaymentSuccess from './pages/PaymentSuccess'
 import DoctorAuth from './components/DoctorAuth'
 import TermsOfService from './pages/TermsOfService'
 import PrivacyPolicy from './pages/PrivacyPolicy'
@@ -22,6 +23,7 @@ function viewFromPath(pathname) {
   if (path.startsWith('/facility')) return 'facility'
   if (path.startsWith('/platform-admin')) return 'platform-admin'
   if (path.startsWith('/auth/callback')) return 'auth-callback'
+  if (path.startsWith('/payment-success')) return 'payment-success'
   if (path.startsWith('/terms')) return 'terms'
   if (path.startsWith('/privacy')) return 'privacy'
   if (path.startsWith('/contact')) return 'contact'
@@ -42,6 +44,8 @@ function pathFromView(view) {
       return '/doctor/dashboard'
     case 'auth-callback':
       return '/auth/callback'
+    case 'payment-success':
+      return '/payment-success'
     case 'terms':
       return '/terms'
     case 'privacy':
@@ -186,6 +190,7 @@ function App() {
       {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
       {currentView === 'facility' && <FacilityPortal />}
       {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
+      {currentView === 'payment-success' && <PaymentSuccess onNavigate={navigate} />}
       {currentView === 'terms' && <TermsOfService onNavigate={navigate} />}
       {currentView === 'privacy' && <PrivacyPolicy onNavigate={navigate} />}
       {currentView === 'contact' && <Contact onNavigate={navigate} />}

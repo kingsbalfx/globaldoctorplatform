@@ -9,6 +9,7 @@ import AdminSettings from '../components/AdminSettings'
 import PatientRecordReview from '../components/PatientRecordReview'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import ManualDownload from '../components/ManualDownload'
+import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { API_BASE } from '../lib/apiBase'
 
@@ -107,7 +108,7 @@ function AdminDashboard({ doctor, onLogout }) {
       <div className="rounded-3xl px-8 py-10 text-white shadow-xl shadow-brand-700/20 mb-8" style={adminHeaderStyle}>
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-4xl font-bold">Admin Portal</h2>
+            <h2 className="text-4xl font-bold">Doctor Dashboard</h2>
             <p className="text-brand-100 mt-2">Welcome back, Dr. {doctor.name}</p>
             <p className="mt-2 inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-sm font-semibold text-white">
               {adminSpecialtyInfo.logo} {adminSpecialty}
@@ -125,16 +126,17 @@ function AdminDashboard({ doctor, onLogout }) {
       {/* Navigation Tabs */}
       <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
         {[
-          { id: 'overview', label: 'Overview', icon: 'ðŸ“Š' },
-          { id: 'doctors', label: 'Doctors', icon: 'ðŸ‘¨â€âš•ï¸' },
-          { id: 'reviews', label: 'Reviews', icon: 'â­' },
-          { id: 'referrals', label: 'Referrals', icon: 'ðŸ”„' },
-          { id: 'patients', label: 'Patients', icon: '🗂️' },
-          { id: 'settings', label: 'Settings', icon: 'âš™ï¸' },
-          { id: 'files', label: 'Files', icon: 'ðŸ“Ž' },
-          { id: 'wallet', label: 'Financials', icon: 'ðŸ’°' },
-          { id: 'manuals', label: 'Manuals & Guides', icon: '📘' },
-          { id: 'notifications', label: 'Notifications', icon: 'ðŸ””' },
+          { id: 'overview', label: 'Overview', icon: 'Stats' },
+          { id: 'community', label: 'Community', icon: 'Chat' },
+          { id: 'doctors', label: 'Doctors', icon: 'Care' },
+          { id: 'reviews', label: 'Reviews', icon: 'Star' },
+          { id: 'referrals', label: 'Referrals', icon: 'Flow' },
+          { id: 'patients', label: 'Patients', icon: 'Records' },
+          { id: 'settings', label: 'Settings', icon: 'Config' },
+          { id: 'files', label: 'Files', icon: 'Files' },
+          { id: 'wallet', label: 'Financials', icon: 'Wallet' },
+          { id: 'manuals', label: 'Manuals & Guides', icon: 'Guides' },
+          { id: 'notifications', label: 'Notifications', icon: 'Alerts' },
         ].map(tab => (
           <button
             key={tab.id}
@@ -145,7 +147,7 @@ function AdminDashboard({ doctor, onLogout }) {
                 : 'bg-white text-slate-700 border border-slate-200 hover:border-brand-300'
             }`}
           >
-            {tab.icon} {tab.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -376,6 +378,17 @@ function AdminDashboard({ doctor, onLogout }) {
       )}
 
       {activeTab === 'manuals' && <ManualDownload userType="doctor" />}
+
+      {activeTab === 'community' && (
+        <DoctorCommunityChat
+          sender={{
+            id: doctor.id,
+            name: doctor.name,
+            type: 'doctor',
+            phone: doctor.phone,
+          }}
+        />
+      )}
 
       {/* Doctors Tab */}
       {activeTab === 'doctors' && <DoctorManagement />}

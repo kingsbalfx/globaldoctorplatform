@@ -95,8 +95,9 @@ function LandingPage() {
         location.includes(normalizedQuery) ||
         doctorSpecialty.toLowerCase().includes(normalizedQuery)
 
-      const matchesSpecialty = specialty === '' || doctorSpecialty === specialty
-      const matchesLanguage = language === '' || doctorLanguages.includes(language)
+      const matchesSpecialty = specialty === '' || doctorSpecialty.toLowerCase() === specialty.toLowerCase()
+      const matchesLanguage =
+        language === '' || doctorLanguages.some((item) => String(item).toLowerCase() === language.toLowerCase())
       const matchesRating = doctorRating >= minRating
       const matchesAvailability = normalizedAvailability === '' || doctorAvailability.includes(normalizedAvailability)
 

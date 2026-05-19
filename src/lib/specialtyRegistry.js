@@ -1,118 +1,118 @@
-// Specialty-based design system with icons, colors, and logos
 export const specialtyRegistry = {
   cardiology: {
     name: 'Cardiology',
-    color: '#E74C3C',
-    bgColor: '#FADBD8',
-    icon: '❤️',
-    logo: '🫀',
-    description: 'Heart & Cardiovascular Health',
-    gradient: 'from-red-500 to-rose-600',
+    color: '#DC2626',
+    bgColor: '#FEE2E2',
+    icon: 'CARD',
+    logo: 'CARD',
+    description: 'Heart and cardiovascular care',
+    gradient: 'from-red-600 to-rose-600',
   },
   dermatology: {
     name: 'Dermatology',
-    color: '#E67E22',
-    bgColor: '#FDEBD0',
-    icon: '🧴',
-    logo: '💆',
-    description: 'Skin & Beauty Care',
-    gradient: 'from-orange-500 to-yellow-500',
+    color: '#EA580C',
+    bgColor: '#FFEDD5',
+    icon: 'DERM',
+    logo: 'DERM',
+    description: 'Skin, hair, and nail care',
+    gradient: 'from-orange-600 to-amber-500',
   },
   psychiatry: {
     name: 'Psychiatry',
-    color: '#8E44AD',
-    bgColor: '#EBDEF0',
-    icon: '🧠',
-    logo: '💭',
-    description: 'Mental Health & Wellness',
-    gradient: 'from-purple-500 to-indigo-600',
+    color: '#7C3AED',
+    bgColor: '#EDE9FE',
+    icon: 'PSY',
+    logo: 'PSY',
+    description: 'Mental health and wellness',
+    gradient: 'from-violet-600 to-indigo-600',
   },
   pediatrics: {
     name: 'Pediatrics',
-    color: '#3498DB',
-    bgColor: '#D6EAF8',
-    icon: '👶',
-    logo: '🧸',
-    description: 'Children & Family Care',
-    gradient: 'from-blue-400 to-cyan-500',
+    color: '#0284C7',
+    bgColor: '#E0F2FE',
+    icon: 'PED',
+    logo: 'PED',
+    description: 'Children and family care',
+    gradient: 'from-sky-600 to-cyan-500',
   },
   oncology: {
     name: 'Oncology',
-    color: '#27AE60',
-    bgColor: '#D5F4E6',
-    icon: '🔬',
-    logo: '🧬',
-    description: 'Cancer & Tumor Research',
-    gradient: 'from-green-500 to-teal-600',
+    color: '#059669',
+    bgColor: '#D1FAE5',
+    icon: 'ONC',
+    logo: 'ONC',
+    description: 'Cancer care and tumor review',
+    gradient: 'from-emerald-600 to-teal-600',
   },
   orthopedics: {
     name: 'Orthopedics',
-    color: '#34495E',
-    bgColor: '#D5DBDB',
-    icon: '🦴',
-    logo: '🦵',
-    description: 'Bone & Joint Care',
+    color: '#475569',
+    bgColor: '#E2E8F0',
+    icon: 'ORTH',
+    logo: 'ORTH',
+    description: 'Bone, joint, and mobility care',
     gradient: 'from-slate-600 to-slate-700',
   },
   neurology: {
     name: 'Neurology',
-    color: '#F39C12',
-    bgColor: '#FCF3CF',
-    icon: '🧪',
-    logo: '⚡',
-    description: 'Nerve & Brain Health',
-    gradient: 'from-amber-500 to-orange-600',
+    color: '#D97706',
+    bgColor: '#FEF3C7',
+    icon: 'NEU',
+    logo: 'NEU',
+    description: 'Brain, nerve, and spine care',
+    gradient: 'from-amber-600 to-orange-600',
+  },
+  urology: {
+    name: 'Urology',
+    color: '#2563EB',
+    bgColor: '#DBEAFE',
+    icon: 'URO',
+    logo: 'URO',
+    description: 'Urinary and male reproductive care',
+    gradient: 'from-blue-600 to-cyan-600',
   },
   obstetrics: {
     name: 'Obstetrics & Gynecology',
-    color: '#E91E63',
-    bgColor: '#FCE4EC',
-    icon: '🤰',
-    logo: '👩‍🤰',
-    description: 'Women & Maternal Health',
-    gradient: 'from-pink-500 to-rose-500',
+    color: '#DB2777',
+    bgColor: '#FCE7F3',
+    icon: 'OBG',
+    logo: 'OBG',
+    description: 'Women and maternal health',
+    gradient: 'from-pink-600 to-rose-500',
   },
   ophthalmology: {
     name: 'Ophthalmology',
-    color: '#1E90FF',
-    bgColor: '#EBF5FB',
-    icon: '👁️',
-    logo: '🔭',
-    description: 'Eye & Vision Care',
-    gradient: 'from-blue-600 to-indigo-500',
+    color: '#1D4ED8',
+    bgColor: '#DBEAFE',
+    icon: 'EYE',
+    logo: 'EYE',
+    description: 'Eye and vision care',
+    gradient: 'from-blue-700 to-indigo-500',
   },
   general: {
     name: 'General Practitioner',
-    color: '#16A085',
-    bgColor: '#D1F2EB',
-    icon: '⚕️',
-    logo: '🏥',
-    description: 'General Health Care',
-    gradient: 'from-teal-500 to-green-600',
+    color: '#0F766E',
+    bgColor: '#CCFBF1',
+    icon: 'GEN',
+    logo: 'GEN',
+    description: 'General medical care',
+    gradient: 'from-teal-600 to-emerald-600',
   },
 }
 
 export const getSpecialtyInfo = (specialty) => {
-  const normalized = specialty?.toLowerCase().replace(/\s+/g, '') || 'general'
+  const normalized = String(specialty || 'general')
+    .toLowerCase()
+    .replace(/&/g, '')
+    .replace(/[^a-z]/g, '')
+
+  if (normalized.includes('general')) return specialtyRegistry.general
+  if (normalized.includes('obgyn') || normalized.includes('obstetrics') || normalized.includes('gynecology')) return specialtyRegistry.obstetrics
   return specialtyRegistry[normalized] || specialtyRegistry.general
 }
 
-export const getSpecialtyColor = (specialty) => {
-  return getSpecialtyInfo(specialty).color
-}
-
-export const getSpecialtyBg = (specialty) => {
-  return getSpecialtyInfo(specialty).bgColor
-}
-
-export const getSpecialtyGradient = (specialty) => {
-  return getSpecialtyInfo(specialty).gradient
-}
-
-export const getSpecialtyLogo = (specialty) => {
-  return getSpecialtyInfo(specialty).logo
-}
-
-export const getSpecialtyIcon = (specialty) => {
-  return getSpecialtyInfo(specialty).icon
-}
+export const getSpecialtyColor = (specialty) => getSpecialtyInfo(specialty).color
+export const getSpecialtyBg = (specialty) => getSpecialtyInfo(specialty).bgColor
+export const getSpecialtyGradient = (specialty) => getSpecialtyInfo(specialty).gradient
+export const getSpecialtyLogo = (specialty) => getSpecialtyInfo(specialty).logo
+export const getSpecialtyIcon = (specialty) => getSpecialtyInfo(specialty).icon

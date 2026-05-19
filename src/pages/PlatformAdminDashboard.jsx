@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_BASE } from '../lib/apiBase'
+import DoctorCommunityChat from '../components/DoctorCommunityChat'
 
 const AUDIENCES = [
   { id: 'landing', label: 'Landing Page' },
@@ -17,7 +18,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const credentials = adminSession?.credentials || null
   const admin = adminSession?.admin || null
 
-  const [activeSection, setActiveSection] = useState('broadcasts') // broadcasts | facilities | audit
+  const [activeSection, setActiveSection] = useState('broadcasts') // broadcasts | facilities | community | audit
 
   const [selectedAudience, setSelectedAudience] = useState('landing')
   const [severity, setSeverity] = useState('info')
@@ -294,6 +295,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
         {[
           { id: 'broadcasts', label: 'Broadcasts' },
           { id: 'facilities', label: 'Facilities' },
+          { id: 'community', label: 'Doctor Community' },
           { id: 'audit', label: 'Audit Logs' },
         ].map((tab) => (
           <button
@@ -684,9 +686,19 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
           )}
         </div>
       )}
+
+      {activeSection === 'community' && (
+        <DoctorCommunityChat
+          sender={{
+            id: admin.email,
+            name: admin.name || 'Platform Admin',
+            type: 'admin',
+            phone: '',
+          }}
+        />
+      )}
     </section>
   )
 }
 
 export default PlatformAdminDashboard
-

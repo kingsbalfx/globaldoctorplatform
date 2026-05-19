@@ -91,6 +91,7 @@ const auditLogs = [] // Audit trail for all money/critical ops
 let platformBalanceNgn = 0
 let dataFundBalanceNgn = 0
 const chatMessages = []
+const communityMessages = []
 const appointmentReminders = []
 const emergencyRequests = []
 const serverSettings = {
@@ -279,6 +280,76 @@ function getPatientTokenRecord(patientId) {
     patientTokens.push(tokenRecord)
   }
   return tokenRecord
+}
+
+function getOrCreatePatientProfile(patientId, seed = {}) {
+  let patient = patients.find((p) => p.id === patientId)
+  if (!patient) {
+    patient = {
+      id: patientId,
+      email: seed.email || null,
+      password: null,
+      portal_pin: null,
+      name: seed.name || seed.email || 'Patient',
+      dateOfBirth: seed.dateOfBirth || null,
+      phone: seed.phone || null,
+      country: seed.country || 'NG',
+      language: seed.language || 'English',
+      tokens: 0,
+      isOnline: true,
+      registered_via: seed.registered_via || 'supabase',
+      facility_id: null,
+      facility_type: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    patients.push(patient)
+  }
+  getPatientTokenRecord(patientId)
+  return patient
+}
+
+function getOrCreateDoctorProfile(doctorId, seed = {}) {
+  let doctor = resolveDoctor(doctorId)
+  if (!doctor) {
+    doctor = {
+      id: doctorId,
+      email: seed.email || null,
+      password: null,
+      name: seed.name || seed.email || 'Doctor',
+      specialty: seed.specialty || 'General Practitioner',
+      location: seed.location || '',
+      languages: seed.languages || ['English'],
+      rating: 4.8,
+      availability: 'Available now',
+      verified: false,
+      isOnline: true,
+      fee: 35,
+      price: { basic: 50, premium: 100 },
+      licenseNumber: seed.licenseNumber || '',
+      phone: seed.phone || '',
+      earningsTokens: 0,
+      registered_via: seed.registered_via || 'supabase',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    doctorsAuth.push(doctor)
+    doctors.push({
+      id: doctor.id,
+      name: doctor.name,
+      specialty: doctor.specialty,
+      location: doctor.location,
+      languages: doctor.languages,
+      rating: doctor.rating,
+      availability: doctor.availability,
+      verified: doctor.verified,
+      isOnline: doctor.isOnline,
+      fee: doctor.fee,
+      price: doctor.price,
+      licenseVerified: false,
+    })
+  }
+  return doctor
 }
 
 function hasPatientPurchasedTokens(patientId) {
@@ -953,7 +1024,7 @@ app.get('/api/video/token', (req, res) => {
 app.post('/api/doctors/register', (req, res) => {
   const { email, password, name, specialty, location, licenseNumber } = req.body
 
-  if (!email || !password || !name || !specialty || !location || !licenseNumber) {
+  if (!email || !name || !specialty || !location || !licenseNumber) {
     return res.status(400).json({ error: 'All fields are required' })
   }
 
@@ -968,7 +1039,7 @@ app.post('/api/doctors/register', (req, res) => {
   const newDoctor = {
     id: `doc-${doctorsAuth.length + 1}`,
     email,
-    password, // In production, hash this!
+    password: password || null,
     name,
     specialty,
     location,
@@ -1137,7 +1208,7 @@ app.post('/api/auth/oauth/bridge', (req, res) => {
 app.post('/api/patients/register', (req, res) => {
   const { email, password, name, dateOfBirth, phone, country, language } = req.body
 
-  if (!email || !password || !name || !dateOfBirth || !phone || !country) {
+  if (!email || !name || !dateOfBirth || !phone || !country) {
     return res.status(400).json({ error: 'All required fields must be provided' })
   }
 
@@ -1150,7 +1221,7 @@ app.post('/api/patients/register', (req, res) => {
   const newPatient = {
     id: `patient-${patients.length + 1}`,
     email,
-    password, // In production, hash this!
+    password: password || null,
     name,
     dateOfBirth,
     phone,
@@ -1370,8 +1441,10 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   const { patientId } = req.params
   const amountUSD = safeNumber(req.body?.amountUSD)
 
-  const patient = patients.find(p => p.id === patientId)
-  if (!patient) return res.status(404).json({ error: 'Patient not found' })
+  const patient = getOrCreatePatientProfile(patientId, {
+    email: req.body?.email ? String(req.body.email).trim() : null,
+    name: req.body?.name ? String(req.body.name).trim() : null,
+  })
 
   if (amountUSD === null || amountUSD < serverSettings.patientMinimumDepositUSD) {
     return res.status(400).json({ error: `Minimum deposit is $${serverSettings.patientMinimumDepositUSD}` })
@@ -1499,8 +1572,10 @@ app.patch('/api/doctors/:doctorId/payout-details', (req, res) => {
 
 app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   const { doctorId } = req.params
-  const doctor = resolveDoctor(doctorId)
-  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+  const doctor = getOrCreateDoctorProfile(doctorId, {
+    email: req.body?.email ? String(req.body.email).trim() : null,
+    name: req.body?.name ? String(req.body.name).trim() : null,
+  })
 
   const availableTokens = safeNumber(doctor.earningsTokens ?? 0) ?? 0
   const requestedTokens = req.body?.tokens === undefined ? null : safeNumber(req.body.tokens)
@@ -1710,6 +1785,15 @@ app.post('/api/subscriptions', (req, res) => {
     return res.status(400).json({ error: 'Missing subscription details' })
   }
 
+  if (Number(price) < serverSettings.minimumSubscriptionUSD) {
+    return res.status(400).json({ error: `Minimum subscription is $${serverSettings.minimumSubscriptionUSD}` })
+  }
+
+  getOrCreatePatientProfile(patientId, {
+    email: req.body?.email ? String(req.body.email).trim() : null,
+    name: req.body?.name ? String(req.body.name).trim() : null,
+  })
+
   // Check if patient already has an active subscription
   const existingSubscription = subscriptions.find(s => s.patientId === patientId && s.status === 'active')
   if (existingSubscription) {
@@ -1762,6 +1846,34 @@ app.get('/api/online/status', (req, res) => {
   const onlineDoctors = doctors.filter((doctor) => doctor.isOnline)
   const onlinePatients = patients.filter((patient) => patient.isOnline)
   res.json({ doctors: onlineDoctors, patients: onlinePatients, emergencyRequests })
+})
+
+app.get('/api/doctors/community/messages', (req, res) => {
+  res.json({ messages: communityMessages.slice(-200) })
+})
+
+app.post('/api/doctors/community/messages', (req, res) => {
+  const senderId = String(req.body?.senderId || '').trim()
+  const senderName = String(req.body?.senderName || '').trim()
+  const senderType = String(req.body?.senderType || 'doctor').trim().toLowerCase()
+  const phone = String(req.body?.phone || '').trim()
+  const message = String(req.body?.message || '').trim()
+
+  if (!senderId || !senderName || !message) {
+    return res.status(400).json({ error: 'senderId, senderName and message are required' })
+  }
+
+  const item = {
+    id: `community-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+    senderId,
+    senderName,
+    senderType: senderType === 'admin' ? 'admin' : 'doctor',
+    phone: phone || null,
+    message,
+    createdAt: new Date().toISOString(),
+  }
+  communityMessages.push(item)
+  res.status(201).json({ message: item })
 })
 
 app.post('/api/emergency/call', (req, res) => {
