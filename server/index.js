@@ -1047,6 +1047,14 @@ app.post('/api/auth/oauth/bridge', (req, res) => {
   if (!email) return res.status(400).json({ error: 'email is required' })
   if (!['patient', 'doctor'].includes(role)) return res.status(400).json({ error: 'role must be patient or doctor' })
 
+  const admin = admins.find((item) => item.email.toLowerCase() === email)
+  if (admin && role === 'doctor') {
+    return res.json({
+      admin: { email: admin.email, name: admin.name, role: 'admin' },
+      message: 'Admin OAuth login successful',
+    })
+  }
+
   if (role === 'patient') {
     let patient = patients.find((p) => (p.email || '').toLowerCase() === email) || null
     if (!patient) {

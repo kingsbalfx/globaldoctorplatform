@@ -47,22 +47,22 @@ function PrivacyPolicy({ onNavigate }) {
             <div className="bg-green-50 border-l-4 border-green-400 p-4 mb-8">
               <p className="text-green-800 font-medium">Your Privacy Matters</p>
               <p className="text-green-800">
-                At GlobalDoc Connect, we are committed to protecting your personal and medical information. This Privacy Policy explains how we collect, use, and safeguard your data.
+                At GlobalDoc Connect, our commitment is protecting your personal and medical information. This Privacy Policy explains how our platform collects, uses, and safeguards your data.
               </p>
             </div>
 
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">1. Introduction</h2>
               <p className="text-slate-700 mb-4">
-                GlobalDoc Connect ("we," "us," or "our") operates a telehealth platform that connects patients with healthcare professionals worldwide. We are committed to protecting your privacy and ensuring the security of your personal and medical information.
+                GlobalDoc Connect ("our") operates a telehealth platform that connects patients with healthcare professionals worldwide. Our commitment is protecting your privacy and ensuring the security of your personal and medical information.
               </p>
               <p className="text-slate-700 mb-4">
-                This Privacy Policy describes what information we collect, how we use it, and the choices you have regarding your information. By using our platform, you consent to the collection and use of information as described in this policy.
+                This Privacy Policy describes what information our platform collects, how our platform uses it, and the choices you have regarding your information. By using our platform, you consent to the collection and use of information as described in this policy.
               </p>
             </section>
 
             <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">2. Information We Collect</h2>
+              <h2 className="text-2xl font-semibold text-slate-900 mb-4">2. Information Our Platform Collects</h2>
 
               <h3 className="text-xl font-medium text-slate-800 mb-3">Personal Information:</h3>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
@@ -92,7 +92,7 @@ function PrivacyPolicy({ onNavigate }) {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">3. How We Use Your Information</h2>
+              <h2 className="text-2xl font-semibold text-slate-900 mb-4">3. How Our Platform Uses Your Information</h2>
 
               <h3 className="text-xl font-medium text-slate-800 mb-3">Providing Healthcare Services:</h3>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
@@ -124,7 +124,7 @@ function PrivacyPolicy({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">4. Information Sharing and Disclosure</h2>
               <p className="text-slate-700 mb-4">
-                We take your privacy seriously and only share your information in limited circumstances:
+                Our platform takes your privacy seriously and only shares your information in limited circumstances:
               </p>
 
               <h3 className="text-xl font-medium text-slate-800 mb-3">With Healthcare Professionals:</h3>
@@ -156,7 +156,7 @@ function PrivacyPolicy({ onNavigate }) {
               <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
                 <p className="text-blue-800 font-medium">Bank-Level Security</p>
                 <p className="text-blue-800">
-                  We use industry-leading security measures to protect your information, including end-to-end encryption for all medical consultations.
+                  Our platform uses industry-leading security measures to protect your information, including end-to-end encryption for all medical consultations.
                 </p>
               </div>
 
@@ -182,7 +182,7 @@ function PrivacyPolicy({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">6. International Data Transfers</h2>
               <p className="text-slate-700 mb-4">
-                As a global telehealth platform, we may transfer your information to countries other than your own. We ensure that such transfers comply with applicable data protection laws.
+                As a global telehealth platform, our service may transfer your information to countries other than your own. Our safeguards ensure that such transfers comply with applicable data protection laws.
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>Data is transferred only to countries with adequate privacy protections</li>
@@ -195,13 +195,13 @@ function PrivacyPolicy({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">7. Cookies and Tracking Technologies</h2>
               <p className="text-slate-700 mb-4">
-                We use cookies and similar technologies to improve your experience and analyze platform usage.
+                Our platform uses cookies and similar technologies to improve your experience and analyze platform usage.
               </p>
 
               <h3 className="text-xl font-medium text-slate-800 mb-3">Types of Cookies:</h3>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li><strong>Essential Cookies:</strong> Required for platform functionality</li>
-                <li><strong>Analytics Cookies:</strong> Help us understand usage patterns</li>
+                <li><strong>Analytics Cookies:</strong> Help our team understand usage patterns</li>
                 <li><strong>Preference Cookies:</strong> Remember your settings and preferences</li>
                 <li><strong>Marketing Cookies:</strong> Used for targeted communications (with consent)</li>
               </ul>
@@ -223,7 +223,7 @@ function PrivacyPolicy({ onNavigate }) {
                 <li><strong>Correction:</strong> Update inaccurate or incomplete information</li>
                 <li><strong>Deletion:</strong> Request deletion of your personal information</li>
                 <li><strong>Portability:</strong> Receive your data in a structured format</li>
-                <li><strong>Restriction:</strong> Limit how we process your information</li>
+                <li><strong>Restriction:</strong> Limit how our platform processes your information</li>
                 <li><strong>Objection:</strong> Object to processing based on legitimate interests</li>
               </ul>
 
@@ -239,7 +239,7 @@ function PrivacyPolicy({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">9. Data Retention</h2>
               <p className="text-slate-700 mb-4">
-                We retain your information only as long as necessary for the purposes described in this policy:
+                Our platform retains your information only as long as necessary for the purposes described in this policy:
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li><strong>Medical Records:</strong> Retained for minimum 7 years or as required by law</li>
@@ -255,12 +255,12 @@ function PrivacyPolicy({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">10. Children's Privacy</h2>
               <p className="text-slate-700 mb-4">
-                Our services are not intended for children under 18 without parental consent. We do not knowingly collect personal information from children under 13.
+                Our services are not intended for children under 18 without parental consent. Our platform does not knowingly collect personal information from children under 13.
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>Parental consent is required for users under 18</li>
                 <li>Parents can review and request deletion of their child's information</li>
-                <li>We comply with COPPA and similar children's privacy laws</li>
+                <li>Our platform complies with COPPA and similar children's privacy laws</li>
               </ul>
             </section>
 
@@ -280,18 +280,18 @@ function PrivacyPolicy({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">12. Changes to This Policy</h2>
               <p className="text-slate-700 mb-4">
-                We may update this Privacy Policy periodically to reflect changes in our practices or legal requirements.
+                Our team may update this Privacy Policy periodically to reflect changes in our practices or legal requirements.
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>Material changes will be notified via email or platform notification</li>
                 <li>Continued use constitutes acceptance of updated policy</li>
                 <li>Previous versions remain accessible for reference</li>
-                <li>We encourage regular review of this policy</li>
+                <li>Our team encourages regular review of this policy</li>
               </ul>
             </section>
 
             <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">13. Contact Us</h2>
+              <h2 className="text-2xl font-semibold text-slate-900 mb-4">13. Contact Our Team</h2>
               <p className="text-slate-700 mb-4">
                 If you have questions about this Privacy Policy or our data practices:
               </p>
@@ -310,7 +310,7 @@ function PrivacyPolicy({ onNavigate }) {
                 </div>
                 <div className="mt-4 pt-4 border-t border-slate-200">
                   <p className="text-slate-600 text-sm">
-                    For urgent privacy concerns or data breaches, contact us immediately. We take all privacy matters seriously and respond promptly to protect your rights.
+                    For urgent privacy concerns or data breaches, contact our team immediately. Our team takes all privacy matters seriously and responds promptly to protect your rights.
                   </p>
                 </div>
               </div>
@@ -319,7 +319,7 @@ function PrivacyPolicy({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">14. Compliance and Certifications</h2>
               <p className="text-slate-700 mb-4">
-                We maintain compliance with international privacy standards:
+                Our platform maintains compliance with international privacy standards:
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>HIPAA compliant for healthcare data in the United States</li>
@@ -331,12 +331,12 @@ function PrivacyPolicy({ onNavigate }) {
             </section>
 
             <div className="bg-green-50 border-l-4 border-green-400 p-6 mt-8">
-              <h3 className="text-lg font-semibold text-green-900 mb-2">Your Trust is Important to Us</h3>
+              <h3 className="text-lg font-semibold text-green-900 mb-2">Your Trust is Important to Our Team</h3>
               <p className="text-green-800">
-                We are committed to maintaining the highest standards of privacy and security for your healthcare information. Your trust enables us to provide quality telehealth services worldwide.
+                Our team is committed to maintaining the highest standards of privacy and security for your healthcare information. Your trust enables our platform to provide quality telehealth services worldwide.
               </p>
               <p className="text-green-800 mt-2">
-                If you ever have concerns about your privacy or data security, please don't hesitate to contact us. We're here to help and ensure your information remains protected.
+                If you ever have concerns about your privacy or data security, please contact our team. Our support is here to help and ensure your information remains protected.
               </p>
             </div>
           </div>

@@ -47,10 +47,10 @@ function TermsOfService({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">1. Introduction</h2>
               <p className="text-slate-700 mb-4">
-                Welcome to GlobalDoc Connect ("we," "us," or "our"). These Terms of Service ("Terms") govern your use of our telehealth platform that connects patients with healthcare professionals worldwide. By accessing or using our services, you agree to be bound by these Terms.
+                Welcome to GlobalDoc Connect ("our"). These Terms of Service ("Terms") govern your use of our telehealth platform that connects patients with healthcare professionals worldwide. By accessing or using our services, you agree to be bound by these Terms.
               </p>
               <p className="text-slate-700 mb-4">
-                Our platform provides secure video consultations, emergency medical support, appointment scheduling, payment processing, and related healthcare services. We are committed to maintaining the highest standards of medical care, privacy, and security.
+                Our platform provides secure video consultations, emergency medical support, appointment scheduling, payment processing, and related healthcare services. Our team is committed to maintaining the highest standards of medical care, privacy, and security.
               </p>
             </section>
 
@@ -145,7 +145,7 @@ function TermsOfService({ onNavigate }) {
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>All consultations use end-to-end encryption</li>
                 <li>Medical records are stored securely and access is restricted</li>
-                <li>We comply with HIPAA and international privacy regulations</li>
+                <li>Our platform complies with HIPAA and international privacy regulations</li>
                 <li>You control access to your medical information</li>
               </ul>
             </section>
@@ -196,7 +196,7 @@ function TermsOfService({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">10. Account Termination</h2>
               <p className="text-slate-700 mb-4">
-                We reserve the right to suspend or terminate accounts that violate these Terms or engage in harmful behavior. Termination may result in loss of access to medical records and services.
+                Our platform reserves the right to suspend or terminate accounts that violate these Terms or engage in harmful behavior. Termination may result in loss of access to medical records and services.
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>Immediate termination for serious violations</li>
@@ -209,10 +209,10 @@ function TermsOfService({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">11. Limitation of Liability</h2>
               <p className="text-slate-700 mb-4">
-                While we strive to provide reliable telehealth services, healthcare involves inherent risks. Our liability is limited to the amount paid for services in the preceding 12 months.
+                While our platform strives to provide reliable telehealth services, healthcare involves inherent risks. Our liability is limited to the amount paid for services in the preceding 12 months.
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>We are not liable for medical outcomes or treatment effectiveness</li>
+                <li>Our platform is not liable for medical outcomes or treatment effectiveness</li>
                 <li>Platform availability is provided "as is" without warranties</li>
                 <li>Users assume responsibility for technology requirements</li>
                 <li>Disputes between patients and healthcare professionals are handled separately</li>
@@ -222,7 +222,7 @@ function TermsOfService({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">12. Dispute Resolution</h2>
               <p className="text-slate-700 mb-4">
-                We encourage users to resolve disputes amicably. For unresolved issues:
+                Our team encourages users to resolve disputes amicably. For unresolved issues:
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>Contact support at globaldoctorconnect@gmail.com</li>
@@ -235,7 +235,7 @@ function TermsOfService({ onNavigate }) {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold text-slate-900 mb-4">13. Updates to Terms</h2>
               <p className="text-slate-700 mb-4">
-                We may update these Terms periodically to reflect changes in our services or legal requirements. Users will be notified of significant changes via email or platform notifications.
+                Our team may update these Terms periodically to reflect changes in our services or legal requirements. Users will be notified of significant changes via email or platform notifications.
               </p>
               <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
                 <li>Continued use constitutes acceptance of updated Terms</li>
@@ -269,7 +269,7 @@ function TermsOfService({ onNavigate }) {
                 By using GlobalDoc Connect, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use our platform.
               </p>
               <p className="text-blue-800 mt-2">
-                Remember: Your health and privacy are our top priorities. We're here to connect you with quality healthcare professionals worldwide.
+                Remember: Your health and privacy are our top priorities. Our platform connects you with quality healthcare professionals worldwide.
               </p>
             </div>
           </div>

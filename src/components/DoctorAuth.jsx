@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { API_BASE } from '../lib/apiBase'
+import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
 
@@ -24,10 +25,10 @@ function DoctorAuth({ onAuth }) {
       return
     }
 
-    const redirectTo = `${window.location.origin}/auth/callback?role=doctor&next=${encodeURIComponent('/doctor/dashboard')}`
+    const redirectTo = buildOAuthRedirectUrl({ role: 'doctor', next: '/doctor/dashboard' })
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo },
+      options: { redirectTo, queryParams: { prompt: 'select_account' } },
     })
     if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
@@ -54,6 +55,22 @@ function DoctorAuth({ onAuth }) {
       }
 
       if (isLogin) {
+        const localResponse = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const localResult = await localResponse.json().catch(() => ({}))
+
+        if (localResponse.ok && localResult?.admin) {
+          onAuth({
+            type: 'admin-login',
+            admin: localResult.admin,
+            credentials: { email: formData.email, password: formData.password },
+          })
+          return
+        }
+
         const { error: authError } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,

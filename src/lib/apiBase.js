@@ -22,6 +22,13 @@ function normalizeApiBase(rawValue) {
 
 let apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE)
 
+if (!apiBase && typeof window !== 'undefined') {
+  const protocol = window.location?.protocol || ''
+  if (protocol === 'capacitor:' || protocol === 'ionic:') {
+    apiBase = 'https://globaldoctorplatform.vercel.app'
+  }
+}
+
 if (!import.meta.env.PROD && !apiBase) {
   apiBase = 'http://localhost:4000'
 }

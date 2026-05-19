@@ -38,13 +38,14 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
       }
 
       try {
-        if (supabase.auth.getSessionFromUrl) {
+        const isOAuthCallback = url.searchParams.has('code')
+
+        if (isOAuthCallback) {
           setStatus('Finalizing OAuth session...')
-          const { data: sessionData, error: sessionError } = await supabase.auth.getSessionFromUrl({
-            storeSession: true,
-          })
+          const { data: sessionData, error: sessionError } = await supabase.auth.exchangeCodeForSession(params.code)
+
           if (sessionError) {
-            if (sessionError.message?.includes('PKCE code verifier not found')) {
+            if (sessionError.message?.toLowerCase().includes('pkce code verifier not found')) {
               setError('Authentication session expired. Please sign in again from the same browser.')
               setStatus('')
               return
@@ -52,36 +53,31 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
             throw sessionError
           }
 
-          if (!sessionData?.session && params.code) {
-            setStatus('Finalizing session with authorization code...')
-            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(params.code)
-            if (exchangeError) {
-              if (exchangeError.message?.includes('PKCE code verifier not found')) {
-                setError('Authentication session expired. Please sign in again from the same browser.')
-                setStatus('')
-                return
-              }
-              throw exchangeError
-            }
+          if (!sessionData?.session) {
+            throw new Error('OAuth session was not created. Please sign in again.')
           }
-        } else if (params.code) {
-          setStatus('Finalizing session with authorization code...')
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(params.code)
-          if (exchangeError) {
-            if (exchangeError.message?.includes('PKCE code verifier not found')) {
-              setError('Authentication session expired. Please sign in again from the same browser.')
-              setStatus('')
-              return
-            }
-            throw exchangeError
-          }
+
+          // Clean callback query params from the URL after sign-in.
+          window.history.replaceState({}, document.title, window.location.pathname)
         }
 
         setStatus('Loading profile...')
+        const { data: sessionState, error: sessionStateError } = await supabase.auth.getSession()
+        if (sessionStateError) {
+          throw sessionStateError
+        }
+
         const { data: userData, error: userError } = await supabase.auth.getUser()
-        if (userError) throw userError
-        const user = userData?.user
-        if (!user?.email) throw new Error('No email returned from OAuth provider.')
+        if (userError) {
+          throw userError
+        }
+
+        const user = userData?.user || sessionState?.session?.user
+        if (!user?.email) {
+          throw new Error(
+            'Unable to read signed-in user from Supabase. Confirm /auth/callback is whitelisted in Supabase Auth redirect URLs.'
+          )
+        }
 
         const role = params.role === 'doctor' ? 'doctor' : 'patient'
 
@@ -99,6 +95,17 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         if (!response.ok) throw new Error(data.error || 'Failed to initialize local session.')
 
         if (cancelled) return
+
+        if (data?.admin) {
+          try {
+            window.localStorage.setItem('gd_platform_admin_session', JSON.stringify(data.admin))
+          } catch {
+            // ignore
+          }
+          onDoctorAuth?.({ type: 'admin-login', admin: data.admin })
+          onNavigate?.('platform-admin')
+          return
+        }
 
         if (role === 'doctor') {
           const doctor = data.doctor
@@ -126,6 +133,7 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         } catch {
           // ignore
         }
+
         const next = params.next || '/patient'
         if (next.startsWith('/patient')) onPatientNavigate?.()
         else if (next.startsWith('/facility')) onNavigate?.('facility')
@@ -134,7 +142,7 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         else onNavigate?.('landing')
       } catch (err) {
         if (!cancelled) {
-          setError(err.message || 'Authentication failed.')
+          setError(err?.message || 'Authentication failed.')
           setStatus('')
         }
       }
@@ -144,7 +152,7 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
     return () => {
       cancelled = true
     }
-  }, [onDoctorAuth, onNavigate, onPatientNavigate, params.code, params.role])
+  }, [onDoctorAuth, onNavigate, onPatientNavigate, params.code, params.next, params.role])
 
   return (
     <section className="mx-auto mt-16 max-w-2xl px-6 pb-20 sm:px-8">

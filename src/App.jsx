@@ -185,7 +185,7 @@ function App() {
       {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
       {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
       {currentView === 'facility' && <FacilityPortal />}
-      {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={setAuthDoctor} onPatientNavigate={() => navigate('patient')} />}
+      {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
       {currentView === 'terms' && <TermsOfService onNavigate={navigate} />}
       {currentView === 'privacy' && <PrivacyPolicy onNavigate={navigate} />}
       {currentView === 'contact' && <Contact onNavigate={navigate} />}

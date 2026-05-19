@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Globe2, Languages } from 'lucide-react'
 import { fetchDoctors, submitReview, createPaymentSession } from '../lib/kiraApi'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import LanguageSelector from '../components/LanguageSelector'
@@ -235,9 +236,35 @@ function LandingPage() {
                 See how it works
               </a>
             </div>
-            <div className="mt-6 rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-sm">
-              <p className="text-sm font-medium text-slate-700 mb-2">Translate this page</p>
-              <div id="google_translate_element" className="min-h-[44px]" />
+            <div className="mt-6 overflow-hidden rounded-2xl border border-teal-100 bg-white shadow-sm">
+              <div className="grid gap-0 sm:grid-cols-[0.95fr_1.05fr]">
+                <div className="relative min-h-[128px] bg-slate-50">
+                  <img
+                    src="/translation-art.svg"
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover"
+                    aria-hidden="true"
+                  />
+                </div>
+                <div className="p-4">
+                  <div className="mb-3 flex items-center gap-2 text-teal-800">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-teal-50">
+                      <Languages className="h-5 w-5" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Translate this page</p>
+                      <p className="text-xs text-slate-500">Choose a language for easier care access.</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+                      <Globe2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Google Translate
+                    </div>
+                    <div id="google_translate_element" className="min-h-[44px]" />
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">

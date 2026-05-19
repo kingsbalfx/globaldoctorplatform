@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { API_BASE } from '../lib/apiBase'
+import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
 
@@ -30,10 +31,10 @@ function PatientAuth({ onAuth }) {
       addError(t('errors.server'), 'error')
       return
     }
-    const redirectTo = `${window.location.origin}/auth/callback?role=patient&next=${encodeURIComponent('/patient')}`
+    const redirectTo = buildOAuthRedirectUrl({ role: 'patient', next: '/patient' })
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo },
+      options: { redirectTo, queryParams: { prompt: 'select_account' } },
     })
     if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
