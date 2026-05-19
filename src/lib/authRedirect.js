@@ -12,8 +12,9 @@ export function getAppOrigin() {
 }
 
 export function buildOAuthRedirectUrl({ role, next }) {
-  const url = new URL('/auth/callback', getAppOrigin())
-  url.searchParams.set('role', role === 'doctor' ? 'doctor' : 'patient')
-  if (next) url.searchParams.set('next', next)
-  return url.toString()
+  const origin = window.location.origin;
+  const url = new URL('/auth/callback', origin);
+  url.searchParams.set('role', role === 'doctor' ? 'doctor' : 'patient');
+  if (next) url.searchParams.set('next', next);
+  return url.toString();
 }
