@@ -41,6 +41,18 @@ function PatientAuth({ onAuth }) {
     if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
 
+  const buildSupabasePatientSession = (user) => ({
+    id: `supabase-patient-${user.id}`,
+    email: user.email,
+    name: user.user_metadata?.full_name || user.user_metadata?.name || formData.name || user.email?.split('@')[0] || 'Patient',
+    dateOfBirth: user.user_metadata?.date_of_birth || formData.dateOfBirth || '',
+    phone: user.user_metadata?.phone || formData.phone || '',
+    country: user.user_metadata?.country || formData.country || 'NG',
+    language: user.user_metadata?.preferred_language || formData.language || 'English',
+    tokens: 0,
+    isOnline: true,
+  })
+
   const handleSubmit = async (event) => {
     event.preventDefault()
     setLoading(true)
@@ -69,7 +81,7 @@ function PatientAuth({ onAuth }) {
         }
 
         const result = await response.json()
-        onAuth({ type: 'login', ...result.patient })
+        onAuth({ type: 'login', patient: result.patient })
         return
       }
 
@@ -83,14 +95,16 @@ function PatientAuth({ onAuth }) {
         password: formData.password,
       }
 
+      let supabaseUser = null
       if (isLogin) {
-        const { error: authError } = await supabase.auth.signInWithPassword({
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         })
         if (authError) {
           throw authError
         }
+        supabaseUser = authData?.user || null
       } else {
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
@@ -111,24 +125,38 @@ function PatientAuth({ onAuth }) {
         if (!signUpData?.user) {
           throw new Error('Could not create patient account. Please try again.')
         }
+        supabaseUser = signUpData.user
 
         endpoint = '/api/patients/register'
         payload = formData
       }
 
-      const response = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      let response
+      try {
+        response = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch {
+        if (supabaseUser) {
+          onAuth({ type: isLogin ? 'login' : 'register', patient: buildSupabasePatientSession(supabaseUser) })
+          return
+        }
+        throw new Error('Could not reach the app server. Please check the API URL and internet connection.')
+      }
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
+        if (supabaseUser && response.status === 401) {
+          onAuth({ type: isLogin ? 'login' : 'register', patient: buildSupabasePatientSession(supabaseUser) })
+          return
+        }
         throw new Error(error.error || 'Authentication failed')
       }
 
       const result = await response.json()
-      onAuth({ type: isLogin ? 'login' : 'register', ...result.patient })
+      onAuth({ type: isLogin ? 'login' : 'register', patient: result.patient })
     } catch (error) {
       addError(error.message || t('auth.authFailed'), 'error')
     } finally {

@@ -6,6 +6,35 @@ function isSupabaseConfigured() {
   return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_KEY)
 }
 
+function buildFallbackProfile(user, role) {
+  const base = {
+    email: user.email,
+    name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '',
+    isOnline: true,
+  }
+
+  if (role === 'doctor') {
+    return {
+      ...base,
+      id: `supabase-doctor-${user.id}`,
+      specialty: user.user_metadata?.specialty || 'General Practitioner',
+      location: user.user_metadata?.location || '',
+      verified: false,
+      earningsTokens: 0,
+    }
+  }
+
+  return {
+    ...base,
+    id: `supabase-patient-${user.id}`,
+    dateOfBirth: user.user_metadata?.date_of_birth || '',
+    phone: user.user_metadata?.phone || '',
+    country: user.user_metadata?.country || 'NG',
+    language: user.user_metadata?.preferred_language || 'English',
+    tokens: 0,
+  }
+}
+
 function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
   const [status, setStatus] = useState('Processing sign-in...')
   const [error, setError] = useState('')
@@ -82,15 +111,30 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         const role = params.role === 'doctor' ? 'doctor' : 'patient'
 
         setStatus('Preparing dashboard...')
-        const response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            role,
-            email: user.email,
-            name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0],
-          }),
-        })
+        let response
+        try {
+          response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role,
+              email: user.email,
+              name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0],
+            }),
+          })
+        } catch {
+          const fallbackProfile = buildFallbackProfile(user, role)
+          if (role === 'doctor') {
+            window.localStorage.setItem('gd_doctor_session', JSON.stringify(fallbackProfile))
+            onDoctorAuth?.({ type: 'login', ...fallbackProfile })
+            onNavigate?.('admin')
+            return
+          }
+
+          window.localStorage.setItem('gd_patient_session', JSON.stringify(fallbackProfile))
+          onPatientNavigate?.()
+          return
+        }
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || 'Failed to initialize local session.')
 
@@ -157,7 +201,7 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
   return (
     <section className="mx-auto mt-16 max-w-2xl px-6 pb-20 sm:px-8">
       <div className="rounded-3xl bg-white p-10 shadow-xl shadow-slate-200/50">
-        <h1 className="text-2xl font-bold text-slate-900">Signing you in…</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Signing you in...</h1>
         {status && <p className="mt-2 text-slate-600">{status}</p>}
         {error && (
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

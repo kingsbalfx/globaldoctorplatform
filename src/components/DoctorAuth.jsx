@@ -35,6 +35,18 @@ function DoctorAuth({ onAuth }) {
     if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
 
+  const buildSupabaseDoctorSession = (user) => ({
+    id: `supabase-doctor-${user.id}`,
+    email: user.email,
+    name: user.user_metadata?.full_name || user.user_metadata?.name || formData.name || user.email?.split('@')[0] || 'Doctor',
+    specialty: user.user_metadata?.specialty || formData.specialty || 'General Practitioner',
+    location: user.user_metadata?.location || formData.location || '',
+    licenseNumber: user.user_metadata?.license_number || formData.licenseNumber || '',
+    verified: false,
+    isOnline: true,
+    earningsTokens: 0,
+  })
+
   const handleSubmit = async (event) => {
     event.preventDefault()
     setLoading(true)
@@ -56,30 +68,36 @@ function DoctorAuth({ onAuth }) {
         password: formData.password,
       }
 
+      let supabaseUser = null
       if (isLogin) {
-        const localResponse = await fetch(`${API_BASE}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        const localResult = await localResponse.json().catch(() => ({}))
-
-        if (localResponse.ok && localResult?.admin) {
-          onAuth({
-            type: 'admin-login',
-            admin: localResult.admin,
-            credentials: { email: formData.email, password: formData.password },
+        try {
+          const localResponse = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
           })
-          return
+          const localResult = await localResponse.json().catch(() => ({}))
+
+          if (localResponse.ok && localResult?.admin) {
+            onAuth({
+              type: 'admin-login',
+              admin: localResult.admin,
+              credentials: { email: formData.email, password: formData.password },
+            })
+            return
+          }
+        } catch {
+          // Continue with Supabase Auth for normal doctor accounts if the local API is unreachable.
         }
 
-        const { error: authError } = await supabase.auth.signInWithPassword({
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         })
         if (authError) {
           throw authError
         }
+        supabaseUser = authData?.user || null
       } else {
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
@@ -99,19 +117,33 @@ function DoctorAuth({ onAuth }) {
         if (!signUpData?.user) {
           throw new Error('Could not create doctor account. Please try again.')
         }
+        supabaseUser = signUpData.user
 
         endpoint = '/api/doctors/register'
         payload = formData
       }
 
-      const response = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      let response
+      try {
+        response = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch {
+        if (supabaseUser) {
+          onAuth({ type: isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
+          return
+        }
+        throw new Error('Could not reach the app server. Please check the API URL and internet connection.')
+      }
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
+        if (supabaseUser && response.status === 401) {
+          onAuth({ type: isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
+          return
+        }
         throw new Error(error.error || 'Authentication failed')
       }
 
