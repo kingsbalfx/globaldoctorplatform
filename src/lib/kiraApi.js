@@ -48,3 +48,19 @@ export async function createPaymentSession(paymentData) {
 
   return response.json()
 }
+
+// NEW: Doctor withdrawal request – calls the existing backend endpoint
+export async function requestDoctorWithdrawal(doctorId, tokens) {
+  const response = await fetch(`${APP_API_BASE}/api/doctors/${encodeURIComponent(doctorId)}/withdraw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tokens }),
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}))
+    throw new Error(errorData.error || 'Withdrawal failed')
+  }
+
+  return response.json()
+}
