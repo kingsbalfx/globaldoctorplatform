@@ -6,6 +6,52 @@ import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
 
+// ===== COUNTRY LIST (extend as needed) =====
+const COUNTRIES = [
+  'Afghanistan','Albania','Algeria','Andorra','Angola','Argentina','Armenia','Australia','Austria','Azerbaijan',
+  'Bahamas','Bahrain','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan','Bolivia',
+  'Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi',
+  'Cabo Verde','Cambodia','Cameroon','Canada','Central African Republic','Chad','Chile','China','Colombia','Comoros',
+  'Congo','Costa Rica','Croatia','Cuba','Cyprus','Czech Republic','Denmark','Djibouti','Dominica','Dominican Republic',
+  'Ecuador','Egypt','El Salvador','Equatorial Guinea','Eritrea','Estonia','Eswatini','Ethiopia',
+  'Fiji','Finland','France','Gabon','Gambia','Georgia','Germany','Ghana','Greece','Grenada','Guatemala','Guinea','Guinea-Bissau','Guyana',
+  'Haiti','Honduras','Hungary','Iceland','India','Indonesia','Iran','Iraq','Ireland','Israel','Italy','Jamaica','Japan','Jordan',
+  'Kazakhstan','Kenya','Kiribati','Korea, North','Korea, South','Kosovo','Kuwait','Kyrgyzstan',
+  'Laos','Latvia','Lebanon','Lesotho','Liberia','Libya','Liechtenstein','Lithuania','Luxembourg',
+  'Madagascar','Malawi','Malaysia','Maldives','Mali','Malta','Marshall Islands','Mauritania','Mauritius','Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Morocco','Mozambique','Myanmar',
+  'Namibia','Nauru','Nepal','Netherlands','New Zealand','Nicaragua','Niger','Nigeria','North Macedonia','Norway',
+  'Oman','Pakistan','Palau','Palestine','Panama','Papua New Guinea','Paraguay','Peru','Philippines','Poland','Portugal',
+  'Qatar','Romania','Russia','Rwanda',
+  'Saint Kitts and Nevis','Saint Lucia','Saint Vincent and the Grenadines','Samoa','San Marino','Sao Tome and Principe','Saudi Arabia','Senegal','Serbia','Seychelles','Sierra Leone','Singapore','Slovakia','Slovenia','Solomon Islands','Somalia','South Africa','South Sudan','Spain','Sri Lanka','Sudan','Suriname','Sweden','Switzerland','Syria',
+  'Taiwan','Tajikistan','Tanzania','Thailand','Timor-Leste','Togo','Tonga','Trinidad and Tobago','Tunisia','Turkey','Turkmenistan','Tuvalu',
+  'Uganda','Ukraine','United Arab Emirates','United Kingdom','United States','Uruguay','Uzbekistan',
+  'Vanuatu','Vatican City','Venezuela','Vietnam',
+  'Yemen','Zambia','Zimbabwe'
+]
+
+// ===== LICENSE VALIDATION BY COUNTRY =====
+function getLicensePattern(country) {
+  const lower = country.toLowerCase()
+  if (lower.includes('united states')) return /^[A-Z]{2}\d{6,8}$/       // e.g., CA12345678
+  if (lower.includes('united kingdom')) return /^\d{7}$/                // e.g., 7123456
+  if (lower.includes('nigeria')) return /^MDCN\/\d{4,6}$/               // e.g., MDCN/12345
+  if (lower.includes('india')) return /^[A-Z]{2}\/\d{4,6}$/             // e.g., MH/12345
+  if (lower.includes('kenya')) return /^[A-Z]\d{5}$/                   // e.g., A12345
+  if (lower.includes('canada')) return /^\d{5,6}$/                     // varies
+  return null   // any non-empty accepted
+}
+
+function validateLicense(license, country) {
+  if (!license || !license.trim()) return 'License number is required.'
+  const pattern = getLicensePattern(country)
+  if (pattern && !pattern.test(license.trim())) {
+    return `Invalid format for ${country}. Example: ${pattern}`
+  }
+  return null
+}
+
+// ============================================================
+
 function DoctorAuth({ onAuth }) {
   const { t } = useTranslation()
   const { addError } = useError()
@@ -22,6 +68,7 @@ function DoctorAuth({ onAuth }) {
   const [showPassword, setShowPassword] = useState(false)
   const [completingExistingUser, setCompletingExistingUser] = useState(false)
 
+  // Restore pending profile after OAuth (if any)
   useEffect(() => {
     try {
       const pending = JSON.parse(window.localStorage.getItem('gd_pending_doctor_profile') || 'null')
@@ -39,17 +86,12 @@ function DoctorAuth({ onAuth }) {
     }
   }, [])
 
-  const isDoctorProfileComplete = (user) => {
-    const data = user?.user_metadata || {}
-    return Boolean(data.full_name && data.specialty && data.location && data.license_number)
-  }
-
+  // ========== GOOGLE SIGN‑IN (doctors only, not admin) ==========
   const handleGoogleSignIn = async () => {
     if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
       addError(t('errors.server'), 'error')
       return
     }
-
     const redirectTo = buildOAuthRedirectUrl({ role: 'doctor', next: '/doctor/dashboard' })
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
@@ -58,119 +100,38 @@ function DoctorAuth({ onAuth }) {
     if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
 
-  const buildSupabaseDoctorSession = (user) => ({
-    id: `supabase-doctor-${user.id}`,
-    email: user.email,
-    name: user.user_metadata?.full_name || user.user_metadata?.name || formData.name || user.email?.split('@')[0] || 'Doctor',
-    specialty: user.user_metadata?.specialty || formData.specialty || 'General Practitioner',
-    location: user.user_metadata?.location || formData.location || '',
-    licenseNumber: user.user_metadata?.license_number || formData.licenseNumber || '',
-    verified: false,
-    isOnline: true,
-    earningsTokens: 0,
-  })
-
+  // ========== EMAIL / PASSWORD LOGIN (admin + doctor) ==========
   const handleSubmit = async (event) => {
     event.preventDefault()
     setLoading(true)
 
     try {
-      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
-        throw new Error(
-          'Supabase auth is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.'
-        )
+      // 1. Validate license number when registering
+      if (!isLogin && !completingExistingUser) {
+        const licenseError = validateLicense(formData.licenseNumber, formData.location)
+        if (licenseError) {
+          addError(licenseError, 'error')
+          setLoading(false)
+          return
+        }
       }
 
       if (!formData.email || (isLogin && !formData.password)) {
         throw new Error('Please enter your email and password.')
       }
 
-      let endpoint = '/api/doctors/login'
-      let payload = {
-        email: formData.email,
-        password: formData.password,
-      }
-
-      let supabaseUser = null
-      if (isLogin) {
-        try {
-          const localResponse = await fetch(`${API_BASE}${endpoint}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-          const localResult = await localResponse.json().catch(() => ({}))
-
-          if (localResponse.ok && localResult?.admin) {
-            onAuth({
-              type: 'admin-login',
-              admin: localResult.admin,
-              credentials: { email: formData.email, password: formData.password },
-            })
-            return
-          }
-        } catch {
-          // Continue with Supabase Auth for normal doctor accounts if the local API is unreachable.
-        }
-
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: formData.email,
-          password: formData.password,
-        })
-        if (authError) {
-          throw authError
-        }
-        supabaseUser = authData?.user || null
-        if (!isDoctorProfileComplete(supabaseUser)) {
-          setCompletingExistingUser(true)
-          setIsLogin(false)
-          setFormData((prev) => ({
-            ...prev,
-            name: supabaseUser?.user_metadata?.full_name || prev.name,
-            specialty: supabaseUser?.user_metadata?.specialty || prev.specialty,
-            location: supabaseUser?.user_metadata?.location || prev.location,
-            licenseNumber: supabaseUser?.user_metadata?.license_number || prev.licenseNumber,
-          }))
-          addError('Complete your doctor profile before entering the dashboard.', 'warning', 8000)
-          return
-        }
-      } else {
-        if (completingExistingUser) {
-          const { data: updateData, error: updateError } = await supabase.auth.updateUser({
-            data: {
-              full_name: formData.name,
-              specialty: formData.specialty,
-              location: formData.location,
-              license_number: formData.licenseNumber,
-            },
-          })
-          if (updateError) throw updateError
-          supabaseUser = updateData?.user || supabaseUser
-        } else {
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      // 2. ALWAYS call the local API first for email/password login
+      const endpoint = isLogin ? '/api/doctors/login' : '/api/doctors/register'
+      const payload = isLogin
+        ? { email: formData.email, password: formData.password }
+        : {
             email: formData.email,
             password: formData.password,
-            options: {
-              data: {
-                full_name: formData.name,
-                specialty: formData.specialty,
-                location: formData.location,
-                license_number: formData.licenseNumber,
-              },
-            },
-          })
-          if (signUpError) {
-            throw signUpError
+            name: formData.name,
+            specialty: formData.specialty,
+            location: formData.location,
+            licenseNumber: formData.licenseNumber,
           }
-          if (!signUpData?.user) {
-            throw new Error('Could not create doctor account. Please try again.')
-          }
-          supabaseUser = signUpData.user
-        }
-
-        endpoint = '/api/doctors/register'
-        payload = formData
-      }
 
       let response
       try {
@@ -179,25 +140,16 @@ function DoctorAuth({ onAuth }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
-      } catch {
-        if (supabaseUser) {
-          onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
-          return
-        }
-        throw new Error('Could not reach the app server. Please check the API URL and internet connection.')
+      } catch (networkError) {
+        // If the API is completely unreachable, show a clear error
+        throw new Error(
+          'Could not reach the server. Please check your connection or try again later.'
+        )
       }
 
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}))
-        if (supabaseUser && [401, 409].includes(response.status)) {
-          onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', ...buildSupabaseDoctorSession(supabaseUser) })
-          return
-        }
-        throw new Error(error.error || 'Authentication failed')
-      }
+      const result = await response.json().catch(() => ({}))
 
-      const result = await response.json()
-
+      // 3. Handle admin login
       if (result?.admin) {
         onAuth({
           type: 'admin-login',
@@ -207,12 +159,16 @@ function DoctorAuth({ onAuth }) {
         return
       }
 
-      if (result?.doctor) {
-        onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', ...result.doctor })
-        return
+      // 4. Handle doctor login / register
+      if (!response.ok) {
+        throw new Error(result.error || 'Authentication failed')
       }
 
-      throw new Error('Unexpected authentication response')
+      if (result?.doctor) {
+        onAuth({ type: isLogin ? 'login' : 'register', ...result.doctor })
+      } else {
+        throw new Error('Unexpected response from server')
+      }
     } catch (error) {
       addError(error.message || t('auth.authFailed'), 'error')
     } finally {
@@ -233,6 +189,7 @@ function DoctorAuth({ onAuth }) {
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl p-8">
+          {/* Google sign-in (for doctors only) */}
           <button
             type="button"
             onClick={handleGoogleSignIn}
@@ -240,12 +197,14 @@ function DoctorAuth({ onAuth }) {
           >
             Continue with Google
           </button>
+
           <div className="my-6 flex items-center gap-3">
             <div className="h-px flex-1 bg-slate-200" />
             <span className="text-xs font-semibold text-slate-500">OR</span>
             <div className="h-px flex-1 bg-slate-200" />
           </div>
 
+          {/* Login / Register toggle */}
           <div className="flex mb-6">
             <button
               onClick={() => setIsLogin(true)}
@@ -271,6 +230,8 @@ function DoctorAuth({ onAuth }) {
                 Complete your profile details. Your Supabase session is active, so password is optional here.
               </div>
             )}
+
+            {/* Registration fields */}
             {!isLogin && (
               <>
                 <div>
@@ -300,32 +261,46 @@ function DoctorAuth({ onAuth }) {
                     <option value="Oncology">Oncology</option>
                     <option value="Neurology">Neurology</option>
                     <option value="Urology">Urology</option>
+                    {/* Add more as needed */}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Location</label>
-                  <input
-                    type="text"
+                  <label className="block text-sm font-medium text-slate-700">Country</label>
+                  <select
                     value={formData.location}
                     onChange={(e) => handleChange('location', e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                    placeholder="City, Country"
                     required
-                  />
+                  >
+                    <option value="">Select your country</option>
+                    {COUNTRIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Medical License Number</label>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Medical License Number
+                    <span className="ml-1 text-xs text-slate-400">(must match your country’s format)</span>
+                  </label>
                   <input
                     type="text"
                     value={formData.licenseNumber}
                     onChange={(e) => handleChange('licenseNumber', e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    placeholder="e.g., MDCN/12345"
                     required
                   />
+                  {formData.location && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Expected format: {getLicensePattern(formData.location)?.toString() || 'Any non‑empty value'}
+                    </p>
+                  )}
                 </div>
               </>
             )}
 
+            {/* Email & Password */}
             <div>
               <label className="block text-sm font-medium text-slate-700">Email</label>
               <input
@@ -350,12 +325,11 @@ function DoctorAuth({ onAuth }) {
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword((value) => !value)}
+                  onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  title={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -365,7 +339,7 @@ function DoctorAuth({ onAuth }) {
               disabled={loading}
               className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Processing...' : (isLogin ? 'Login' : completingExistingUser ? 'Complete Profile' : 'Register')}
+              {loading ? 'Processing...' : isLogin ? 'Login' : completingExistingUser ? 'Complete Profile' : 'Register'}
             </button>
           </form>
 
