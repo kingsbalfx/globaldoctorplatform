@@ -15,22 +15,26 @@ function normalizeApiBase(rawValue) {
 
   const absolute = tryParse(value)
   if (absolute) return absolute
-
-  // Allow values like "my-app.vercel.app" (Vercel's `VERCEL_URL` has no protocol).
   return tryParse(`https://${value}`)
 }
 
-let apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE)
+let apiBase = ''
 
-if (!apiBase && typeof window !== 'undefined') {
+// If running in production (Vite build), always use the current domain.
+// This ensures the API works on Vercel without env vars.
+if (import.meta.env.PROD) {
+  apiBase = window.location.origin
+} else {
+  // Development: try VITE_API_BASE env, then fallback to localhost
+  apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE) || 'http://localhost:4000'
+}
+
+// Safety net for Capacitor/Ionic hybrid apps
+if (typeof window !== 'undefined') {
   const protocol = window.location?.protocol || ''
   if (protocol === 'capacitor:' || protocol === 'ionic:') {
     apiBase = 'https://globaldoctorplatform.vercel.app'
   }
-}
-
-if (!import.meta.env.PROD && !apiBase) {
-  apiBase = 'http://localhost:4000'
 }
 
 export const API_BASE = apiBase.replace(/\/+$/, '')
