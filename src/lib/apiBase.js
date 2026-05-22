@@ -22,31 +22,29 @@ function normalizeApiBase(rawValue) {
 
 let apiBase = ''
 
-// Always use production URL in Capacitor/Ionic or when explicitly in production
+// Detect Capacitor / Ionic or any localhost scenario
 if (typeof window !== 'undefined') {
   const protocol = window.location?.protocol || ''
   if (
     protocol === 'capacitor:' ||
     protocol === 'ionic:' ||
-    // Some webview versions show 'http://localhost'
     window.location.hostname === 'localhost'
   ) {
     apiBase = PRODUCTION_ORIGIN
   }
 }
 
-// If not set yet, check environment/build mode
 if (!apiBase) {
   if (import.meta.env.PROD) {
-    // Normal browser (Vercel) – use current origin
+    // Normal browser – use the current origin (your Vercel domain)
     apiBase = window.location.origin
   } else {
-    // Development – use VITE_API_BASE or default to localhost
+    // Development – use VITE_API_BASE or fallback to localhost:4000
     apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE) || 'http://localhost:4000'
   }
 }
 
-// Final fallback
+// Final safety net
 if (!apiBase) {
   apiBase = PRODUCTION_ORIGIN
 }
