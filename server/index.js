@@ -21,7 +21,7 @@ const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.warn('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY – API may fail.')
+  console.error('❌ FATAL: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables.')
 }
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false }
@@ -29,6 +29,35 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 
 const KORA_SECRET_KEY = process.env.KORA_SECRET_KEY
 const KORA_BASE_URL = process.env.KORA_BASE_URL || 'https://api.korapay.com'
+
+// ---------- STARTUP DIAGNOSTICS ----------
+;(async () => {
+  console.log('🔍 Running startup diagnostics...')
+  
+  // Test Supabase connection
+  const { data: adminCount, error: dbError } = await supabase.from('admins').select('*', { count: 'exact', head: true })
+  if (dbError) {
+    console.error('❌ Cannot reach Supabase:', dbError.message)
+  } else {
+    console.log('✅ Supabase connection OK')
+  }
+
+  // Check check_password function
+  const { error: fnError } = await supabase.rpc('check_password', { pass: 'test', hashed: 'test' })
+  if (fnError) {
+    console.error('❌ check_password function missing! Run this SQL in Supabase SQL Editor:')
+    console.error(`
+CREATE OR REPLACE FUNCTION check_password(pass text, hashed text)
+RETURNS boolean AS $$
+BEGIN
+  RETURN hashed = crypt(pass, hashed);
+END;
+$$ LANGUAGE plpgsql IMMUTABLE STRICT;
+    `)
+  } else {
+    console.log('✅ check_password function exists')
+  }
+})()
 
 // ---------- ID generator ----------
 const generateId = (prefix) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
@@ -73,7 +102,8 @@ async function isPlatformAdminRequest(req) {
   if (!email || !password) return false
   const { data: admin } = await supabase.from('admins').select('*').eq('email', email).maybeSingle()
   if (!admin) return false
-  const { data: ok } = await supabase.rpc('check_password', { pass: password, hashed: admin.password })
+  const { data: ok, error } = await supabase.rpc('check_password', { pass: password, hashed: admin.password })
+  if (error) return false
   return ok === true
 }
 
@@ -212,6 +242,24 @@ async function updatePlatformBalance(platformDelta, dataDelta) {
 // ---------- HEALTH ----------
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
 
+// ---------- DEBUG ----------
+app.get('/api/debug', async (req, res) => {
+  const tables = ['admins', 'doctors_auth', 'doctors', 'patients', 'patient_tokens', 'facilities', 'consultations_ng']
+  const results = {}
+  for (const table of tables) {
+    const { data, error } = await supabase.from(table).select('*', { count: 'exact', head: true })
+    results[table] = error ? `❌ ${error.message}` : `✅ ${data?.count ?? 0} rows`
+  }
+  const { error: fnError } = await supabase.rpc('check_password', { pass: 'x', hashed: 'x' })
+  res.json({
+    supabase_url: supabaseUrl,
+    service_role_configured: Boolean(supabaseServiceKey),
+    tables: results,
+    check_password: fnError ? 'MISSING' : 'OK',
+    env: { KORA: Boolean(KORA_SECRET_KEY), AGORA: Boolean(AGORA_APP_ID) }
+  })
+})
+
 // ---------- CONFIG ----------
 app.get('/api/config', (req, res) => {
   res.json({
@@ -225,28 +273,35 @@ app.get('/api/config', (req, res) => {
   })
 })
 
-// ---------- ADMIN LOGIN (email + password) ----------
+// ---------- ADMIN LOGIN ----------
 app.post('/api/doctors/login', async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
 
-  // 1. Check admin
-  const { data: admin } = await supabase.from('admins').select('*').eq('email', email).maybeSingle()
-  if (admin) {
-    const { data: ok } = await supabase.rpc('check_password', { pass: password, hashed: admin.password })
-    if (ok) {
-      return res.json({ admin: { email: admin.email, name: admin.name, role: 'admin' }, message: 'Admin login successful' })
+  try {
+    // Admin check
+    const { data: admin, error: adminError } = await supabase.from('admins').select('*').eq('email', email).maybeSingle()
+    if (adminError) return res.status(500).json({ error: 'Database error (admins): ' + adminError.message })
+
+    if (admin) {
+      const { data: ok, error: rpcError } = await supabase.rpc('check_password', { pass: password, hashed: admin.password })
+      if (rpcError) return res.status(500).json({ error: 'check_password function error: ' + rpcError.message })
+      if (ok) {
+        return res.json({ admin: { email: admin.email, name: admin.name, role: 'admin' }, message: 'Admin login successful' })
+      }
     }
+
+    // Doctor check
+    const { data: doctor, error: docError } = await supabase.from('doctors_auth').select('*').eq('email', email).eq('password', password).maybeSingle()
+    if (docError) return res.status(500).json({ error: 'Database error (doctors_auth): ' + docError.message })
+    if (!doctor) return res.status(401).json({ error: 'Invalid credentials' })
+
+    await supabase.from('doctors').update({ is_online: true }).eq('id', doctor.id)
+    const { password: _, ...doc } = doctor
+    res.json({ doctor: doc, message: 'Login successful' })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
   }
-
-  // 2. Check doctor
-  const { data: doctor } = await supabase.from('doctors_auth').select('*').eq('email', email).eq('password', password).maybeSingle()
-  if (!doctor) return res.status(401).json({ error: 'Invalid credentials' })
-
-  await supabase.from('doctors').update({ is_online: true }).eq('id', doctor.id)
-
-  const { password: _, ...doctorResponse } = doctor
-  res.json({ doctor: doctorResponse, message: 'Login successful' })
 })
 
 // ---------- DOCTOR REGISTRATION ----------
@@ -286,44 +341,46 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
   const { email, name, role } = req.body
   if (!email || !role) return res.status(400).json({ error: 'email and role required' })
 
-  if (role === 'patient') {
-    let { data: patient } = await supabase.from('patients').select('*').eq('email', email).maybeSingle()
-    if (!patient) {
-      const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
-      const newPatient = {
-        id, email, password: null, name: name || email.split('@')[0],
-        date_of_birth: null, phone: null, country: 'NG', language: 'English',
-        tokens: 0, is_online: true, created_at: new Date().toISOString()
+  try {
+    if (role === 'patient') {
+      let { data: patient } = await supabase.from('patients').select('*').eq('email', email).maybeSingle()
+      if (!patient) {
+        const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
+        const { error: insertErr } = await supabase.from('patients').insert({
+          id, email, password: '', name: name || email.split('@')[0],
+          date_of_birth: null, phone: '', country: 'NG', language: 'English',
+          tokens: 0, is_online: true, created_at: new Date().toISOString()
+        })
+        if (insertErr) return res.status(500).json({ error: 'Failed to create patient: ' + insertErr.message })
+        return res.json({ patient: sanitizePatientForResponse({ id, email, name: name || '', password: '' }), message: 'Patient session ready' })
       }
-      await supabase.from('patients').insert(newPatient)
-      await supabase.from('patient_tokens').insert({ patient_id: id, balance: 0 })
-      return res.json({ patient: sanitizePatientForResponse(newPatient), message: 'Patient session ready' })
-    } else {
       await supabase.from('patients').update({ is_online: true }).eq('id', patient.id)
       return res.json({ patient: sanitizePatientForResponse(patient), message: 'Patient session ready' })
     }
-  }
 
-  // Doctor
-  let { data: doctor } = await supabase.from('doctors_auth').select('*').eq('email', email).maybeSingle()
-  if (!doctor) {
-    const id = generateId('doc')
-    const newDoc = {
-      id, email, password: null, name: name || email.split('@')[0],
-      specialty: 'General Practitioner', location: 'Nigeria',
-      license_number: 'PENDING', verified: false, created_at: new Date().toISOString()
+    // Doctor
+    let { data: doctor } = await supabase.from('doctors_auth').select('*').eq('email', email).maybeSingle()
+    if (!doctor) {
+      const id = generateId('doc')
+      const newDoc = { id, email, password: '', name: name || email.split('@')[0], specialty: 'General Practitioner', location: 'Nigeria', license_number: 'PENDING', verified: false, created_at: new Date().toISOString() }
+      const { error: insertDocErr } = await supabase.from('doctors_auth').insert(newDoc)
+      if (insertDocErr) return res.status(500).json({ error: 'Failed to create doctor auth: ' + insertDocErr.message })
+
+      const { error: insertProfErr } = await supabase.from('doctors').insert({
+        id, name: newDoc.name, specialty: 'General Practitioner', location: 'Nigeria',
+        languages: ['English'], rating: 0, is_online: true, fee: 35,
+        price: { basic: 50, premium: 100 }, license_verified: false
+      })
+      if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
+
+      return res.json({ doctor: { ...newDoc, password: undefined }, message: 'Doctor session ready' })
+    } else {
+      await supabase.from('doctors').update({ is_online: true }).eq('id', doctor.id)
+      const { password: _, ...doc } = doctor
+      return res.json({ doctor: doc, message: 'Doctor session ready' })
     }
-    await supabase.from('doctors_auth').insert(newDoc)
-    await supabase.from('doctors').insert({
-      id, name: newDoc.name, specialty: 'General Practitioner', location: 'Nigeria',
-      languages: ['English'], rating: 0, is_online: true, fee: 35,
-      price: { basic: 50, premium: 100 }, license_verified: false
-    })
-    return res.json({ doctor: { ...newDoc, password: undefined }, message: 'Doctor session ready' })
-  } else {
-    await supabase.from('doctors').update({ is_online: true }).eq('id', doctor.id)
-    const { password: _, ...doc } = doctor
-    return res.json({ doctor: doc, message: 'Doctor session ready' })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
   }
 })
 
@@ -440,7 +497,6 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   }
   if (!Number.isInteger(amountUSD)) return res.status(400).json({ error: 'Deposit amount must be a whole number' })
 
-  // Check if patient has purchased before
   const { count } = await supabase.from('token_transactions')
     .select('*', { count: 'exact', head: true })
     .eq('patient_id', patientId)
@@ -452,7 +508,6 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   const reference = `kora-token-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   const origin = getApiOrigin(req)
 
-  // Record payment intent
   await supabase.from('payments').insert({
     id: reference,
     patient_id: patientId,
@@ -553,10 +608,8 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   if (tokensToWithdraw > available) return res.status(400).json({ error: 'Requested tokens exceed available balance' })
   if (tokensToWithdraw < minTokens) return res.status(400).json({ error: `Minimum withdrawal is ${minTokens} tokens ($${settings.doctorMinimumWithdrawalUSD})` })
 
-  // For simplicity, deduct tokens immediately; in production you'd integrate Kora payout.
   await updateDoctorEarnings(doctorId, -tokensToWithdraw)
 
-  // Record payout
   const reference = `kora-wd-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   await supabase.from('payouts').insert({
     id: reference,
@@ -613,7 +666,6 @@ app.get('/api/doctors', async (req, res) => {
   if (req.query.specialty) query = query.eq('specialty', req.query.specialty)
   if (req.query.minRating) query = query.gte('rating', Number(req.query.minRating))
   if (req.query.online !== undefined && req.query.online !== '') query = query.eq('is_online', req.query.online === 'true')
-  // Language filtering would require unnest; simplified for now
   query = query.order('rating', { ascending: false })
   const { data } = await query
   res.json({ doctors: data || [] })
@@ -643,7 +695,6 @@ app.post('/api/reviews', async (req, res) => {
   const review = { id, doctor_id: doctorId, patient_id: patientId, rating, comment, verified: true, created_at: new Date().toISOString() }
   await supabase.from('reviews').insert(review)
 
-  // Update doctor average rating
   const { data: reviews } = await supabase.from('reviews').select('rating').eq('doctor_id', doctorId)
   const avg = reviews?.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0
   await supabase.from('doctors').update({ rating: Number(avg.toFixed(2)), rating_count: reviews?.length || 0 }).eq('id', doctorId)
@@ -674,7 +725,6 @@ app.post('/api/appointments', async (req, res) => {
   }
   await supabase.from('appointments').insert(appointment)
 
-  // Add reminders (24h and 1h) – simplified
   const date = new Date(scheduledDate)
   await supabase.from('appointment_reminders').insert([
     {
@@ -691,7 +741,6 @@ app.post('/api/appointments', async (req, res) => {
     }
   ])
 
-  // Notify patient and doctor
   await supabase.from('notifications').insert([
     {
       id: generateId('notif'), user_id: patientId, user_type: 'patient',
@@ -874,30 +923,26 @@ app.post('/api/admin/referrals', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
   const { patientId, fromSpecialty, toSpecialty, reason, notes } = req.body
   const id = generateId('ref')
-  // (This uses the old in-memory structure; if you need a table, create one. For now, returning success)
   res.status(201).json({ referral: { id, patientId, fromSpecialty, toSpecialty, reason, notes, status: 'pending' }, message: 'Referral created' })
 })
 
 app.get('/api/admin/referrals', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  // Return empty for now if no table
   res.json({ referrals: [] })
 })
 
 app.post('/api/patients/referrals', async (req, res) => {
   const { patientId, fromSpecialty, toSpecialty, reason, notes } = req.body
-  // same legacy
   res.status(201).json({ referral: { id: generateId('ref'), patientId, fromSpecialty, toSpecialty, reason, notes, status: 'pending' }, message: 'Referral request submitted' })
 })
 
 app.get('/api/patients/:patientId/referrals', async (req, res) => {
-  res.json({ referrals: [] }) // legacy
+  res.json({ referrals: [] })
 })
 
 // ---------- ADMIN: FILES ----------
 app.post('/api/admin/files/upload', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  // Mock file upload
   const mockFiles = [{
     id: `file-${Date.now()}`,
     name: 'Sample Document.pdf',
@@ -1007,7 +1052,6 @@ app.post('/api/consultations/start', async (req, res) => {
   const allowedChannels = ['direct_home', 'facility_private', 'facility_phc']
   if (!patientId || !doctorId || !allowedChannels.includes(channel)) return res.status(400).json({ error: 'patientId, doctorId, and valid channel required' })
 
-  // Verify doctor exists
   const doctor = await getDoctorProfile(doctorId)
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
 
@@ -1056,7 +1100,6 @@ app.post('/api/consultations/end', async (req, res) => {
     durationMin: finalDurationMin
   })
 
-  // Handle PHC wallet topup debit
   if (split.channel === 'facility_phc' && consultation.facility_id) {
     const debitResult = await debitFacilityWallet(consultation.facility_id, split.facility_topup_ngn, {
       reason: 'PHC consult topup funding',
@@ -1072,7 +1115,6 @@ app.post('/api/consultations/end', async (req, res) => {
     }
   }
 
-  // Credit facility share (if any)
   if (consultation.facility_id && split.facility_ngn > 0) {
     await creditFacilityWallet(consultation.facility_id, split.facility_ngn, {
       reason: 'Facility share from consultation',
@@ -1080,17 +1122,14 @@ app.post('/api/consultations/end', async (req, res) => {
     })
   }
 
-  // Credit doctor earnings
   if (split.doctor_ngn > 0) {
     await updateDoctorEarnings(consultation.doctor_id, split.doctor_ngn)
   }
 
-  // Update platform balances
   const platformDelta = split.platform_ngn || 0
   const dataDelta = split.data_fee_ngn || 0
   await updatePlatformBalance(platformDelta, dataDelta)
 
-  // Record revenue split
   const revenueSplit = {
     id: generateId('rsng'),
     consultation_id: consultationId,
@@ -1102,7 +1141,6 @@ app.post('/api/consultations/end', async (req, res) => {
   }
   await supabase.from('revenue_splits_ng').insert(revenueSplit)
 
-  // Mark consultation completed
   await supabase.from('consultations_ng').update({
     status: 'completed', duration_min: split.durationMin, blocks: split.blocks,
     total_ngn: split.total_ngn, completed_at: new Date().toISOString()
@@ -1170,7 +1208,6 @@ app.post('/api/referrals/facility/redeem', async (req, res) => {
       ref_type: 'facility_referral',
       ref_id: referral.id
     })
-    // Deduct from platform balance
     const balances = await getPlatformBalances()
     await updatePlatformBalance(-referral.payout_ngn, 0)
   }
@@ -1218,7 +1255,6 @@ app.post('/api/labs/pay', async (req, res) => {
   }
   await supabase.from('lab_payments').insert(payment)
 
-  // Credit facility wallet and platform
   await creditFacilityWallet(order.facility_id, commission.facility_net_ngn, { reason: 'Lab payment (net)', ref_type: 'lab_order', ref_id: orderId })
   await updatePlatformBalance(commission.platform_commission_ngn, 0)
 
@@ -1280,9 +1316,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
   const { data: payment } = await supabase.from('payments').select('*').eq('reference', reference).maybeSingle()
   if (!payment) return res.status(404).json({ error: 'Payment not found' })
 
-  // Mock verification; in production, call Kora
   if (payment.type === 'token_purchase' && payment.status !== 'success') {
-    // credit tokens
     const { metadata } = payment
     if (metadata?.patientId && metadata?.tokensExpected) {
       await creditPatientTokens(metadata.patientId, metadata.tokensExpected, 'Token purchase via Kora')
@@ -1293,7 +1327,6 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
 })
 
 app.post('/api/webhooks/kora', async (req, res) => {
-  // Simplified webhook processing
   res.sendStatus(200)
 })
 
@@ -1308,7 +1341,6 @@ app.get('/api/video/token', (req, res) => {
 
 // ---------- VITAL PARAMETERS (placeholder) ----------
 app.post('/api/vital-parameters', async (req, res) => {
-  // Not implemented in schema yet
   res.status(200).json({ message: 'Vital parameter recorded (mock)' })
 })
 
