@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Eye, EyeOff } from 'lucide-react'
 import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
@@ -80,7 +81,7 @@ function PatientAuth({ onAuth }) {
   const createBackendPatientSession = async (profile) => {
     let response
     try {
-      response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
+      response = await apiFetch('/api/auth/oauth/bridge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'patient', ...profile }),
@@ -108,7 +109,7 @@ function PatientAuth({ onAuth }) {
       }
 
       if (mode === 'facility') {
-        const response = await fetch(`${API_BASE}/api/patients/facility/login`, {
+        const response = await apiFetch('/api/patients/facility/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -214,7 +215,7 @@ function PatientAuth({ onAuth }) {
 
       let response
       try {
-        response = await fetch(`${API_BASE}${endpoint}`, {
+        response = await apiFetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

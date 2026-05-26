@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Eye, EyeOff } from 'lucide-react'
 import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
@@ -103,7 +104,7 @@ function DoctorAuth({ onAuth }) {
   const createBackendDoctorSession = async (profile) => {
     let response
     try {
-      response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
+      response = await apiFetch('/api/auth/oauth/bridge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'doctor', ...profile }),
@@ -177,7 +178,7 @@ function DoctorAuth({ onAuth }) {
 
       let response
       try {
-        response = await fetch(`${API_BASE}${endpoint}`, {
+        response = await apiFetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -185,7 +186,7 @@ function DoctorAuth({ onAuth }) {
       } catch (networkError) {
         // If the API is completely unreachable, show a clear error
         throw new Error(
-          'Could not reach the server. Please check your connection or try again later.'
+          `Could not reach the server at ${API_BASE}. Please check your connection or try again later.`
         )
       }
 

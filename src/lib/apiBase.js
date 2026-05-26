@@ -22,7 +22,7 @@ function normalizeApiBase(rawValue) {
 let apiBase = ''
 
 if (typeof window !== 'undefined') {
-  const { protocol, hostname } = window.location
+  const { origin, protocol, hostname } = window.location
   const configuredApiBase = normalizeApiBase(import.meta.env.VITE_API_BASE)
   // Capacitor / Ionic / WebView running as mobile app
   if (
@@ -30,10 +30,12 @@ if (typeof window !== 'undefined') {
     protocol === 'ionic:'
   ) {
     apiBase = configuredApiBase || PRODUCTION_ORIGIN
+  } else if (import.meta.env.PROD && origin) {
+    apiBase = origin
   } else if (configuredApiBase) {
     apiBase = configuredApiBase
   } else if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    apiBase = import.meta.env.PROD ? PRODUCTION_ORIGIN : 'http://localhost:4000'
+    apiBase = 'http://localhost:4000'
   }
 }
 

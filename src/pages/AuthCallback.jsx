@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 import { supabase } from '../lib/supabaseClient'
 
 function isSupabaseConfigured() {
@@ -108,7 +109,7 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         let response
         try {
           const metadata = user.user_metadata || {}
-          response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
+          response = await apiFetch('/api/auth/oauth/bridge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
