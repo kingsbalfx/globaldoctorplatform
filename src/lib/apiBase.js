@@ -23,13 +23,17 @@ let apiBase = ''
 
 if (typeof window !== 'undefined') {
   const { protocol, hostname } = window.location
+  const configuredApiBase = normalizeApiBase(import.meta.env.VITE_API_BASE)
   // Capacitor / Ionic / WebView running as mobile app
   if (
     protocol === 'capacitor:' ||
-    protocol === 'ionic:' ||
-    hostname === 'localhost'
+    protocol === 'ionic:'
   ) {
-    apiBase = PRODUCTION_ORIGIN
+    apiBase = configuredApiBase || PRODUCTION_ORIGIN
+  } else if (configuredApiBase) {
+    apiBase = configuredApiBase
+  } else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    apiBase = import.meta.env.PROD ? PRODUCTION_ORIGIN : 'http://localhost:4000'
   }
 }
 

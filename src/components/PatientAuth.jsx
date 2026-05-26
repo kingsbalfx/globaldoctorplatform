@@ -77,6 +77,25 @@ function PatientAuth({ onAuth }) {
     isOnline: true,
   })
 
+  const createBackendPatientSession = async (profile) => {
+    let response
+    try {
+      response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'patient', ...profile }),
+      })
+    } catch {
+      throw new Error(`Could not reach the app server at ${API_BASE}. Your Google account is signed in, but your medical records need the app server.`)
+    }
+
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || !result?.patient?.id) {
+      throw new Error(result.error || 'Could not prepare your patient dashboard.')
+    }
+    return result.patient
+  }
+
   const handleSubmit = async (event) => {
     event.preventDefault()
     setLoading(true)
@@ -156,6 +175,16 @@ function PatientAuth({ onAuth }) {
           })
           if (updateError) throw updateError
           supabaseUser = updateData?.user || supabaseUser
+          const patient = await createBackendPatientSession({
+            email: supabaseUser.email || formData.email,
+            name: formData.name,
+            dateOfBirth: formData.dateOfBirth,
+            phone: formData.phone,
+            country: formData.country,
+            language: formData.language,
+          })
+          onAuth({ type: 'login', patient })
+          return
         } else {
           const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
             email: formData.email,

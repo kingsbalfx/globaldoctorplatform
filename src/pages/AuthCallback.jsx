@@ -6,35 +6,6 @@ function isSupabaseConfigured() {
   return Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_KEY)
 }
 
-function buildFallbackProfile(user, role) {
-  const base = {
-    email: user.email,
-    name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '',
-    isOnline: true,
-  }
-
-  if (role === 'doctor') {
-    return {
-      ...base,
-      id: `supabase-doctor-${user.id}`,
-      specialty: user.user_metadata?.specialty || 'General Practitioner',
-      location: user.user_metadata?.location || '',
-      verified: false,
-      earningsTokens: 0,
-    }
-  }
-
-  return {
-    ...base,
-    id: `supabase-patient-${user.id}`,
-    dateOfBirth: user.user_metadata?.date_of_birth || '',
-    phone: user.user_metadata?.phone || '',
-    country: user.user_metadata?.country || 'NG',
-    language: user.user_metadata?.preferred_language || 'English',
-    tokens: 0,
-  }
-}
-
 function hasRequiredProfile(user, role) {
   const data = user?.user_metadata || {}
   if (role === 'doctor') return Boolean(data.full_name && data.specialty && data.location && data.license_number)
@@ -136,27 +107,27 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         setStatus('Preparing dashboard...')
         let response
         try {
+          const metadata = user.user_metadata || {}
           response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               role,
               email: user.email,
-              name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0],
+              name: metadata.full_name || metadata.name || user.email.split('@')[0],
+              dateOfBirth: metadata.date_of_birth || '',
+              phone: metadata.phone || '',
+              country: metadata.country || '',
+              language: metadata.preferred_language || '',
+              specialty: metadata.specialty || '',
+              location: metadata.location || '',
+              licenseNumber: metadata.license_number || '',
             }),
           })
-        } catch {
-          const fallbackProfile = buildFallbackProfile(user, role)
-          if (role === 'doctor') {
-            window.localStorage.setItem('gd_doctor_session', JSON.stringify(fallbackProfile))
-            onDoctorAuth?.({ type: 'login', ...fallbackProfile })
-            onNavigate?.('admin')
-            return
-          }
-
-          window.localStorage.setItem('gd_patient_session', JSON.stringify(fallbackProfile))
-          onPatientNavigate?.()
-          return
+        } catch (networkError) {
+          throw new Error(
+            `Could not reach the app server at ${API_BASE}. Sign-in succeeded, but the dashboard needs the app server to load your records.`
+          )
         }
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || 'Failed to initialize local session.')

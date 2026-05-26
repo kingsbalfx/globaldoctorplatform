@@ -19,9 +19,12 @@ const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE
 
 // ---------- Supabase server‑side client ----------
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_KEY
 if (!supabaseUrl || !supabaseServiceKey) {
   console.error('❌ FATAL: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables.')
+}
+if (supabaseUrl && supabaseServiceKey && !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn('SUPABASE_SERVICE_ROLE_KEY is not set. Falling back to anon key; database writes may fail if RLS is enabled.')
 }
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false }
@@ -338,45 +341,129 @@ app.post('/api/doctors/register', async (req, res) => {
 
 // ---------- OAUTH BRIDGE ----------
 app.post('/api/auth/oauth/bridge', async (req, res) => {
-  const { email, name, role } = req.body
+  const {
+    email,
+    name,
+    role,
+    dateOfBirth,
+    phone,
+    country,
+    language,
+    specialty,
+    location,
+    licenseNumber,
+  } = req.body
   if (!email || !role) return res.status(400).json({ error: 'email and role required' })
 
   try {
     if (role === 'patient') {
-      let { data: patient } = await supabase.from('patients').select('*').eq('email', email).maybeSingle()
+      const patientProfile = {
+        email,
+        password: '',
+        name: name || email.split('@')[0],
+        date_of_birth: dateOfBirth || null,
+        phone: phone || '',
+        country: country || 'NG',
+        language: language || 'English',
+        is_online: true,
+      }
+      let { data: patient, error: patientLookupError } = await supabase.from('patients').select('*').eq('email', email).maybeSingle()
+      if (patientLookupError) return res.status(500).json({ error: 'Failed to load patient: ' + patientLookupError.message })
       if (!patient) {
         const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
-        const { error: insertErr } = await supabase.from('patients').insert({
-          id, email, password: '', name: name || email.split('@')[0],
-          date_of_birth: null, phone: '', country: 'NG', language: 'English',
-          tokens: 0, is_online: true, created_at: new Date().toISOString()
-        })
+        const newPatient = {
+          id,
+          ...patientProfile,
+          tokens: 0,
+          created_at: new Date().toISOString()
+        }
+        const { error: insertErr } = await supabase.from('patients').insert(newPatient)
         if (insertErr) return res.status(500).json({ error: 'Failed to create patient: ' + insertErr.message })
-        return res.json({ patient: sanitizePatientForResponse({ id, email, name: name || '', password: '' }), message: 'Patient session ready' })
+        await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+        return res.json({ patient: sanitizePatientForResponse(newPatient), message: 'Patient session ready' })
       }
-      await supabase.from('patients').update({ is_online: true }).eq('id', patient.id)
-      return res.json({ patient: sanitizePatientForResponse(patient), message: 'Patient session ready' })
+      const { data: updatedPatient, error: updateErr } = await supabase
+        .from('patients')
+        .update(patientProfile)
+        .eq('id', patient.id)
+        .select('*')
+        .maybeSingle()
+      if (updateErr) return res.status(500).json({ error: 'Failed to update patient: ' + updateErr.message })
+      await supabase.from('patient_tokens').upsert({ patient_id: patient.id, balance: 0 }, { onConflict: 'patient_id', ignoreDuplicates: true })
+      return res.json({ patient: sanitizePatientForResponse(updatedPatient || patient), message: 'Patient session ready' })
     }
 
     // Doctor
-    let { data: doctor } = await supabase.from('doctors_auth').select('*').eq('email', email).maybeSingle()
+    const doctorProfile = {
+      email,
+      password: '',
+      name: name || email.split('@')[0],
+      specialty: specialty || 'General Practitioner',
+      location: location || country || 'Nigeria',
+      license_number: licenseNumber || 'PENDING',
+      verified: false,
+    }
+    let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', email).maybeSingle()
+    if (doctorLookupError) return res.status(500).json({ error: 'Failed to load doctor: ' + doctorLookupError.message })
     if (!doctor) {
       const id = generateId('doc')
-      const newDoc = { id, email, password: '', name: name || email.split('@')[0], specialty: 'General Practitioner', location: 'Nigeria', license_number: 'PENDING', verified: false, created_at: new Date().toISOString() }
+      const newDoc = { id, ...doctorProfile, created_at: new Date().toISOString() }
       const { error: insertDocErr } = await supabase.from('doctors_auth').insert(newDoc)
       if (insertDocErr) return res.status(500).json({ error: 'Failed to create doctor auth: ' + insertDocErr.message })
 
       const { error: insertProfErr } = await supabase.from('doctors').insert({
-        id, name: newDoc.name, specialty: 'General Practitioner', location: 'Nigeria',
-        languages: ['English'], rating: 0, is_online: true, fee: 35,
-        price: { basic: 50, premium: 100 }, license_verified: false
+        id,
+        name: newDoc.name,
+        specialty: newDoc.specialty,
+        location: newDoc.location,
+        languages: ['English'],
+        rating: 0,
+        rating_count: 0,
+        is_online: true,
+        fee: 35,
+        price: { basic: 50, premium: 100 },
+        license_verified: false,
+        license_number: newDoc.license_number,
+        created_at: new Date().toISOString()
       })
       if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
 
       return res.json({ doctor: { ...newDoc, password: undefined }, message: 'Doctor session ready' })
     } else {
-      await supabase.from('doctors').update({ is_online: true }).eq('id', doctor.id)
-      const { password: _, ...doc } = doctor
+      const { data: updatedDoctor, error: updateDocErr } = await supabase
+        .from('doctors_auth')
+        .update(doctorProfile)
+        .eq('id', doctor.id)
+        .select('*')
+        .maybeSingle()
+      if (updateDocErr) return res.status(500).json({ error: 'Failed to update doctor auth: ' + updateDocErr.message })
+      const { data: existingDoctorProfile } = await supabase.from('doctors').select('id').eq('id', doctor.id).maybeSingle()
+      if (existingDoctorProfile) {
+        await supabase.from('doctors').update({
+          name: doctorProfile.name,
+          specialty: doctorProfile.specialty,
+          location: doctorProfile.location,
+          is_online: true,
+          license_number: doctorProfile.license_number,
+        }).eq('id', doctor.id)
+      } else {
+        await supabase.from('doctors').insert({
+          id: doctor.id,
+          name: doctorProfile.name,
+          specialty: doctorProfile.specialty,
+          location: doctorProfile.location,
+          languages: ['English'],
+          rating: 0,
+          rating_count: 0,
+          is_online: true,
+          fee: 35,
+          price: { basic: 50, premium: 100 },
+          license_verified: false,
+          license_number: doctorProfile.license_number,
+          created_at: new Date().toISOString(),
+        })
+      }
+      const { password: _, ...doc } = updatedDoctor || doctor
       return res.json({ doctor: doc, message: 'Doctor session ready' })
     }
   } catch (e) {

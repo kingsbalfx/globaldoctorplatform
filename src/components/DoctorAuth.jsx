@@ -100,6 +100,25 @@ function DoctorAuth({ onAuth }) {
     if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
 
+  const createBackendDoctorSession = async (profile) => {
+    let response
+    try {
+      response = await fetch(`${API_BASE}/api/auth/oauth/bridge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'doctor', ...profile }),
+      })
+    } catch {
+      throw new Error(`Could not reach the app server at ${API_BASE}. Your Google account is signed in, but the doctor dashboard needs the app server.`)
+    }
+
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || !result?.doctor?.id) {
+      throw new Error(result.error || 'Could not prepare your doctor dashboard.')
+    }
+    return result.doctor
+  }
+
   // ========== EMAIL / PASSWORD LOGIN (admin + doctor) ==========
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -118,6 +137,29 @@ function DoctorAuth({ onAuth }) {
 
       if (!formData.email || (isLogin && !formData.password)) {
         throw new Error('Please enter your email and password.')
+      }
+
+      if (!isLogin && completingExistingUser) {
+        const { data: updateData, error: updateError } = await supabase.auth.updateUser({
+          data: {
+            full_name: formData.name,
+            specialty: formData.specialty,
+            location: formData.location,
+            license_number: formData.licenseNumber,
+          },
+        })
+        if (updateError) throw updateError
+
+        const user = updateData?.user
+        const doctor = await createBackendDoctorSession({
+          email: user?.email || formData.email,
+          name: formData.name,
+          specialty: formData.specialty,
+          location: formData.location,
+          licenseNumber: formData.licenseNumber,
+        })
+        onAuth({ type: 'login', ...doctor })
+        return
       }
 
       // 2. ALWAYS call the local API first for email/password login
