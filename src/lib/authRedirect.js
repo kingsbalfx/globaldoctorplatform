@@ -1,4 +1,4 @@
-const PRODUCTION_ORIGIN = 'https://globaldoctorplatform.vercel.app'
+const PRODUCTION_ORIGIN = 'https://globaldoctorplattform.vercel.app'
 
 export function getAppOrigin() {
   const envOrigin = String(import.meta.env.VITE_PUBLIC_APP_URL || '').trim().replace(/\/+$/, '')

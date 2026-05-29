@@ -1,5 +1,4 @@
 ﻿import { useState } from 'react'
-import DoctorManagement from '../components/DoctorManagement'
 import PatientReviewManager from '../components/PatientReviewManager'
 import ReferralManager from '../components/ReferralManager'
 import FacilityReferralManager from '../components/FacilityReferralManager'
@@ -128,7 +127,6 @@ function AdminDashboard({ doctor, onLogout }) {
         {[
           { id: 'overview', label: 'Overview', icon: 'Stats' },
           { id: 'community', label: 'Community', icon: 'Chat' },
-          { id: 'doctors', label: 'Doctors', icon: 'Care' },
           { id: 'reviews', label: 'Reviews', icon: 'Star' },
           { id: 'referrals', label: 'Referrals', icon: 'Flow' },
           { id: 'patients', label: 'Patients', icon: 'Records' },
@@ -389,9 +387,6 @@ function AdminDashboard({ doctor, onLogout }) {
           }}
         />
       )}
-
-      {/* Doctors Tab */}
-      {activeTab === 'doctors' && <DoctorManagement />}
 
       {/* Reviews Tab */}
       {activeTab === 'reviews' && <PatientReviewManager />}

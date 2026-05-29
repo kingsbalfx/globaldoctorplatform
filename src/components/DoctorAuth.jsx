@@ -114,6 +114,9 @@ function DoctorAuth({ onAuth }) {
     }
 
     const result = await response.json().catch(() => ({}))
+    if (response.status === 403 && result?.pendingApproval) {
+      throw new Error(result.message || 'Your doctor account is pending platform admin approval.')
+    }
     if (!response.ok || !result?.doctor?.id) {
       throw new Error(result.error || 'Could not prepare your doctor dashboard.')
     }
@@ -203,8 +206,18 @@ function DoctorAuth({ onAuth }) {
       }
 
       // 4. Handle doctor login / register
+      if (response.status === 403 && result?.pendingApproval) {
+        throw new Error(result.error || result.message || 'Your doctor account is pending platform admin approval.')
+      }
+
       if (!response.ok) {
         throw new Error(result.error || 'Authentication failed')
+      }
+
+      if (result?.pendingApproval) {
+        addError(result.message || 'Registration submitted. A platform admin must approve your account before you can sign in.', 'success', 10000)
+        setIsLogin(true)
+        return
       }
 
       if (result?.doctor) {

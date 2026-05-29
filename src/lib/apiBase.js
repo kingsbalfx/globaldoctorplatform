@@ -1,5 +1,5 @@
 // ==================== PRODUCTION API URL ====================
-const PRODUCTION_ORIGIN = 'https://globaldoctorplatform.vercel.app'
+const PRODUCTION_ORIGIN = 'https://globaldoctorplattform.vercel.app'
 
 // ==================== UTILITY ====================
 function normalizeApiBase(rawValue) {

@@ -3,6 +3,7 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import axios from 'axios'
 import crypto from 'crypto'
+import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 import { calculateConsultationSplitNgn, calculateLabCommissionNgn } from '../src/lib/ngPricing.js'
 import pkg from 'agora-access-token'
@@ -97,6 +98,73 @@ function sanitizePatientForResponse(patient) {
   if (!patient) return null
   const { password, portal_pin, ...rest } = patient
   return rest
+}
+
+function sanitizeDoctorForResponse(doctor) {
+  if (!doctor) return null
+  const { password, doctors, ...rest } = doctor
+  return {
+    ...rest,
+    verified: Boolean(doctor.verified || doctors?.verified),
+    license_verified: Boolean(doctor.license_verified || doctors?.license_verified),
+    approval_status: (doctor.verified || doctors?.verified) ? 'approved' : 'pending_review',
+  }
+}
+
+function normalizeDoctorPayload(body = {}) {
+  return {
+    email: String(body.email || '').trim().toLowerCase(),
+    password: String(body.password || '').trim(),
+    name: String(body.name || '').trim(),
+    specialty: String(body.specialty || 'General Practitioner').trim(),
+    location: String(body.location || '').trim(),
+    languages: Array.isArray(body.languages)
+      ? body.languages.filter(Boolean)
+      : String(body.languages || 'English').split(',').map((item) => item.trim()).filter(Boolean),
+    consultationFee: safeNumber(body.consultation_fee ?? body.fee) || 50,
+    licenseNumber: String(body.licenseNumber || body.license_number || '').trim(),
+    licenseIssuer: String(body.licenseIssuer || body.license_issuer || '').trim(),
+    licenseExpiry: body.licenseExpiry || body.license_expiry || null,
+    bankCode: String(body.bankCode || body.bank_code || '').trim(),
+    bankAccount: String(body.bankAccount || body.bank_account || '').trim(),
+    currency: String(body.currency || '').trim(),
+    payoutMethod: String(body.payoutMethod || body.payout_method || 'bank_account').trim(),
+    mobileMoneyOperator: String(body.mobileMoneyOperator || body.mobile_money_operator || '').trim(),
+    mobileMoneyNumber: String(body.mobileMoneyNumber || body.mobile_money_number || '').trim(),
+  }
+}
+
+async function sendDoctorApprovalEmail(doctor) {
+  const smtpUser = process.env.SMTP_USER
+  const smtpPass = process.env.SMTP_PASS
+  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com'
+  const smtpPort = Number(process.env.SMTP_PORT || 587)
+  if (!smtpUser || !smtpPass || !doctor?.email) {
+    return { sent: false, reason: 'SMTP credentials or doctor email missing' }
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: { user: smtpUser, pass: smtpPass },
+  })
+
+  const appUrl = normalizeAppBaseUrl(process.env.APP_BASE_URL || process.env.VITE_PUBLIC_APP_URL || process.env.VITE_API_BASE) || 'https://globaldoctorplattform.vercel.app'
+  await transporter.sendMail({
+    from: `"GlobalDoc Connect" <${smtpUser}>`,
+    to: doctor.email,
+    subject: 'Your GlobalDoc Connect doctor account has been approved',
+    text: [
+      `Hello Dr. ${doctor.name || ''},`,
+      '',
+      'Your doctor account has been reviewed and approved.',
+      `You can now sign in at ${appUrl}/doctor`,
+      '',
+      'GlobalDoc Connect',
+    ].join('\n'),
+  })
+  return { sent: true }
 }
 
 async function isPlatformAdminRequest(req) {
@@ -298,10 +366,15 @@ app.post('/api/doctors/login', async (req, res) => {
     const { data: doctor, error: docError } = await supabase.from('doctors_auth').select('*').eq('email', email).eq('password', password).maybeSingle()
     if (docError) return res.status(500).json({ error: 'Database error (doctors_auth): ' + docError.message })
     if (!doctor) return res.status(401).json({ error: 'Invalid credentials' })
+    if (!doctor.verified) {
+      return res.status(403).json({
+        error: 'Your doctor account is pending platform admin approval. You will receive an email when access is granted.',
+        pendingApproval: true,
+      })
+    }
 
     await supabase.from('doctors').update({ is_online: true }).eq('id', doctor.id)
-    const { password: _, ...doc } = doctor
-    res.json({ doctor: doc, message: 'Login successful' })
+    res.json({ doctor: sanitizeDoctorForResponse(doctor), message: 'Login successful' })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -335,8 +408,11 @@ app.post('/api/doctors/register', async (req, res) => {
   }
   await supabase.from('doctors').insert(profile)
 
-  const { password: _, ...response } = newDoctor
-  res.status(201).json({ doctor: response, message: 'Registration successful' })
+  res.status(201).json({
+    doctor: sanitizeDoctorForResponse(newDoctor),
+    pendingApproval: true,
+    message: 'Registration submitted. A platform admin must review and approve your account before you can sign in.'
+  })
 })
 
 // ---------- OAUTH BRIDGE ----------
@@ -428,7 +504,11 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       })
       if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
 
-      return res.json({ doctor: { ...newDoc, password: undefined }, message: 'Doctor session ready' })
+      return res.status(403).json({
+        doctor: sanitizeDoctorForResponse(newDoc),
+        pendingApproval: true,
+        message: 'Doctor profile submitted. A platform admin must approve your account before dashboard access is enabled.'
+      })
     } else {
       const { data: updatedDoctor, error: updateDocErr } = await supabase
         .from('doctors_auth')
@@ -463,8 +543,15 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           created_at: new Date().toISOString(),
         })
       }
-      const { password: _, ...doc } = updatedDoctor || doctor
-      return res.json({ doctor: doc, message: 'Doctor session ready' })
+      const doc = updatedDoctor || doctor
+      if (!doc.verified) {
+        return res.status(403).json({
+          doctor: sanitizeDoctorForResponse(doc),
+          pendingApproval: true,
+          message: 'Doctor profile updated and is waiting for platform admin approval.'
+        })
+      }
+      return res.json({ doctor: sanitizeDoctorForResponse(doc), message: 'Doctor session ready' })
     }
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -749,7 +836,7 @@ app.patch('/api/patients/:patientId/status', async (req, res) => {
 
 // ---------- DOCTOR LIST ----------
 app.get('/api/doctors', async (req, res) => {
-  let query = supabase.from('doctors').select('*')
+  let query = supabase.from('doctors').select('*').eq('verified', true).eq('license_verified', true)
   if (req.query.specialty) query = query.eq('specialty', req.query.specialty)
   if (req.query.minRating) query = query.gte('rating', Number(req.query.minRating))
   if (req.query.online !== undefined && req.query.online !== '') query = query.eq('is_online', req.query.online === 'true')
@@ -949,35 +1036,126 @@ app.post('/api/doctors/community/messages', async (req, res) => {
 })
 
 // ---------- ADMIN: DOCTOR MANAGEMENT ----------
+app.get('/api/admin/doctors', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+  const { data: authRows, error: authError } = await supabase.from('doctors_auth').select('*').order('created_at', { ascending: false })
+  if (authError) return res.status(500).json({ error: authError.message })
+  const { data: profiles, error: profileError } = await supabase.from('doctors').select('*')
+  if (profileError) return res.status(500).json({ error: profileError.message })
+  const profileById = new Map((profiles || []).map((item) => [item.id, item]))
+  const doctors = (authRows || []).map((row) => sanitizeDoctorForResponse({ ...profileById.get(row.id), ...row }))
+  res.json({ doctors })
+})
+
 app.post('/api/admin/doctors', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  const { name, specialty, location, languages, consultation_fee, licenseNumber, licenseIssuer, licenseExpiry, bankCode, bankAccount, currency, payoutMethod, mobileMoneyOperator, mobileMoneyNumber } = req.body
-  if (!name || !specialty || !location || !licenseNumber) return res.status(400).json({ error: 'Missing required fields' })
+  const payload = normalizeDoctorPayload(req.body)
+  if (!payload.email || !payload.password || !payload.name || !payload.specialty || !payload.location || !payload.licenseNumber) {
+    return res.status(400).json({ error: 'Email, password, name, specialty, location, and license number are required' })
+  }
+  const { data: existing } = await supabase.from('doctors_auth').select('id').eq('email', payload.email).maybeSingle()
+  if (existing) return res.status(409).json({ error: 'A doctor already exists with this email' })
 
   const id = generateId('doc')
+  const authRow = {
+    id,
+    email: payload.email,
+    password: payload.password,
+    name: payload.name,
+    specialty: payload.specialty,
+    location: payload.location,
+    license_number: payload.licenseNumber,
+    bank_code: payload.bankCode || null,
+    bank_account: payload.bankAccount || null,
+    currency: payload.currency || null,
+    verified: true,
+    created_at: new Date().toISOString(),
+  }
   const doctor = {
-    id, name, specialty, location, languages: languages || ['English'],
-    rating: 0, availability: 'Available upon request', verified: false, is_online: false,
-    fee: consultation_fee || 50, license_number: licenseNumber, license_issuer: licenseIssuer || null,
-    license_expiry: licenseExpiry || null, bank_code: bankCode || null, bank_account: bankAccount || null,
-    currency: currency || null, payout_method: payoutMethod || 'bank_account',
-    mobile_money_operator: mobileMoneyOperator || null, mobile_money_number: mobileMoneyNumber || null,
+    id, name: payload.name, specialty: payload.specialty, location: payload.location, languages: payload.languages,
+    rating: 0, rating_count: 0, availability: 'Available upon request', verified: true, is_online: false,
+    fee: payload.consultationFee, license_number: payload.licenseNumber, license_issuer: payload.licenseIssuer || null,
+    license_expiry: payload.licenseExpiry || null, bank_code: payload.bankCode || null, bank_account: payload.bankAccount || null,
+    currency: payload.currency || null, payout_method: payload.payoutMethod,
+    mobile_money_operator: payload.mobileMoneyOperator || null, mobile_money_number: payload.mobileMoneyNumber || null,
+    license_verified: true,
     created_at: new Date().toISOString()
   }
+  const { error: authInsertError } = await supabase.from('doctors_auth').insert(authRow)
+  if (authInsertError) return res.status(500).json({ error: authInsertError.message })
   await supabase.from('doctors').insert(doctor)
-  res.status(201).json({ doctor, message: 'Doctor added' })
+  const emailResult = await sendDoctorApprovalEmail(authRow).catch((error) => ({ sent: false, reason: error.message }))
+  res.status(201).json({ doctor: sanitizeDoctorForResponse({ ...doctor, ...authRow }), email: emailResult, message: 'Doctor added and approved' })
 })
 
 app.delete('/api/admin/doctors/:doctorId', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
   await supabase.from('doctors').delete().eq('id', req.params.doctorId)
+  await supabase.from('doctors_auth').delete().eq('id', req.params.doctorId)
   res.json({ message: 'Doctor deleted' })
+})
+
+app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+  const payload = normalizeDoctorPayload(req.body)
+  if (!payload.name || !payload.specialty || !payload.location || !payload.licenseNumber) {
+    return res.status(400).json({ error: 'Name, specialty, location, and license number are required' })
+  }
+  const authUpdates = {
+    name: payload.name,
+    specialty: payload.specialty,
+    location: payload.location,
+    license_number: payload.licenseNumber,
+    bank_code: payload.bankCode || null,
+    bank_account: payload.bankAccount || null,
+    currency: payload.currency || null,
+  }
+  if (payload.email) authUpdates.email = payload.email
+  if (payload.password) authUpdates.password = payload.password
+  const profileUpdates = {
+    name: payload.name,
+    specialty: payload.specialty,
+    location: payload.location,
+    languages: payload.languages,
+    fee: payload.consultationFee,
+    license_number: payload.licenseNumber,
+    license_issuer: payload.licenseIssuer || null,
+    license_expiry: payload.licenseExpiry || null,
+    bank_code: payload.bankCode || null,
+    bank_account: payload.bankAccount || null,
+    currency: payload.currency || null,
+    payout_method: payload.payoutMethod,
+    mobile_money_operator: payload.mobileMoneyOperator || null,
+    mobile_money_number: payload.mobileMoneyNumber || null,
+  }
+  const { data: authRow, error: authError } = await supabase.from('doctors_auth').update(authUpdates).eq('id', req.params.doctorId).select('*').maybeSingle()
+  if (authError) return res.status(500).json({ error: authError.message })
+  const { data: profile, error: profileError } = await supabase.from('doctors').update(profileUpdates).eq('id', req.params.doctorId).select('*').maybeSingle()
+  if (profileError) return res.status(500).json({ error: profileError.message })
+  res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...authRow }), message: 'Doctor updated' })
 })
 
 app.patch('/api/admin/doctors/:doctorId/verify', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  await supabase.from('doctors').update({ verified: true, license_verified: true }).eq('id', req.params.doctorId)
-  res.json({ message: 'Doctor verified' })
+  const approvedAt = new Date().toISOString()
+  const { data: authRow, error: authError } = await supabase
+    .from('doctors_auth')
+    .update({ verified: true })
+    .eq('id', req.params.doctorId)
+    .select('*')
+    .maybeSingle()
+  if (authError) return res.status(500).json({ error: authError.message })
+  const { data: profile, error: profileError } = await supabase
+    .from('doctors')
+    .update({ verified: true, license_verified: true, is_online: false })
+    .eq('id', req.params.doctorId)
+    .select('*')
+    .maybeSingle()
+  if (profileError) return res.status(500).json({ error: profileError.message })
+  if (!authRow && !profile) return res.status(404).json({ error: 'Doctor not found' })
+  const doctor = sanitizeDoctorForResponse({ ...profile, ...authRow, approved_at: approvedAt })
+  const emailResult = await sendDoctorApprovalEmail(doctor).catch((error) => ({ sent: false, reason: error.message }))
+  res.json({ doctor, email: emailResult, message: 'Doctor approved and access granted' })
 })
 
 // ---------- ADMIN: REVIEWS ----------

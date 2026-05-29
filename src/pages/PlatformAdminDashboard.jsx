@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_BASE } from '../lib/apiBase'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
+import DoctorManagement from '../components/DoctorManagement'
 
 const AUDIENCES = [
   { id: 'landing', label: 'Landing Page' },
@@ -18,7 +19,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const credentials = adminSession?.credentials || null
   const admin = adminSession?.admin || null
 
-  const [activeSection, setActiveSection] = useState('broadcasts') // broadcasts | facilities | community | audit
+  const [activeSection, setActiveSection] = useState('doctors') // doctors | broadcasts | facilities | community | audit
 
   const [selectedAudience, setSelectedAudience] = useState('landing')
   const [severity, setSeverity] = useState('info')
@@ -293,6 +294,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
       <div className="mb-8 flex flex-wrap gap-2">
         {[
+          { id: 'doctors', label: 'Doctors' },
           { id: 'broadcasts', label: 'Broadcasts' },
           { id: 'facilities', label: 'Facilities' },
           { id: 'community', label: 'Doctor Community' },
@@ -312,6 +314,8 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
           </button>
         ))}
       </div>
+
+      {activeSection === 'doctors' && <DoctorManagement adminHeaders={headers} />}
 
       {activeSection === 'broadcasts' && (
         <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
