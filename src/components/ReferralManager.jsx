@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function ReferralManager() {
   const [showReferralForm, setShowReferralForm] = useState(false)
@@ -17,7 +17,7 @@ function ReferralManager() {
 
   const loadReferrals = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/admin/referrals`)
+      const response = await apiFetch(`/api/admin/referrals`)
       if (!response.ok) {
         throw new Error('Unable to load referrals')
       }
@@ -42,7 +42,7 @@ function ReferralManager() {
 
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/admin/referrals`, {
+      const response = await apiFetch(`/api/admin/referrals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

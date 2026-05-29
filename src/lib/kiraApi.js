@@ -1,4 +1,4 @@
-import { API_BASE as APP_API_BASE } from './apiBase'
+import { apiFetch } from './apiFetch'
 
 export async function fetchDoctors({ specialty, minRating, availability, query, language }) {
   const params = new URLSearchParams()
@@ -8,7 +8,7 @@ export async function fetchDoctors({ specialty, minRating, availability, query, 
   if (query) params.set('query', query)
   if (language) params.set('language', language)
 
-  const response = await fetch(`${APP_API_BASE}/api/doctors?${params.toString()}`)
+  const response = await apiFetch(`/api/doctors?${params.toString()}`)
   if (!response.ok) {
     console.error('Failed to fetch doctors', await response.text())
     return []
@@ -21,7 +21,7 @@ export async function fetchDoctors({ specialty, minRating, availability, query, 
 }
 
 export async function submitReview(reviewData) {
-  const response = await fetch(`${APP_API_BASE}/api/reviews`, {
+  const response = await apiFetch(`/api/reviews`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(reviewData),
@@ -35,7 +35,7 @@ export async function submitReview(reviewData) {
 }
 
 export async function createPaymentSession(paymentData) {
-  const response = await fetch(`${APP_API_BASE}/api/payments`, {
+  const response = await apiFetch(`/api/payments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(paymentData),
@@ -51,7 +51,7 @@ export async function createPaymentSession(paymentData) {
 
 // NEW: Doctor withdrawal request – calls the existing backend endpoint
 export async function requestDoctorWithdrawal(doctorId, tokens) {
-  const response = await fetch(`${APP_API_BASE}/api/doctors/${encodeURIComponent(doctorId)}/withdraw`, {
+  const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctorId)}/withdraw`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tokens }),

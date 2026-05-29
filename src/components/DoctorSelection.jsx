@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search, Stethoscope, WalletCards } from 'lucide-react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 const consultationTypes = [
   { id: 'basic', label: 'Basic', tokens: 50, description: 'Focused visit for common concerns.' },
@@ -27,7 +27,7 @@ function DoctorSelection({ patient, onDoctorSelected }) {
   const fetchDoctors = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/doctors`)
+      const response = await apiFetch(`/api/doctors`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load doctors')
       const sortedDoctors = (data.doctors || []).sort((a, b) => Number(Boolean(b.isOnline)) - Number(Boolean(a.isOnline)))
@@ -43,7 +43,7 @@ function DoctorSelection({ patient, onDoctorSelected }) {
   const fetchPatientTokens = async () => {
     if (!patient?.id) return
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${encodeURIComponent(patient.id)}/tokens`)
+      const response = await apiFetch(`/api/patients/${encodeURIComponent(patient.id)}/tokens`)
       const data = await response.json().catch(() => ({}))
       if (response.ok) setTokens(data.tokens || 0)
     } catch (error) {
@@ -107,7 +107,7 @@ function DoctorSelection({ patient, onDoctorSelected }) {
     const amountUSD = Math.max(10, Math.round(Number(purchaseUSD) || 10))
     setPurchaseLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${encodeURIComponent(patient.id)}/tokens/purchase/initialize`, {
+      const response = await apiFetch(`/api/patients/${encodeURIComponent(patient.id)}/tokens/purchase/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function StatCard({ label, value }) {
   return (
@@ -25,7 +25,7 @@ function PatientRecordReview() {
     setError('')
     setRecord(null)
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${encodeURIComponent(patientId.trim())}/record`)
+      const response = await apiFetch(`/api/patients/${encodeURIComponent(patientId.trim())}/record`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load patient record')
       setRecord(data)

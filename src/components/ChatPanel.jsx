@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function ChatPanel({ consultationId, userId, userType, recipientId, recipientType }) {
   const [messages, setMessages] = useState([])
@@ -15,7 +15,7 @@ function ChatPanel({ consultationId, userId, userType, recipientId, recipientTyp
   const loadMessages = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/chat/messages?consultationId=${encodeURIComponent(consultationId)}`)
+      const response = await apiFetch(`/api/chat/messages?consultationId=${encodeURIComponent(consultationId)}`)
       const data = await response.json()
       setMessages(data.messages || [])
     } catch (error) {
@@ -30,7 +30,7 @@ function ChatPanel({ consultationId, userId, userType, recipientId, recipientTyp
     if (!draft.trim() || !consultationId || !recipientId) return
 
     try {
-      const response = await fetch(`${API_BASE}/api/chat/messages`, {
+      const response = await apiFetch(`/api/chat/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

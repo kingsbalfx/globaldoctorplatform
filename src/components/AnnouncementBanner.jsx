@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 const SEVERITY_STYLES = {
   info: {
@@ -37,7 +37,7 @@ function AnnouncementBanner({ audience }) {
     const load = async () => {
       setLoading(true)
       try {
-        const response = await fetch(`${API_BASE}/api/announcements?audience=${encodeURIComponent(audience)}`)
+        const response = await apiFetch(`/api/announcements?audience=${encodeURIComponent(audience)}`)
         const data = await response.json().catch(() => ({}))
         if (cancelled) return
         setAnnouncements(Array.isArray(data.announcements) ? data.announcements : [])

@@ -15,7 +15,7 @@ import ManualDownload from '../components/ManualDownload'
 import AccessibilityPanel from '../components/AccessibilityPanel'
 import LanguageSelector from '../components/LanguageSelector'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function PatientDashboard() {
   const [currentStep, setCurrentStep] = useState('auth') // auth -> doctor -> calendar -> dashboard
@@ -67,9 +67,9 @@ function PatientDashboard() {
     setLoading(true)
     try {
       const [appointmentsRes, filesRes, notificationsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/appointments?patientId=${encodeURIComponent(patient.id)}`),
-        fetch(`${API_BASE}/api/patients/files?patientId=${encodeURIComponent(patient.id)}`),
-        fetch(`${API_BASE}/api/notifications?userId=${encodeURIComponent(patient.id)}&userType=patient`),
+        apiFetch(`/api/appointments?patientId=${encodeURIComponent(patient.id)}`),
+        apiFetch(`/api/patients/files?patientId=${encodeURIComponent(patient.id)}`),
+        apiFetch(`/api/notifications?userId=${encodeURIComponent(patient.id)}&userType=patient`),
       ])
 
       const [appointmentsData, filesData, notificationsData] = await Promise.all([
@@ -121,7 +121,7 @@ function PatientDashboard() {
     if (!patient) return
 
     try {
-      const response = await fetch(`${API_BASE}/api/emergency/call`, {
+      const response = await apiFetch(`/api/emergency/call`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import DoctorManagement from '../components/DoctorManagement'
 
@@ -59,7 +59,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
   const loadConfig = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/config`)
+      const response = await apiFetch(`/api/config`)
       const data = await response.json().catch(() => null)
       if (response.ok) setConfig(data)
     } catch {
@@ -70,7 +70,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const loadAnnouncements = async (audience) => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/announcements?audience=${encodeURIComponent(audience)}`)
+      const response = await apiFetch(`/api/announcements?audience=${encodeURIComponent(audience)}`)
       const data = await response.json().catch(() => ({}))
       setAnnouncements(Array.isArray(data.announcements) ? data.announcements : [])
     } catch {
@@ -98,7 +98,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/admin/announcements`, {
+      const response = await apiFetch(`/api/admin/announcements`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -129,7 +129,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     if (!window.confirm('Delete this announcement?')) return
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/admin/announcements/${encodeURIComponent(id)}`, {
+      const response = await apiFetch(`/api/admin/announcements/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers,
       })
@@ -148,9 +148,9 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     setLoading(true)
     try {
       const url = facilityFilter
-        ? `${API_BASE}/api/facilities?type=${encodeURIComponent(facilityFilter)}`
-        : `${API_BASE}/api/facilities`
-      const response = await fetch(url, { headers })
+        ? `/api/facilities?type=${encodeURIComponent(facilityFilter)}`
+        : '/api/facilities'
+      const response = await apiFetch(url, { headers })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load facilities')
       setFacilities(Array.isArray(data.facilities) ? data.facilities : [])
@@ -171,7 +171,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/facilities`, {
+      const response = await apiFetch(`/api/facilities`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -217,7 +217,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/admin/facilities/${encodeURIComponent(funding.facilityId)}/fund`, {
+      const response = await apiFetch(`/api/admin/facilities/${encodeURIComponent(funding.facilityId)}/fund`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ amount_ngn: amount }),
@@ -238,7 +238,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     if (!headers) return
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/admin/audit-logs`, { headers })
+      const response = await apiFetch(`/api/admin/audit-logs`, { headers })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load audit logs')
       setAuditLogs(Array.isArray(data.auditLogs) ? data.auditLogs : [])

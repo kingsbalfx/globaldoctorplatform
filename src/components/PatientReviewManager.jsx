@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getSpecialtyLogo } from '../lib/specialtyRegistry'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function PatientReviewManager() {
   const [reviews, setReviews] = useState([])
@@ -15,7 +15,7 @@ function PatientReviewManager() {
   const loadReviews = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/admin/reviews`)
+      const response = await apiFetch(`/api/admin/reviews`)
       if (!response.ok) throw new Error('Failed to load reviews')
       const data = await response.json()
       setReviews(data.reviews || [])
@@ -28,7 +28,7 @@ function PatientReviewManager() {
 
   const handleReviewAction = async (reviewId, action) => {
     try {
-      const response = await fetch(`${API_BASE}/api/admin/reviews/${reviewId}/${action}`, {
+      const response = await apiFetch(`/api/admin/reviews/${reviewId}/${action}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
       })

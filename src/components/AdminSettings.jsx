@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function AdminSettings() {
   const [settings, setSettings] = useState({ minimumSubscriptionUSD: 5 })
@@ -14,7 +14,7 @@ function AdminSettings() {
 
   const fetchAdminSettings = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/settings`)
+      const response = await apiFetch(`/api/settings`)
       if (!response.ok) throw new Error('Failed to load settings')
       const data = await response.json()
       setSettings(data.settings)
@@ -26,7 +26,7 @@ function AdminSettings() {
 
   const fetchOnlineStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/online/status`)
+      const response = await apiFetch(`/api/online/status`)
       if (!response.ok) throw new Error('Failed to load online status')
       const data = await response.json()
       setOnlineStatus(data)
@@ -39,7 +39,7 @@ function AdminSettings() {
 
   const handleSaveSettings = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/admin/settings`, {
+      const response = await apiFetch(`/api/admin/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ minimumSubscriptionUSD: Number(minPrice) }),

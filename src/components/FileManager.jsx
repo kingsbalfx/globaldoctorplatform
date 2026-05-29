@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function FileManager() {
   const [files, setFiles] = useState([])
@@ -18,7 +18,7 @@ function FileManager() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/admin/files/upload`, {
+      const response = await apiFetch(`/api/admin/files/upload`, {
         method: 'POST',
         body: formData,
       })
@@ -38,7 +38,7 @@ function FileManager() {
     if (!window.confirm('Delete this file?')) return
 
     try {
-      const response = await fetch(`${API_BASE}/api/admin/files/${fileId}`, {
+      const response = await apiFetch(`/api/admin/files/${fileId}`, {
         method: 'DELETE',
       })
 

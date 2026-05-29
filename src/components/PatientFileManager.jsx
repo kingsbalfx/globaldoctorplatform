@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function PatientFileManager({ patientId }) {
   const [files, setFiles] = useState([])
@@ -14,7 +14,7 @@ function PatientFileManager({ patientId }) {
   const loadFiles = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/patients/files?patientId=${encodeURIComponent(patientId)}`)
+      const response = await apiFetch(`/api/patients/files?patientId=${encodeURIComponent(patientId)}`)
       const data = await response.json()
       setFiles(data.files || [])
     } catch (error) {
@@ -39,7 +39,7 @@ function PatientFileManager({ patientId }) {
       const reader = new FileReader()
       reader.onload = async () => {
         const base64 = reader.result.split(',')[1]
-        const response = await fetch(`${API_BASE}/api/patients/files/upload`, {
+        const response = await apiFetch(`/api/patients/files/upload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -66,7 +66,7 @@ function PatientFileManager({ patientId }) {
 
   const handleDownload = async (fileId) => {
     try {
-      const response = await fetch(`${API_BASE}/api/patients/files/${fileId}/download?patientId=${encodeURIComponent(patientId)}`)
+      const response = await apiFetch(`/api/patients/files/${fileId}/download?patientId=${encodeURIComponent(patientId)}`)
       if (!response.ok) {
         throw new Error('Download failed')
       }

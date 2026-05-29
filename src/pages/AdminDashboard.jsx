@@ -1,16 +1,12 @@
-﻿import { useState } from 'react'
-import PatientReviewManager from '../components/PatientReviewManager'
-import ReferralManager from '../components/ReferralManager'
+import { useState } from 'react'
 import FacilityReferralManager from '../components/FacilityReferralManager'
-import FileManager from '../components/FileManager'
 import NotificationCenter from '../components/NotificationCenter'
-import AdminSettings from '../components/AdminSettings'
 import PatientRecordReview from '../components/PatientRecordReview'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import ManualDownload from '../components/ManualDownload'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function AdminDashboard({ doctor, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview')
@@ -38,7 +34,7 @@ function AdminDashboard({ doctor, onLogout }) {
   const handleSavePayoutDetails = async () => {
     setSavingPayoutDetails(true)
     try {
-      const response = await fetch(`${API_BASE}/api/doctors/${doctor.id}/payout-details`, {
+      const response = await apiFetch(`/api/doctors/${doctor.id}/payout-details`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payoutDetails),
@@ -72,7 +68,7 @@ function AdminDashboard({ doctor, onLogout }) {
     
     setWithdrawing(true)
     try {
-      const response = await fetch(`${API_BASE}/api/doctors/${doctor.id}/withdraw`, {
+      const response = await apiFetch(`/api/doctors/${doctor.id}/withdraw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tokens })
@@ -127,11 +123,8 @@ function AdminDashboard({ doctor, onLogout }) {
         {[
           { id: 'overview', label: 'Overview', icon: 'Stats' },
           { id: 'community', label: 'Community', icon: 'Chat' },
-          { id: 'reviews', label: 'Reviews', icon: 'Star' },
           { id: 'referrals', label: 'Referrals', icon: 'Flow' },
           { id: 'patients', label: 'Patients', icon: 'Records' },
-          { id: 'settings', label: 'Settings', icon: 'Config' },
-          { id: 'files', label: 'Files', icon: 'Files' },
           { id: 'wallet', label: 'Financials', icon: 'Wallet' },
           { id: 'manuals', label: 'Manuals & Guides', icon: 'Guides' },
           { id: 'notifications', label: 'Notifications', icon: 'Alerts' },
@@ -365,10 +358,10 @@ function AdminDashboard({ doctor, onLogout }) {
             <div className="mt-8 p-6 bg-blue-50 rounded-2xl border border-blue-100">
               <h4 className="text-blue-900 font-semibold mb-2">Withdrawal Policy</h4>
               <ul className="text-blue-800 text-sm space-y-1">
-                <li>â€¢ Conversion rate: 10 Tokens = $1 USD.</li>
-                <li>â€¢ Minimum withdrawal amount is 50 Tokens ($5).</li>
-                <li>â€¢ Payouts are processed via Kora when configured.</li>
-                <li>â€¢ Ensure payout details match your registered identity.</li>
+                <li>• Conversion rate: 10 Tokens = $1 USD.</li>
+                <li>• Minimum withdrawal amount is 50 Tokens ($5).</li>
+                <li>• Payouts are processed via Kora when configured.</li>
+                <li>• Ensure payout details match your registered identity.</li>
               </ul>
             </div>
           </div>
@@ -388,24 +381,13 @@ function AdminDashboard({ doctor, onLogout }) {
         />
       )}
 
-      {/* Reviews Tab */}
-      {activeTab === 'reviews' && <PatientReviewManager />}
-
       {/* Referrals Tab */}
       {activeTab === 'referrals' && (
-        <div className="space-y-8">
-          <ReferralManager />
-          <FacilityReferralManager doctor={doctor} />
-        </div>
+        <FacilityReferralManager doctor={doctor} />
       )}
 
       {/* Patients Tab */}
       {activeTab === 'patients' && <PatientRecordReview />}
-
-      {/* Files Tab */}
-      {activeTab === 'files' && <FileManager />}
-      {/* Settings Tab */}
-      {activeTab === 'settings' && <AdminSettings />}
 
       {/* Notifications Tab */}
       {activeTab === 'notifications' && (

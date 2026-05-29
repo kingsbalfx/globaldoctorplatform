@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 const FACILITY_TYPES = [
   { id: 'private_clinic', label: 'Private Clinic' },
@@ -32,7 +32,7 @@ function FacilityReferralManager({ doctor }) {
 
   const loadFacilities = async (type) => {
     try {
-      const response = await fetch(`${API_BASE}/api/facilities?type=${encodeURIComponent(type)}`)
+      const response = await apiFetch(`/api/facilities?type=${encodeURIComponent(type)}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load facilities')
       setFacilitiesForType(Array.isArray(data.facilities) ? data.facilities : [])
@@ -46,7 +46,7 @@ function FacilityReferralManager({ doctor }) {
 
   const loadFacilityIndex = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/facilities`)
+      const response = await apiFetch(`/api/facilities`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load facilities')
       setFacilityIndex(Array.isArray(data.facilities) ? data.facilities : [])
@@ -58,7 +58,7 @@ function FacilityReferralManager({ doctor }) {
   const loadHistory = async () => {
     if (!doctorId) return
     try {
-      const response = await fetch(`${API_BASE}/api/referrals/facility?doctorId=${encodeURIComponent(doctorId)}`)
+      const response = await apiFetch(`/api/referrals/facility?doctorId=${encodeURIComponent(doctorId)}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load history')
       setHistory(Array.isArray(data.referrals) ? data.referrals : [])
@@ -88,7 +88,7 @@ function FacilityReferralManager({ doctor }) {
     setMessage('')
     setCreated(null)
     try {
-      const response = await fetch(`${API_BASE}/api/referrals/facility/create`, {
+      const response = await apiFetch(`/api/referrals/facility/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

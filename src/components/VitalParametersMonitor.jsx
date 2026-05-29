@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 // Icon components as SVG data URLs for image-based UI
 const VITAL_ICONS = {
@@ -304,7 +304,7 @@ const VitalParametersMonitor = ({ consultationId, patientId, doctorId, userType 
   // Save vital parameter to database
   const saveVitalParameter = async (parameter, value) => {
     try {
-      await fetch(`${API_BASE}/api/vital-parameters`, {
+      await apiFetch(`/api/vital-parameters`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { MessageCircle, Send } from 'lucide-react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function DoctorCommunityChat({ sender }) {
   const [messages, setMessages] = useState([])
@@ -9,7 +9,7 @@ function DoctorCommunityChat({ sender }) {
 
   const loadMessages = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/doctors/community/messages`)
+      const response = await apiFetch(`/api/doctors/community/messages`)
       const data = await response.json().catch(() => ({}))
       setMessages(Array.isArray(data.messages) ? data.messages : [])
     } catch {
@@ -28,7 +28,7 @@ function DoctorCommunityChat({ sender }) {
     if (!draft.trim() || !sender?.id) return
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/doctors/community/messages`, {
+      const response = await apiFetch(`/api/doctors/community/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
 import VitalParametersMonitor from './VitalParametersMonitor'
 
 const SDK_URL = 'https://unpkg.com/@daily-co/daily-js@0.22.1/dist/daily-js.min.js'

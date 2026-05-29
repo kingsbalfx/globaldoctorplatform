@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentScheduled }) {
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -19,7 +19,7 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
     setLoading(true)
     try {
       const dateStr = date.toISOString().split('T')[0]
-      const response = await fetch(`${API_BASE}/api/doctors/${doctor.id}/availability?date=${dateStr}`)
+      const response = await apiFetch(`/api/doctors/${doctor.id}/availability?date=${dateStr}`)
       if (response.ok) {
         const data = await response.json()
         setAvailableSlots(data.slots || {})
@@ -121,7 +121,7 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
         tokensRequired: subscriptionType === 'basic' ? (doctor.price?.basic || 50) : (doctor.price?.premium || 100)
       }
 
-      const response = await fetch(`${API_BASE}/api/appointments`, {
+      const response = await apiFetch(`/api/appointments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(appointmentData),

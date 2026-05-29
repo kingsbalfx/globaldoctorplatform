@@ -1035,6 +1035,79 @@ app.post('/api/doctors/community/messages', async (req, res) => {
   res.status(201).json({ message: 'Community message sent' })
 })
 
+// ---------- LEGACY REFERRAL SUPPORT ----------
+app.get('/api/specialties', (_req, res) => {
+  res.json({
+    specialties: [
+      'General Practitioner',
+      'Cardiology',
+      'Dermatology',
+      'Psychiatry',
+      'Pediatrics',
+      'Oncology',
+      'Neurology',
+      'Urology',
+      'Orthopedics',
+      'Obstetrics & GYN',
+      'Ophthalmology',
+    ],
+  })
+})
+
+app.get('/api/tokens/balance/:patientId', async (req, res) => {
+  const balance = await getPatientTokenBalance(req.params.patientId)
+  res.json({ balance, tokens: balance })
+})
+
+app.post('/api/tokens/deduct', async (req, res) => {
+  const patientId = req.body?.patientId || req.body?.userId
+  const amount = Math.max(0, Math.round(Number(req.body?.amount || 0)))
+  if (!patientId || amount <= 0) return res.status(400).json({ error: 'patientId and valid amount required' })
+  const ok = await deductPatientTokens(patientId, amount)
+  if (!ok) return res.status(402).json({ error: 'Insufficient tokens' })
+  const balance = await getPatientTokenBalance(patientId)
+  res.json({ balance, tokens: balance, message: 'Tokens deducted' })
+})
+
+app.get('/api/referrals/pending/:userId/:consultationId', (req, res) => {
+  res.json({ referral: null, referrals: [], userId: req.params.userId, consultationId: req.params.consultationId })
+})
+
+app.post('/api/referrals/request', (req, res) => {
+  res.status(201).json({
+    referral: {
+      id: generateId('refreq'),
+      ...req.body,
+      status: 'pending_doctor_approval',
+      created_at: new Date().toISOString(),
+    },
+    message: 'Referral request submitted',
+  })
+})
+
+app.post('/api/referrals/initiate', (req, res) => {
+  res.status(201).json({
+    referral: {
+      id: generateId('refinit'),
+      ...req.body,
+      status: 'pending_patient_approval',
+      created_at: new Date().toISOString(),
+    },
+    message: 'Referral initiated',
+  })
+})
+
+app.patch('/api/referrals/:referralId/respond', (req, res) => {
+  res.json({
+    referral: {
+      id: req.params.referralId,
+      status: req.body?.accepted === false ? 'rejected' : 'accepted',
+      responded_at: new Date().toISOString(),
+    },
+    message: 'Referral response recorded',
+  })
+})
+
 // ---------- ADMIN: DOCTOR MANAGEMENT ----------
 app.get('/api/admin/doctors', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })

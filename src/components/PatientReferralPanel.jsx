@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
 
@@ -25,7 +25,7 @@ function PatientReferralPanel({ patient, currentDoctor, onReferralSubmitted }) {
     setMessage('')
 
     try {
-      const response = await fetch(`${API_BASE}/api/patients/referrals`, {
+      const response = await apiFetch(`/api/patients/referrals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function NotificationCenter({ userId, userType }) {
   const [notifications, setNotifications] = useState([])
@@ -14,7 +14,7 @@ function NotificationCenter({ userId, userType }) {
   const loadNotifications = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/notifications?userId=${encodeURIComponent(userId)}&userType=${encodeURIComponent(userType)}`)
+      const response = await apiFetch(`/api/notifications?userId=${encodeURIComponent(userId)}&userType=${encodeURIComponent(userType)}`)
       const data = await response.json()
       setNotifications(data.notifications || [])
     } catch (error) {
@@ -26,7 +26,7 @@ function NotificationCenter({ userId, userType }) {
 
   const handleMarkRead = async (notificationId) => {
     try {
-      const response = await fetch(`${API_BASE}/api/notifications/${notificationId}/read`, {
+      const response = await apiFetch(`/api/notifications/${notificationId}/read`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
       })

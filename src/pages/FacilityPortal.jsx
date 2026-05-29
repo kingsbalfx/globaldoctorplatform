@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 import VideoChatPanel from '../components/VideoChatPanel'
 
 const FACILITY_TYPES = [
@@ -78,7 +78,7 @@ function FacilityPortal() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`${API_BASE}/api/facilities?type=${encodeURIComponent(type)}`)
+      const response = await apiFetch(`/api/facilities?type=${encodeURIComponent(type)}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load facilities')
       setFacilities(Array.isArray(data.facilities) ? data.facilities : [])
@@ -118,7 +118,7 @@ function FacilityPortal() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`${API_BASE}/api/facilities/auth`, {
+      const response = await apiFetch(`/api/facilities/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facilityId, pin: pin.trim() }),
@@ -149,7 +149,7 @@ function FacilityPortal() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`${API_BASE}/api/facilities/auth`, {
+      const response = await apiFetch(`/api/facilities/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facilityId: facility.id, pin: pin.trim() }),
@@ -168,7 +168,7 @@ function FacilityPortal() {
   const loadOnlineDoctors = async () => {
     setDoctorLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/doctors?online=true`)
+      const response = await apiFetch(`/api/doctors?online=true`)
       const data = await response.json().catch(() => ({}))
       const list = Array.isArray(data.doctors) ? data.doctors : []
       setDoctors(list)
@@ -200,7 +200,7 @@ function FacilityPortal() {
     setError('')
     setRedeemResult(null)
     try {
-      const response = await fetch(`${API_BASE}/api/referrals/facility/redeem`, {
+      const response = await apiFetch(`/api/referrals/facility/redeem`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -244,7 +244,7 @@ function FacilityPortal() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`${API_BASE}/api/patients/facility/register`, {
+      const response = await apiFetch(`/api/patients/facility/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -275,7 +275,7 @@ function FacilityPortal() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${encodeURIComponent(selectedPatientId.trim())}/record`)
+      const response = await apiFetch(`/api/patients/${encodeURIComponent(selectedPatientId.trim())}/record`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load patient record')
       setPatientRecord(data)
@@ -305,7 +305,7 @@ function FacilityPortal() {
     setConsultation(null)
     setConsultSplit(null)
     try {
-      const response = await fetch(`${API_BASE}/api/consultations/start`, {
+      const response = await apiFetch(`/api/consultations/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -335,7 +335,7 @@ function FacilityPortal() {
     setLoading(true)
     setError('')
     try {
-      const response = await fetch(`${API_BASE}/api/consultations/end`, {
+      const response = await apiFetch(`/api/consultations/end`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

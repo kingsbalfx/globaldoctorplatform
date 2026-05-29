@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function TokenManager({ patient, onTokensUpdated }) {
   const [tokens, setTokens] = useState(0)
@@ -21,7 +21,7 @@ function TokenManager({ patient, onTokensUpdated }) {
 
   const fetchSettings = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/settings`)
+      const response = await apiFetch(`/api/settings`)
       if (response.ok) {
         const data = await response.json()
         setMinSubscriptionUSD(data.settings.minimumSubscriptionUSD || 10)
@@ -33,12 +33,12 @@ function TokenManager({ patient, onTokensUpdated }) {
 
   const fetchTokenBalance = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${patient.id}/tokens`)
+      const response = await apiFetch(`/api/patients/${patient.id}/tokens`)
       if (response.ok) {
         const data = await response.json()
         setTokens(data.tokens || 0)
         // Check history for prior purchases
-        const historyRes = await fetch(`${API_BASE}/api/patients/${patient.id}/tokens/history`).catch(() => null)
+        const historyRes = await apiFetch(`/api/patients/${patient.id}/tokens/history`).catch(() => null)
         if (historyRes?.ok) {
           const historyData = await historyRes.json()
           setHasPurchasedBefore((historyData.transactions || []).some(t => t.type === 'purchase'))
@@ -52,7 +52,7 @@ function TokenManager({ patient, onTokensUpdated }) {
 
   const fetchSubscription = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${patient.id}/subscription`)
+      const response = await apiFetch(`/api/patients/${patient.id}/subscription`)
       if (response.ok) {
         const data = await response.json()
         setSubscription(data.subscription)
@@ -65,7 +65,7 @@ function TokenManager({ patient, onTokensUpdated }) {
   const handlePurchaseTokens = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/patients/${patient.id}/tokens/purchase/initialize`, {
+      const response = await apiFetch(`/api/patients/${patient.id}/tokens/purchase/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amountUSD: Math.max(10, Math.round(Number(purchaseUSD) || 10)), email: patient.email, name: patient.name }),
@@ -96,7 +96,7 @@ function TokenManager({ patient, onTokensUpdated }) {
     if (!pendingPurchase?.reference) return
     try {
       setLoading(true)
-      const response = await fetch(`${API_BASE}/api/payments/kora/verify/${encodeURIComponent(pendingPurchase.reference)}`)
+      const response = await apiFetch(`/api/payments/kora/verify/${encodeURIComponent(pendingPurchase.reference)}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to verify payment')
 
@@ -129,7 +129,7 @@ function TokenManager({ patient, onTokensUpdated }) {
         name: patient.name,
       }
 
-      const response = await fetch(`${API_BASE}/api/subscriptions`, {
+      const response = await apiFetch(`/api/subscriptions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscriptionData),

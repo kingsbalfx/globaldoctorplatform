@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function AppointmentScheduler({ patientId, onScheduled }) {
   const [doctors, setDoctors] = useState([])
@@ -16,7 +16,7 @@ function AppointmentScheduler({ patientId, onScheduled }) {
 
   const fetchDoctors = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/doctors`)
+      const response = await apiFetch(`/api/doctors`)
       const data = await response.json().catch(() => ({}))
       const list = Array.isArray(data.doctors) ? data.doctors : []
       setDoctors(list)
@@ -35,7 +35,7 @@ function AppointmentScheduler({ patientId, onScheduled }) {
     }
     setSaving(true)
     try {
-      const response = await fetch(`${API_BASE}/api/appointments`, {
+      const response = await apiFetch(`/api/appointments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

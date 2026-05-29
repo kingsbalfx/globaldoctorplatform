@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
+import { apiFetch } from '../lib/apiFetch'
 
 function PaymentSuccess({ onNavigate }) {
   const [status, setStatus] = useState('Verifying payment...')
@@ -20,7 +20,7 @@ function PaymentSuccess({ onNavigate }) {
       }
 
       try {
-        const response = await fetch(`${API_BASE}/api/payments/kora/verify/${encodeURIComponent(reference)}`)
+        const response = await apiFetch(`/api/payments/kora/verify/${encodeURIComponent(reference)}`)
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || 'Payment verification failed')
 
