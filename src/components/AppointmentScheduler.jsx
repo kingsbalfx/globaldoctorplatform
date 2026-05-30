@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from '../components/ErrorHandler'
 
 function AppointmentScheduler({ patientId, onScheduled }) {
+  const { addError } = useError()
   const [doctors, setDoctors] = useState([])
   const [doctorId, setDoctorId] = useState('')
   const [consultationType, setConsultationType] = useState('telehealth')
@@ -55,10 +57,10 @@ function AppointmentScheduler({ patientId, onScheduled }) {
       setNotes('')
       setConsultationType('telehealth')
       onScheduled && onScheduled(data.appointment)
-      alert('Appointment scheduled successfully! You will receive reminders 24 hours and 1 hour before the consultation.')
+      addError('Appointment scheduled successfully! You will receive reminders 24 hours and 1 hour before the consultation.', 'success')
     } catch (err) {
       setError(err.message)
-      console.error(err)
+      addError(err.message, 'error')
     } finally {
       setSaving(false)
     }

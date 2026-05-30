@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getSpecialtyInfo, getSpecialtyLogo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from '../components/ErrorHandler'
 
 const specialties = ['General Practitioner', 'Neurology', 'Urology', 'Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Obstetrics & GYN', 'Ophthalmology']
 
@@ -41,6 +42,7 @@ function doctorToForm(doctor) {
 }
 
 function DoctorManagement({ adminHeaders }) {
+  const { addError } = useError()
   const [showForm, setShowForm] = useState(false)
   const [doctors, setDoctors] = useState([])
   const [loading, setLoading] = useState(false)
@@ -62,7 +64,7 @@ function DoctorManagement({ adminHeaders }) {
       if (!response.ok) throw new Error(data.error || 'Failed to load doctors')
       setDoctors(Array.isArray(data.doctors) ? data.doctors : [])
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -102,9 +104,9 @@ function DoctorManagement({ adminHeaders }) {
       if (!response.ok) throw new Error(result.error || 'Failed to save doctor')
       await fetchDoctorList()
       resetForm()
-      alert(editing ? 'Doctor updated.' : 'Doctor added, approved, and notified by email when SMTP is configured.')
+      addError(editing ? 'Doctor updated.' : 'Doctor added, approved, and notified by email when SMTP is configured.', 'success')
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -121,9 +123,9 @@ function DoctorManagement({ adminHeaders }) {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to delete doctor')
       setDoctors((current) => current.filter((doctor) => doctor.id !== doctorId))
-      alert('Doctor deleted.')
+      addError('Doctor deleted.', 'success')
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -139,9 +141,9 @@ function DoctorManagement({ adminHeaders }) {
       const result = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(result.error || 'Failed to approve doctor')
       setDoctors((current) => current.map((doctor) => doctor.id === doctorId ? result.doctor : doctor))
-      alert(result.email?.sent ? 'Doctor approved and email sent.' : `Doctor approved. Email notice was not sent: ${result.email?.reason || 'SMTP not configured'}`)
+      addError(result.email?.sent ? 'Doctor approved and email sent.' : `Doctor approved. Email notice was not sent: ${result.email?.reason || 'SMTP not configured'}`, 'success')
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setLoading(false)
     }

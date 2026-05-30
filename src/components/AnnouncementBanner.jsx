@@ -3,17 +3,17 @@ import { apiFetch } from '../lib/apiFetch'
 
 const SEVERITY_STYLES = {
   info: {
-    wrapper: 'border-brand-200 bg-brand-50 text-brand-900',
-    badge: 'bg-brand-700 text-white',
+    wrapper: 'border-blue-200 bg-gradient-to-r from-blue-50 to-white text-blue-900',
+    badge: 'bg-blue-600 text-white',
     label: 'Info',
   },
   warning: {
-    wrapper: 'border-amber-200 bg-amber-50 text-amber-900',
-    badge: 'bg-amber-600 text-white',
+    wrapper: 'border-amber-200 bg-gradient-to-r from-amber-50 to-white text-amber-900',
+    badge: 'bg-amber-500 text-white',
     label: 'Warning',
   },
   urgent: {
-    wrapper: 'border-red-200 bg-red-50 text-red-900',
+    wrapper: 'border-red-200 bg-gradient-to-r from-red-50 to-white text-red-900',
     badge: 'bg-red-600 text-white',
     label: 'Urgent',
   },
@@ -71,21 +71,26 @@ function AnnouncementBanner({ audience }) {
   }
 
   return (
-    <div className={`mb-6 rounded-3xl border px-5 py-4 shadow-sm ${style.wrapper}`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-        <div className="flex items-start gap-3">
-          <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${style.badge}`}>
-            {style.label}
-          </span>
-          <div>
-            <p className="text-sm font-semibold">{top.title}</p>
-            <p className="mt-1 text-sm whitespace-pre-line opacity-90">{top.message}</p>
+    <div className={`mb-6 overflow-hidden rounded-3xl border px-5 py-4 shadow-lg ${style.wrapper}`}>
+      <div className="flex items-center gap-4">
+        {/* Badge */}
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${style.badge}`}>
+          {style.label}
+        </span>
+
+        {/* Scrolling text */}
+        <div className="relative flex-1 overflow-hidden whitespace-nowrap">
+          <div className="marquee inline-block animate-marquee">
+            <span className="text-sm font-semibold">{top.title}</span>
+            <span className="mx-4 opacity-50">•</span>
+            <span className="text-sm opacity-90">{top.message}</span>
           </div>
         </div>
+
         <button
           type="button"
           onClick={dismiss}
-          className="self-start rounded-full bg-white/60 px-4 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200/60 hover:bg-white"
+          className="shrink-0 rounded-full bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-300 hover:bg-white"
         >
           Dismiss
         </button>
@@ -95,4 +100,3 @@ function AnnouncementBanner({ audience }) {
 }
 
 export default AnnouncementBanner
-

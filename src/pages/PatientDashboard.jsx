@@ -16,8 +16,10 @@ import AccessibilityPanel from '../components/AccessibilityPanel'
 import LanguageSelector from '../components/LanguageSelector'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from '../components/ErrorHandler'
 
 function PatientDashboard() {
+  const { addError } = useError()
   const [currentStep, setCurrentStep] = useState('auth') // auth -> doctor -> calendar -> dashboard
   const [patient, setPatient] = useState(null)
   const [selectedDoctor, setSelectedDoctor] = useState(null)
@@ -134,9 +136,9 @@ function PatientDashboard() {
         const error = await response.json()
         throw new Error(error.error || 'Emergency call failed')
       }
-      alert('Emergency request sent to available doctors. Help is on the way.')
+      addError('Emergency request sent to available doctors. Help is on the way.', 'success')
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     }
   }
 

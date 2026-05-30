@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from '../components/ErrorHandler'
 
 function TokenManager({ patient, onTokensUpdated }) {
+  const { addError } = useError()
   const [tokens, setTokens] = useState(0)
   const [subscription, setSubscription] = useState(null)
   const [showPurchase, setShowPurchase] = useState(false)
@@ -86,7 +88,7 @@ function TokenManager({ patient, onTokensUpdated }) {
 
       if (result.checkout_url) window.location.href = result.checkout_url
     } catch (error) {
-      alert('Payment failed: ' + error.message)
+      addError('Payment failed: ' + error.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -101,17 +103,16 @@ function TokenManager({ patient, onTokensUpdated }) {
       if (!response.ok) throw new Error(data.error || 'Failed to verify payment')
 
       if (data.status !== 'success') {
-        alert(`Payment status: ${data.status || 'pending'}. Please retry in a moment.`)
+        addError(`Payment status: ${data.status || 'pending'}. Please retry in a moment.`, 'warning')
         return
       }
 
       await fetchTokenBalance()
       setPendingPurchase(null)
       setShowPurchase(false)
-      alert(`Tokens credited successfully.`)
+      addError('Tokens credited successfully.', 'success')
     } catch (error) {
-      console.error('Failed to add tokens:', error)
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -140,12 +141,11 @@ function TokenManager({ patient, onTokensUpdated }) {
       }
 
       const result = await response.json()
-      alert(`Subscription activated! ${subscriptionData.tokensIncluded} tokens added to your account.`)
+      addError(`Subscription activated! ${subscriptionData.tokensIncluded} tokens added to your account.`, 'success')
       await fetchTokenBalance()
       await fetchSubscription()
-
     } catch (error) {
-      alert('Subscription failed: ' + error.message)
+      addError('Subscription failed: ' + error.message, 'error')
     } finally {
       setLoading(false)
     }

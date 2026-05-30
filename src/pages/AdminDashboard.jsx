@@ -7,8 +7,10 @@ import ManualDownload from '../components/ManualDownload'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from '../components/ErrorHandler'
 
 function AdminDashboard({ doctor, onLogout }) {
+  const { addError } = useError()
   const [activeTab, setActiveTab] = useState('overview')
   const adminSpecialty = doctor?.specialty || 'General Practitioner'
   const adminSpecialtyInfo = getSpecialtyInfo(adminSpecialty)
@@ -41,9 +43,9 @@ function AdminDashboard({ doctor, onLogout }) {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Failed to save payout details')
-      alert('Payout details saved.')
+      addError('Payout details saved.', 'success')
     } catch (err) {
-      alert(err.message)
+      addError(err.message, 'error')
     } finally {
       setSavingPayoutDetails(false)
     }
@@ -52,15 +54,15 @@ function AdminDashboard({ doctor, onLogout }) {
   const handleWithdraw = async () => {
     const tokens = Number(withdrawTokenAmount)
     if (!Number.isFinite(tokens) || tokens <= 0) {
-      alert('Enter a valid token amount to withdraw.')
+      addError('Enter a valid token amount to withdraw.', 'error')
       return
     }
     if (tokens < minWithdrawTokens) {
-      alert(`Minimum withdrawal is ${minWithdrawTokens} tokens ($5).`)
+      addError(`Minimum withdrawal is ${minWithdrawTokens} tokens ($5).`, 'error')
       return
     }
     if (tokens > (doctor.earningsTokens || 0)) {
-      alert('Requested amount exceeds your available tokens.')
+      addError('Requested amount exceeds your available tokens.', 'error')
       return
     }
 
@@ -77,9 +79,9 @@ function AdminDashboard({ doctor, onLogout }) {
       if (!response.ok) throw new Error(data.error)
       const payoutLine = data.currency ? `Payout: ${data.payoutAmount ?? ''} ${data.currency}` : ''
       const usdLine = typeof data.amountUSD === 'number' ? `USD: $${data.amountUSD.toFixed(2)}` : ''
-      alert([`Success: ${data.message}`, `Reference: ${data.reference}`, payoutLine, usdLine].filter(Boolean).join('\n'))
+      addError([`Success: ${data.message}`, `Reference: ${data.reference}`, payoutLine, usdLine].filter(Boolean).join('\n'), 'success')
     } catch (err) {
-      alert(err.message)
+      addError(err.message, 'error')
     } finally {
       setWithdrawing(false)
     }

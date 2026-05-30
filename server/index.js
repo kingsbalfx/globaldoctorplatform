@@ -1607,7 +1607,7 @@ app.get('/api/announcements', async (req, res) => {
   const now = new Date().toISOString()
   let query = supabase.from('announcements').select('*').eq('is_active', true)
     .or(`expires_at.is.null, expires_at.gt.${now}`)
-  if (audience && audience !== 'all') query = query.eq('audience', audience)
+  if (audience && audience !== 'all') query = query.ilike('audience', audience)   // case‑insensitive
   query = query.order('created_at', { ascending: false })
   const { data } = await query
   res.json({ announcements: data || [] })
