@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search, Stethoscope, WalletCards } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 const consultationTypes = [
   { id: 'basic', label: 'Basic', tokens: 50, description: 'Focused visit for common concerns.' },
@@ -8,6 +9,7 @@ const consultationTypes = [
 ]
 
 function DoctorSelection({ patient, onDoctorSelected }) {
+  const { addError } = useError()
   const [doctors, setDoctors] = useState([])
   const [selectedDoctor, setSelectedDoctor] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -120,7 +122,7 @@ function DoctorSelection({ patient, onDoctorSelected }) {
       if (!response.ok) throw new Error(data.error || 'Payment initialization failed')
       if (data.checkout_url) window.location.href = data.checkout_url
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setPurchaseLoading(false)
     }

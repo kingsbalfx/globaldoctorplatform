@@ -57,7 +57,7 @@ const ErrorToastContainer = () => {
   if (errors.length === 0) return null;
 
   return (
-    <div className="fixed right-4 top-4 z-50 w-[min(420px,calc(100vw-2rem))] space-y-3">
+    <div className="fixed inset-x-0 bottom-5 z-50 flex flex-col items-center gap-3 px-4 sm:bottom-7">
       {errors.map((error) => (
         <ErrorToast key={error.id} error={error} onClose={() => removeError(error.id)} />
       ))}
@@ -69,13 +69,13 @@ const ErrorToast = ({ error, onClose }) => {
   const getIcon = () => {
     switch (error.type) {
       case 'success':
-        return <CheckCircle className="w-5 h-5 text-green-500" />;
+        return <CheckCircle className="h-5 w-5 text-emerald-500" />;
       case 'warning':
-        return <AlertTriangle className="w-5 h-5 text-yellow-500" />;
+        return <AlertTriangle className="h-5 w-5 text-amber-500" />;
       case 'info':
-        return <Info className="w-5 h-5 text-blue-500" />;
+        return <Info className="h-5 w-5 text-blue-500" />;
       default:
-        return <AlertCircle className="w-5 h-5 text-red-500" />;
+        return <AlertCircle className="h-5 w-5 text-rose-500" />;
     }
   };
 
@@ -93,22 +93,22 @@ const ErrorToast = ({ error, onClose }) => {
   };
 
   return (
-    <div className={`overflow-hidden rounded-2xl border shadow-2xl animate-in slide-in-from-right-2 ${getBgColor()}`}>
+    <div className={`w-[min(560px,100%)] overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-3 ${getBgColor()}`}>
       <div className="h-1 bg-gradient-to-r from-brand-700 via-cyan-500 to-emerald-500" />
       <div className="flex items-start gap-3 p-4">
         <div className="mt-0.5 rounded-full bg-slate-50 p-2 ring-1 ring-slate-100">{getIcon()}</div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
-            {error.type === 'success' ? 'Completed' : error.type === 'warning' ? 'Attention' : error.type === 'info' ? 'Update' : 'Action needed'}
+            {error.type === 'success' ? 'Command completed' : error.type === 'warning' ? 'Review required' : error.type === 'info' ? 'System update' : 'Action needed'}
           </p>
           <p className="mt-1 text-sm font-semibold leading-6 text-slate-900">{error.message}</p>
         </div>
         <button
           onClick={onClose}
-          className="flex-shrink-0 ml-2 text-gray-400 hover:text-gray-600 transition-colors"
+          className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           aria-label="Close notification"
         >
-          <X className="w-4 h-4" />
+          <X className="h-4 w-4" />
         </button>
       </div>
     </div>

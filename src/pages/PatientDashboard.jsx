@@ -35,12 +35,36 @@ function PatientDashboard() {
   const [showAccessibilityPanel, setShowAccessibilityPanel] = useState(false)
   const { t } = useTranslation()
 
-  const currentSpecialty = selectedDoctor?.specialty || 'General Practitioner'
+  const activeConsultation = useMemo(() => {
+    return appointments.find((appointment) => appointment.id === selectedConsultationId) || appointments[0] || null
+  }, [appointments, selectedConsultationId])
+
+  const currentSpecialty =
+    selectedDoctor?.specialty ||
+    activeConsultation?.doctorSpecialty ||
+    activeConsultation?.doctor_specialty ||
+    activeConsultation?.specialty ||
+    'General Practitioner'
   const specialtyInfo = getSpecialtyInfo(currentSpecialty)
+  const activeDoctorName =
+    selectedDoctor?.name ||
+    activeConsultation?.doctorName ||
+    activeConsultation?.doctor_name ||
+    activeConsultation?.doctorId ||
+    activeConsultation?.doctor_id ||
+    'Care team'
   const patientDashboardStyle = {
-    backgroundImage: `radial-gradient(circle at top left, ${specialtyInfo.color}20, transparent 35%), radial-gradient(circle at bottom right, ${specialtyInfo.color}10, transparent 25%)`,
-    backgroundColor: specialtyInfo.bgColor,
+    '--specialty-color': specialtyInfo.color,
+    '--specialty-bg': specialtyInfo.bgColor,
+    backgroundImage: `linear-gradient(135deg, ${specialtyInfo.bgColor} 0%, #ffffff 42%, ${specialtyInfo.color}18 100%)`,
   }
+
+  const upcomingAppointments = useMemo(
+    () => appointments.filter((appointment) => new Date(appointment.scheduledDate || appointment.scheduled_date) > new Date()),
+    [appointments]
+  )
+
+  const unreadNotifications = notifications.filter((item) => !item.is_read).length
 
   useEffect(() => {
     if (patient && currentStep === 'dashboard') {
@@ -175,57 +199,51 @@ function PatientDashboard() {
     )
   }
 
-  // Main dashboard
-  const upcomingAppointments = useMemo(
-    () => appointments.filter((appointment) => new Date(appointment.scheduledDate) > new Date()),
-    [appointments]
-  )
-
-  const unreadNotifications = notifications.filter((item) => !item.is_read).length
-
   const handleAppointmentCreated = async () => {
     await loadOverview()
   }
 
   return (
-    <section className="relative mx-auto mt-16 max-w-7xl px-6 pb-20 sm:px-8" style={patientDashboardStyle}>
-      <div className="absolute inset-x-0 top-0 h-72 bg-white/80 blur-xl opacity-40" />
+    <section className="relative mx-auto mt-16 max-w-7xl overflow-hidden rounded-[2rem] px-6 pb-20 pt-1 sm:px-8" style={patientDashboardStyle}>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-white/70 blur-xl opacity-70" />
       <AnnouncementBanner audience="patient" />
-      <div className="rounded-3xl border border-white/60 bg-white/95 px-8 py-10 shadow-xl shadow-slate-200/40 mb-8 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent to-white/80 opacity-80" />
+      <div className="rounded-3xl border border-white/70 bg-white/95 px-8 py-10 shadow-xl shadow-slate-200/40 mb-8 relative overflow-hidden">
+        <div className="absolute inset-y-0 right-0 w-2/5 opacity-15" style={{ background: specialtyInfo.color }} />
         <div className="relative grid gap-6 lg:grid-cols-[1.8fr_1fr] lg:items-center">
           <div>
-            <h1 className="text-4xl font-bold text-slate-900">Patient Portal</h1>
-            <p className="mt-3 max-w-2xl text-lg leading-8 text-slate-600">Upload medical records, schedule appointments, chat with your doctor, and receive reminders 24 hours and 1 hour before your visit.</p>
-            <div className="mt-4 inline-flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 shadow-sm">
-              <span className="text-lg">{specialtyInfo.logo}</span>
-              <span>{currentSpecialty} care experience</span>
+            <div className="inline-flex flex-wrap items-center gap-3 rounded-full border border-white bg-white px-4 py-2 text-sm font-bold shadow-sm" style={{ color: specialtyInfo.color }}>
+              <span className="rounded-full px-2 py-1 text-xs text-white" style={{ backgroundColor: specialtyInfo.color }}>{specialtyInfo.logo}</span>
+              <span>{specialtyInfo.name} rhythm</span>
+              <span className="text-slate-400">with {activeDoctorName}</span>
             </div>
+            <h1 className="mt-5 text-4xl font-bold text-slate-900">Patient Portal</h1>
+            <p className="mt-3 max-w-2xl text-lg leading-8 text-slate-600">Upload medical records, schedule appointments, chat with your doctor, and receive reminders 24 hours and 1 hour before your visit.</p>
             <div className="mt-6 grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] items-center">
-              <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
-                <p className="text-xs uppercase tracking-[0.24em] text-blue-700">Patient guide</p>
+              <div className="rounded-3xl border p-4" style={{ borderColor: `${specialtyInfo.color}35`, backgroundColor: `${specialtyInfo.bgColor}90` }}>
+                <p className="text-xs uppercase tracking-[0.24em]" style={{ color: specialtyInfo.color }}>Patient guide</p>
                 <p className="mt-2 text-sm text-slate-700">Your preferred language: <strong>{patient?.language || 'English'}</strong></p>
-                <p className="mt-2 text-sm text-slate-600">Download step-by-step instructions and accessibility guides for your dashboard.</p>
+                <p className="mt-2 text-sm text-slate-600">{specialtyInfo.description}. Your dashboard adapts to the specialist you selected, the referral path, or the doctor currently consulting.</p>
               </div>
               <div className="flex flex-wrap gap-3 items-center">
                 <LanguageSelector />
                 <button
                   onClick={() => setActiveTab('manuals')}
-                  className="rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600"
+                  className="rounded-full px-5 py-3 text-sm font-semibold text-white shadow-lg"
+                  style={{ backgroundColor: specialtyInfo.color }}
                 >
                   {t('manuals.downloadManual')}
                 </button>
               </div>
             </div>
           </div>
-          <div className="rounded-3xl bg-gradient-to-r from-white to-slate-100 p-6 shadow-lg shadow-slate-200/50">
+          <div className="rounded-3xl p-6 text-white shadow-lg shadow-slate-200/50" style={{ background: `linear-gradient(135deg, ${specialtyInfo.color}, #0f172a)` }}>
             <div className="space-y-4">
               <div className="rounded-3xl bg-white/15 p-4">
-                <p className="text-sm uppercase tracking-[0.2em] text-brand-100">Upcoming appointments</p>
+                <p className="text-sm uppercase tracking-[0.2em] text-white/70">Upcoming appointments</p>
                 <p className="mt-2 text-3xl font-semibold">{upcomingAppointments.length}</p>
               </div>
               <div className="rounded-3xl bg-white/15 p-4">
-                <p className="text-sm uppercase tracking-[0.2em] text-brand-100">Unread notifications</p>
+                <p className="text-sm uppercase tracking-[0.2em] text-white/70">Unread notifications</p>
                 <p className="mt-2 text-3xl font-semibold">{unreadNotifications}</p>
               </div>
             </div>
@@ -248,7 +266,8 @@ function PatientDashboard() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`rounded-full px-6 py-3 text-sm font-semibold transition ${activeTab === tab.id ? 'bg-brand-700 text-white' : 'bg-white text-slate-700 border border-slate-200 hover:border-brand-300'}`}
+            className={`rounded-full border px-6 py-3 text-sm font-semibold transition ${activeTab === tab.id ? 'text-white shadow-lg' : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'}`}
+            style={activeTab === tab.id ? { backgroundColor: specialtyInfo.color, borderColor: specialtyInfo.color } : undefined}
           >
             {tab.label}
           </button>
@@ -260,7 +279,8 @@ function PatientDashboard() {
           <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
             <h2 className="text-xl font-semibold text-slate-900 mb-4">Quick Actions</h2>
             <div className="space-y-4">
-              <div className="rounded-3xl bg-slate-50 p-5">
+              <div className="rounded-3xl p-5" style={{ backgroundColor: specialtyInfo.bgColor }}>
+                <p className="text-sm font-bold" style={{ color: specialtyInfo.color }}>{specialtyInfo.name} care mode</p>
                 <p className="text-sm text-slate-600">Schedule a new appointment and receive email and in-app reminders before the consultation.</p>
               </div>
               <div className="rounded-3xl bg-slate-50 p-5">
@@ -293,10 +313,10 @@ function PatientDashboard() {
             ) : (
               <div className="space-y-4">
                 {upcomingAppointments.slice(0, 3).map((appointment) => (
-                  <div key={appointment.id} className="rounded-3xl bg-slate-50 p-5">
-                    <p className="font-semibold text-slate-900">{appointment.consultationType.replace('_', ' ')} with {appointment.doctorName || appointment.doctorId}</p>
-                    <p className="text-sm text-slate-600 mt-1">{new Date(appointment.scheduledDate).toLocaleString()}</p>
-                    <p className="text-sm text-brand-700 mt-2">{appointment.status}</p>
+                  <div key={appointment.id} className="rounded-3xl border bg-slate-50 p-5" style={{ borderColor: `${specialtyInfo.color}35` }}>
+                    <p className="font-semibold text-slate-900">{String(appointment.consultationType || appointment.consultation_type || 'consultation').replace('_', ' ')} with {appointment.doctorName || appointment.doctor_name || appointment.doctorId || appointment.doctor_id}</p>
+                    <p className="text-sm text-slate-600 mt-1">{new Date(appointment.scheduledDate || appointment.scheduled_date).toLocaleString()}</p>
+                    <p className="text-sm font-bold mt-2" style={{ color: specialtyInfo.color }}>{appointment.status}</p>
                   </div>
                 ))}
                 {upcomingAppointments.length === 0 && <p className="text-sm text-slate-500">No upcoming appointments yet.</p>}
@@ -319,18 +339,19 @@ function PatientDashboard() {
               ) : (
                 <div className="space-y-4">
                   {appointments.map((appointment) => (
-                    <div key={appointment.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <div key={appointment.id} className="rounded-3xl border bg-slate-50 p-5" style={{ borderColor: selectedConsultationId === appointment.id ? specialtyInfo.color : undefined }}>
                       <div className="flex flex-wrap items-center justify-between gap-4">
                         <div>
-                          <p className="font-semibold text-slate-900">{appointment.doctorName || appointment.doctorId}</p>
-                          <p className="text-sm text-slate-600">{appointment.consultationType.replace('_', ' ')}</p>
+                          <p className="font-semibold text-slate-900">{appointment.doctorName || appointment.doctor_name || appointment.doctorId || appointment.doctor_id}</p>
+                          <p className="text-sm text-slate-600">{String(appointment.consultationType || appointment.consultation_type || 'consultation').replace('_', ' ')}</p>
                         </div>
-                        <span className="rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold uppercase text-brand-700">{appointment.status}</span>
+                        <span className="rounded-full px-3 py-1 text-xs font-semibold uppercase" style={{ backgroundColor: specialtyInfo.bgColor, color: specialtyInfo.color }}>{appointment.status}</span>
                       </div>
-                      <p className="mt-3 text-sm text-slate-600">{new Date(appointment.scheduledDate).toLocaleString()}</p>
+                      <p className="mt-3 text-sm text-slate-600">{new Date(appointment.scheduledDate || appointment.scheduled_date).toLocaleString()}</p>
                       <button
                         onClick={() => setSelectedConsultationId(appointment.id)}
-                        className="mt-4 rounded-full bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+                        className="mt-4 rounded-full px-4 py-2 text-sm font-semibold text-white"
+                        style={{ backgroundColor: specialtyInfo.color }}
                       >
                         Open chat for this appointment
                       </button>
