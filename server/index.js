@@ -153,7 +153,18 @@ async function queryKoraCharge(reference) {
 }
 
 function parsePaymentMetadata(payment) {
-  if (!payment?.metadata) return {}
+  if (!payment) return {}
+  if (!payment.metadata) {
+    const reference = String(payment.reference || payment.provider_reference || payment.id || '')
+    const match = reference.match(/^kora-token-(\d+)-/)
+    return {
+      patientId: payment.patient_id || '',
+      tokensExpected: Math.round(Number(payment.amount || 0) / Math.max(1, KORA_USD_EXCHANGE_RATE) * 10),
+      koraAmount: payment.amount,
+      koraCurrency: payment.currency,
+      createdMs: match ? Number(match[1]) : null,
+    }
+  }
   if (typeof payment.metadata === 'string') {
     try {
       return JSON.parse(payment.metadata)
@@ -182,6 +193,27 @@ async function creditTokenPurchasePayment(payment, source = 'kora') {
   const tokens = await creditPatientTokens(patientId, tokensExpected, `Token purchase via ${source}`)
   await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
   return { credited: true, tokens, reason: 'Tokens credited' }
+}
+
+async function insertPaymentRecord(row) {
+  const { error } = await supabase.from('payments').insert(row)
+  if (!error) return { error: null, mode: 'full' }
+  if (!isMissingColumnError(error)) return { error, mode: 'full' }
+
+  const fallback = {
+    id: row.id,
+    patient_id: row.patient_id,
+    doctor_id: row.doctor_id || 'system',
+    amount: row.amount,
+    currency: row.currency || 'NGN',
+    type: row.type || row.payment_type || 'token_purchase',
+    status: row.status || 'pending',
+    provider: row.provider || row.payment_provider || 'kora',
+    provider_reference: row.reference || row.provider_reference || row.id,
+    created_at: row.created_at || new Date().toISOString(),
+  }
+  const retry = await supabase.from('payments').insert(fallback)
+  return { error: retry.error || null, mode: 'fallback' }
 }
 
 function isMissingColumnError(error) {
@@ -828,9 +860,10 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     patientEmail = patientProfile?.email || 'patient@globaldoc.com'
   }
 
-  const { error: paymentInsertError } = await supabase.from('payments').insert({
+  const { error: paymentInsertError } = await insertPaymentRecord({
     id: reference,
     patient_id: patientId,
+    doctor_id: 'system',
     amount: koraCharge.amount,
     currency: koraCharge.currency,
     type: 'token_purchase',
@@ -1956,8 +1989,8 @@ app.post('/api/payments/kora/initialize', async (req, res) => {
   const chargeCurrency = String(currency || KORA_CHARGE_CURRENCY || 'NGN').trim().toUpperCase()
 
   const reference = `kora-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-  const { error: paymentInsertError } = await supabase.from('payments').insert({
-    id: reference, amount: numericAmount, currency: chargeCurrency, description,
+  const { error: paymentInsertError } = await insertPaymentRecord({
+    id: reference, patient_id: metadata?.patientId || metadata?.patient_id || 'system', doctor_id: metadata?.doctorId || metadata?.doctor_id || 'system', amount: numericAmount, currency: chargeCurrency, description,
     customer, metadata, status: 'pending', provider: 'kora', reference, created_at: new Date().toISOString()
   })
   if (paymentInsertError) return res.status(500).json({ error: `Could not create payment record: ${paymentInsertError.message}` })

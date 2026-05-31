@@ -17,8 +17,9 @@ import LanguageSelector from '../components/LanguageSelector'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
+import { supabase } from '../lib/supabaseClient'
 
-function PatientDashboard() {
+function PatientDashboard({ logoutSignal = 0, onLoggedOut }) {
   const { addError } = useError()
   const [currentStep, setCurrentStep] = useState('auth') // auth -> doctor -> calendar -> dashboard
   const [patient, setPatient] = useState(null)
@@ -66,11 +67,56 @@ function PatientDashboard() {
 
   const unreadNotifications = notifications.filter((item) => !item.is_read).length
 
+  const cleanLogout = (reason = 'logout') => {
+    setPatient(null)
+    setSelectedDoctor(null)
+    setSubscriptionType('basic')
+    setTokens(0)
+    setActiveTab('overview')
+    setAppointments([])
+    setNotifications([])
+    setFiles([])
+    setSelectedConsultationId('')
+    setShowAccessibilityPanel(false)
+    setCurrentStep('auth')
+    try {
+      window.localStorage.removeItem('gd_patient_session')
+      window.localStorage.removeItem('gd_pending_patient_profile')
+    } catch {
+      // ignore
+    }
+    void supabase.auth.signOut().catch(() => null)
+    if (reason === 'idle') addError('You were logged out after 15 minutes of inactivity.', 'info', 9000)
+    onLoggedOut?.()
+  }
+
   useEffect(() => {
     if (patient && currentStep === 'dashboard') {
       loadOverview()
     }
   }, [patient, currentStep])
+
+  useEffect(() => {
+    if (logoutSignal > 0) cleanLogout('manual')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logoutSignal])
+
+  useEffect(() => {
+    if (!patient) return
+    const events = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll']
+    let timer
+    const resetTimer = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => cleanLogout('idle'), 15 * 60 * 1000)
+    }
+    events.forEach((event) => window.addEventListener(event, resetTimer, { passive: true }))
+    resetTimer()
+    return () => {
+      window.clearTimeout(timer)
+      events.forEach((event) => window.removeEventListener(event, resetTimer))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patient?.id])
 
   // ---------- AUTO‑RESTORE SESSION (fixed) ----------
   useEffect(() => {

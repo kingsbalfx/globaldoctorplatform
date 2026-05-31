@@ -66,6 +66,7 @@ function App() {
   const [currentView, setCurrentView] = useState(() => viewFromPath(window.location.pathname)) // 'landing', 'patient', 'doctor-auth', 'admin', 'platform-admin', 'facility', 'auth-callback', 'terms', 'privacy', 'contact'
   const [authDoctor, setAuthDoctor] = useState(null)
   const [authAdmin, setAuthAdmin] = useState(null)
+  const [patientLogoutSignal, setPatientLogoutSignal] = useState(0)
 
   const navigate = (view) => {
     const nextView = viewFromPath(pathFromView(view))
@@ -127,7 +128,17 @@ function App() {
   const handleLogout = () => {
     setAuthDoctor(null)
     setAuthAdmin(null)
+    setPatientLogoutSignal((value) => value + 1)
     setCurrentView('landing')
+    try {
+      window.localStorage.removeItem('gd_doctor_session')
+      window.localStorage.removeItem('gd_platform_admin_session')
+      window.localStorage.removeItem('gd_patient_session')
+      window.localStorage.removeItem('gd_pending_patient_profile')
+      window.localStorage.removeItem('gd_pending_doctor_profile')
+    } catch {
+      // ignore
+    }
     try {
       window.history.pushState({ view: 'landing' }, '', '/')
     } catch {
@@ -188,7 +199,7 @@ function App() {
       </nav>
 
       {currentView === 'landing' && <LandingPage />}
-      {currentView === 'patient' && <PatientDashboard />}
+      {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} />}
       {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
       {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
       {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
