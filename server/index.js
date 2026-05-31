@@ -150,7 +150,7 @@ async function sendDoctorApprovalEmail(doctor) {
     auth: { user: smtpUser, pass: smtpPass },
   })
 
-  const appUrl = normalizeAppBaseUrl(process.env.APP_BASE_URL || process.env.VITE_PUBLIC_APP_URL || process.env.VITE_API_BASE) || 'https://globaldoctorplattform.vercel.app'
+  const appUrl = normalizeAppBaseUrl(process.env.APP_BASE_URL || process.env.VITE_PUBLIC_APP_URL || process.env.VITE_API_BASE) || 'https://globaldoctorplatform.vercel.app'
   await transporter.sendMail({
     from: `"GlobalDoc Connect" <${smtpUser}>`,
     to: doctor.email,
@@ -684,6 +684,17 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   // *** FORCE production origin for Kora URLs – NEVER rely on request headers on Vercel ***
   const origin = 'https://globaldoctorplatform.vercel.app'
 
+  // *** Fetch patient email as fallback ***
+  let patientEmail = req.body.email || ''
+  if (!patientEmail) {
+    const { data: patientProfile } = await supabase
+      .from('patients')
+      .select('email, name')
+      .eq('id', patientId)
+      .maybeSingle()
+    patientEmail = patientProfile?.email || 'patient@globaldoc.com'
+  }
+
   await supabase.from('payments').insert({
     id: reference,
     patient_id: patientId,
@@ -714,7 +725,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
         notification_url: `${origin}/api/webhooks/kora`,
         narration: `Token purchase (${tokensExpected} tokens)`,
         customer: {
-          email: req.body.email || 'patient@globaldoc.com',
+          email: patientEmail,
           name: req.body.name || 'Patient'
         },
         metadata: { purpose: 'token_purchase', patientId }
@@ -736,7 +747,6 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
       message: response.data?.message || 'Payment initialized'
     })
   } catch (error) {
-    // Return the exact Kora error so you can see what's wrong
     const koraError = error.response?.data || error.message
     console.error('Kora initialization error:', koraError)
     return res.status(500).json({
@@ -745,6 +755,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     })
   }
 })
+
 // ---------- SUBSCRIPTIONS ----------
 app.get('/api/patients/:patientId/subscription', async (req, res) => {
   const { data } = await supabase.from('subscriptions').select('*').eq('patient_id', req.params.patientId).eq('status', 'active').maybeSingle()
@@ -1630,7 +1641,7 @@ app.get('/api/announcements', async (req, res) => {
   const now = new Date().toISOString()
   let query = supabase.from('announcements').select('*').eq('is_active', true)
     .or(`expires_at.is.null, expires_at.gt.${now}`)
-  if (audience && audience !== 'all') query = query.ilike('audience', audience)   // case‑insensitive
+  if (audience && audience !== 'all') query = query.ilike('audience', audience)
   query = query.order('created_at', { ascending: false })
   const { data } = await query
   res.json({ announcements: data || [] })
