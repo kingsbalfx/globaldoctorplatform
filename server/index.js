@@ -1730,6 +1730,87 @@ app.post('/api/vital-parameters', async (req, res) => {
   res.status(200).json({ message: 'Vital parameter recorded (mock)' })
 })
 
+// ---------- FORGOT / RESET PASSWORD ----------
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email, userType } = req.body
+  if (!email || !userType) return res.status(400).json({ error: 'email and userType required' })
+
+  const normalizedEmail = email.toLowerCase()
+  const table = userType === 'patient' ? 'patients' : 'doctors_auth'
+
+  // Check if user exists
+  const { data: user } = await supabase.from(table).select('*').eq('email', normalizedEmail).maybeSingle()
+  if (!user) {
+    // Do not reveal whether the email exists – simply return ok
+    return res.json({ message: 'If that email is registered, a reset link has been sent.' })
+  }
+
+  // Generate a secure token
+  const token = crypto.randomBytes(32).toString('hex')
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1 hour
+
+  // Store the token
+  await supabase.from('password_reset_tokens').insert({
+    id: generateId('pwrst'),
+    user_email: normalizedEmail,
+    user_type: userType,
+    token,
+    expires_at: expiresAt,
+    created_at: new Date().toISOString()
+  })
+
+  // Send email
+  const origin = 'https://globaldoctorplatform.vercel.app'
+  const resetUrl = `${origin}/reset-password?token=${encodeURIComponent(token)}&userType=${encodeURIComponent(userType)}`
+
+  const smtpUser = process.env.SMTP_USER
+  const smtpPass = process.env.SMTP_PASS
+  if (smtpUser && smtpPass) {
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT || 587) === 465,
+      auth: { user: smtpUser, pass: smtpPass },
+    })
+    await transporter.sendMail({
+      from: `"GlobalDoc Connect" <${smtpUser}>`,
+      to: normalizedEmail,
+      subject: 'Reset your password',
+      text: `Click the link to reset your password: ${resetUrl}\nThis link expires in 1 hour.`,
+    }).catch(console.error)
+  }
+
+  res.json({ message: 'If that email is registered, a reset link has been sent.' })
+})
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, newPassword, userType } = req.body
+  if (!token || !newPassword || !userType) return res.status(400).json({ error: 'token, newPassword, and userType required' })
+
+  // Find a valid token
+  const { data: resetEntry } = await supabase.from('password_reset_tokens')
+    .select('*')
+    .eq('token', token)
+    .eq('used', false)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle()
+
+  if (!resetEntry) return res.status(400).json({ error: 'Invalid or expired reset token.' })
+
+  // Update the password
+  const table = userType === 'patient' ? 'patients' : 'doctors_auth'
+  const { error: updateError } = await supabase.from(table)
+    .update({ password: newPassword })
+    .eq('email', resetEntry.user_email)
+
+  if (updateError) return res.status(500).json({ error: updateError.message })
+
+  // Mark token as used
+  await supabase.from('password_reset_tokens').update({ used: true }).eq('id', resetEntry.id)
+
+  res.json({ message: 'Password has been reset. You can now log in.' })
+})
+
 // ---------- EXPORT ----------
 const port = process.env.PORT || 4000
 export default app

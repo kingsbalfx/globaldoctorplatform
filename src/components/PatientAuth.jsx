@@ -6,6 +6,7 @@ import { apiFetch } from '../lib/apiFetch'
 import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
+import ForgotPassword from '../pages/ForgotPassword'  // ← new import
 
 function PatientAuth({ onAuth }) {
   const { t } = useTranslation()
@@ -29,6 +30,14 @@ function PatientAuth({ onAuth }) {
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [completingExistingUser, setCompletingExistingUser] = useState(false)
+
+  // NEW – forgot password mode
+  const [forgotActive, setForgotActive] = useState(false)
+
+  // If forgot password is active, show that component
+  if (forgotActive) {
+    return <ForgotPassword userType="patient" onBack={() => setForgotActive(false)} />
+  }
 
   useEffect(() => {
     try {
@@ -429,6 +438,19 @@ function PatientAuth({ onAuth }) {
                     </button>
                   </div>
                 </div>
+
+                {/* NEW – Forgot password link (only on login) */}
+                {isLogin && (
+                  <div className="text-right">
+                    <button
+                      type="button"
+                      onClick={() => setForgotActive(true)}
+                      className="text-sm text-brand-700 hover:text-brand-600 font-medium"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <>

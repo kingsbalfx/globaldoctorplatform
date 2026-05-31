@@ -6,6 +6,7 @@ import { apiFetch } from '../lib/apiFetch'
 import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
+import ForgotPassword from '../pages/ForgotPassword'   // ← new import
 
 // ===== COUNTRY LIST (extend as needed) =====
 const COUNTRIES = [
@@ -68,6 +69,14 @@ function DoctorAuth({ onAuth }) {
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [completingExistingUser, setCompletingExistingUser] = useState(false)
+
+  // NEW – forgot password mode
+  const [forgotActive, setForgotActive] = useState(false)
+
+  // If forgot password is active, show that component
+  if (forgotActive) {
+    return <ForgotPassword userType="doctor" onBack={() => setForgotActive(false)} />
+  }
 
   // Restore pending profile after OAuth (if any)
   useEffect(() => {
@@ -187,7 +196,6 @@ function DoctorAuth({ onAuth }) {
           body: JSON.stringify(payload),
         })
       } catch (networkError) {
-        // If the API is completely unreachable, show a clear error
         throw new Error(
           `Could not reach the server at ${API_BASE}. Please check your connection or try again later.`
         )
@@ -389,6 +397,19 @@ function DoctorAuth({ onAuth }) {
                 </button>
               </div>
             </div>
+
+            {/* NEW – Forgot password link (only on login) */}
+            {isLogin && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => setForgotActive(true)}
+                  className="text-sm text-brand-700 hover:text-brand-600 font-medium"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
 
             <button
               type="submit"
