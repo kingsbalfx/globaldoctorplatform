@@ -203,22 +203,43 @@ async function insertPaymentRecord(row) {
   const fallback = {
     id: row.id,
     patient_id: row.patient_id,
-    doctor_id: row.doctor_id || 'system',
     amount: row.amount,
     currency: row.currency || 'NGN',
     type: row.type || row.payment_type || 'token_purchase',
     status: row.status || 'pending',
     provider: row.provider || row.payment_provider || 'kora',
+    reference: row.reference || row.provider_reference || row.id,
     provider_reference: row.reference || row.provider_reference || row.id,
     created_at: row.created_at || new Date().toISOString(),
   }
-  const retry = await supabase.from('payments').insert(fallback)
-  return { error: retry.error || null, mode: 'fallback' }
+  if (row.doctor_id && row.doctor_id !== 'system') fallback.doctor_id = row.doctor_id
+
+  let candidate = { ...fallback }
+  let lastError = null
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const retry = await supabase.from('payments').insert(candidate)
+    if (!retry.error) return { error: null, mode: 'adaptive' }
+    lastError = retry.error
+    if (!isMissingColumnError(retry.error)) break
+    const missingColumn = getMissingColumnName(retry.error)
+    if (!missingColumn || !(missingColumn in candidate)) break
+    const { [missingColumn]: _removed, ...nextCandidate } = candidate
+    candidate = nextCandidate
+  }
+  return { error: lastError || error, mode: 'adaptive' }
 }
 
 function isMissingColumnError(error) {
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase()
   return text.includes('schema cache') || text.includes('column')
+}
+
+function getMissingColumnName(error) {
+  const text = `${error?.message || ''} ${error?.details || ''}`
+  const quoted = text.match(/'([^']+)'\s+column/i)
+  if (quoted?.[1]) return quoted[1]
+  const named = text.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+(?:does not exist|of)/i)
+  return named?.[1] || ''
 }
 
 function withoutOptionalDoctorPayoutColumns(row) {
