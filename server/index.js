@@ -680,7 +680,9 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   const tokensExpected = Math.round(amountUSD * rate)
 
   const reference = `kora-token-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-  const origin = getApiOrigin(req)
+
+  // *** FORCE production origin for Kora URLs – NEVER rely on request headers on Vercel ***
+  const origin = 'https://globaldoctorplatform.vercel.app'
 
   await supabase.from('payments').insert({
     id: reference,
@@ -697,31 +699,52 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     return res.json({
       reference, tokensExpected, rate,
       checkout_url: `https://kora-pay.com/pay/${reference}`,
-      message: 'Payment initialized (mock)'
+      message: 'Payment initialized (mock – no KORA key)'
     })
   }
 
   try {
-    const { data: response } = await axios.post(`${KORA_BASE_URL}/merchant/api/v1/charges/initialize`, {
-      amount: amountUSD, currency: 'USD', reference,
-      redirect_url: origin ? `${origin}/payment-success?reference=${encodeURIComponent(reference)}` : undefined,
-      notification_url: origin ? `${origin}/api/webhooks/kora` : undefined,
-      narration: `Token purchase (${tokensExpected} tokens)`,
-      customer: { email: req.body.email, name: req.body.name },
-      metadata: { purpose: 'token_purchase', patientId }
-    }, { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } })
+    const { data: response } = await axios.post(
+      `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
+      {
+        amount: amountUSD,
+        currency: 'USD',
+        reference,
+        redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
+        notification_url: `${origin}/api/webhooks/kora`,
+        narration: `Token purchase (${tokensExpected} tokens)`,
+        customer: {
+          email: req.body.email || 'patient@globaldoc.com',
+          name: req.body.name || 'Patient'
+        },
+        metadata: { purpose: 'token_purchase', patientId }
+      },
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+    )
+
+    const checkoutUrl = response.data?.data?.checkout_url || response.data?.data?.checkoutUrl
+    if (!checkoutUrl) {
+      return res.status(500).json({
+        error: 'Kora did not return a checkout URL',
+        details: response.data
+      })
+    }
 
     return res.json({
       reference, tokensExpected, rate,
-      checkout_url: response.data?.data?.checkout_url || response.data?.data?.checkoutUrl,
+      checkout_url: checkoutUrl,
       message: response.data?.message || 'Payment initialized'
     })
   } catch (error) {
-    console.error('Kora initialization error:', error?.response?.data || error)
-    return res.status(500).json({ error: 'Failed to initialize Kora payment' })
+    // Return the exact Kora error so you can see what's wrong
+    const koraError = error.response?.data || error.message
+    console.error('Kora initialization error:', koraError)
+    return res.status(500).json({
+      error: 'Failed to initialize Kora payment',
+      details: koraError
+    })
   }
 })
-
 // ---------- SUBSCRIPTIONS ----------
 app.get('/api/patients/:patientId/subscription', async (req, res) => {
   const { data } = await supabase.from('subscriptions').select('*').eq('patient_id', req.params.patientId).eq('status', 'active').maybeSingle()
