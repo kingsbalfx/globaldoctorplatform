@@ -104,6 +104,67 @@ function extractKoraCheckoutUrl(payload) {
     || ''
 }
 
+function normalizeKoraStatus(payload) {
+  return String(payload?.data?.status || payload?.status || '').trim().toLowerCase()
+}
+
+function isKoraChargeSuccessful(payload) {
+  return ['success', 'successful', 'completed'].includes(normalizeKoraStatus(payload))
+}
+
+async function queryKoraCharge(reference) {
+  if (!KORA_SECRET_KEY) {
+    return { ok: false, status: 'pending', payload: null, error: 'KORA_SECRET_KEY is not configured' }
+  }
+
+  try {
+    const { data } = await axios.get(
+      `${KORA_BASE_URL}/merchant/api/v1/charges/${encodeURIComponent(reference)}`,
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+    )
+    return { ok: true, status: normalizeKoraStatus(data), payload: data }
+  } catch (error) {
+    return {
+      ok: false,
+      status: 'unknown',
+      payload: error.response?.data || null,
+      error: error.response?.data?.message || error.message,
+    }
+  }
+}
+
+function parsePaymentMetadata(payment) {
+  if (!payment?.metadata) return {}
+  if (typeof payment.metadata === 'string') {
+    try {
+      return JSON.parse(payment.metadata)
+    } catch {
+      return {}
+    }
+  }
+  return payment.metadata
+}
+
+async function creditTokenPurchasePayment(payment, source = 'kora') {
+  if (!payment) return { credited: false, tokens: null, reason: 'Payment not found' }
+  if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
+    const patientId = payment.patient_id || parsePaymentMetadata(payment).patientId
+    const tokens = patientId ? await getPatientTokenBalance(patientId) : null
+    return { credited: false, tokens, reason: 'Payment already credited' }
+  }
+
+  const metadata = parsePaymentMetadata(payment)
+  const patientId = payment.patient_id || metadata.patientId
+  const tokensExpected = Math.round(Number(metadata.tokensExpected || 0))
+  if (!patientId || tokensExpected <= 0) {
+    return { credited: false, tokens: null, reason: 'Payment metadata is incomplete' }
+  }
+
+  const tokens = await creditPatientTokens(patientId, tokensExpected, `Token purchase via ${source}`)
+  await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+  return { credited: true, tokens, reason: 'Tokens credited' }
+}
+
 function isMissingColumnError(error) {
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase()
   return text.includes('schema cache') || text.includes('column')
@@ -797,7 +858,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     return res.json({
       reference, tokensExpected, rate,
       checkout_url: checkoutUrl,
-      message: response.data?.message || 'Payment initialized'
+      message: response?.message || 'Payment initialized'
     })
   } catch (error) {
     const koraError = error.response?.data || error.message
@@ -1822,18 +1883,72 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
   const { data: payment } = await supabase.from('payments').select('*').eq('reference', reference).maybeSingle()
   if (!payment) return res.status(404).json({ error: 'Payment not found' })
 
-  if (payment.type === 'token_purchase' && payment.status !== 'success') {
-    const { metadata } = payment
-    if (metadata?.patientId && metadata?.tokensExpected) {
-      await creditPatientTokens(metadata.patientId, metadata.tokensExpected, 'Token purchase via Kora')
-    }
-    await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+  if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
+    const metadata = parsePaymentMetadata(payment)
+    const patientId = payment.patient_id || metadata.patientId
+    const tokens = patientId ? await getPatientTokenBalance(patientId) : null
+    return res.json({ status: 'success', credited: false, tokens, payment, message: 'Payment was already verified.' })
   }
-  res.json({ status: 'success', credited: true, payment })
+
+  const charge = await queryKoraCharge(reference)
+  if (!charge.ok) {
+    return res.status(502).json({
+      status: charge.status,
+      credited: false,
+      error: 'Could not verify payment with Kora',
+      details: charge.error,
+      payment,
+    })
+  }
+
+  if (!isKoraChargeSuccessful(charge.payload)) {
+    await supabase.from('payments').update({ status: charge.status || 'pending' }).eq('id', payment.id)
+    return res.json({
+      status: charge.status || 'pending',
+      credited: false,
+      payment,
+      message: 'Payment is not successful yet.',
+    })
+  }
+
+  if (payment.type === 'token_purchase') {
+    const result = await creditTokenPurchasePayment(payment, 'Kora')
+    return res.json({
+      status: 'success',
+      credited: result.credited,
+      tokens: result.tokens,
+      payment,
+      message: result.reason,
+    })
+  }
+
+  await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+  res.json({ status: 'success', credited: false, payment, message: 'Payment verified.' })
 })
 
 app.post('/api/webhooks/kora', async (req, res) => {
-  res.sendStatus(200)
+  const event = req.body?.event
+  const data = req.body?.data || {}
+  const reference = data.reference || data.payment_reference
+
+  if (!reference) return res.status(400).json({ error: 'Missing payment reference' })
+
+  const { data: payment } = await supabase.from('payments').select('*').eq('reference', reference).maybeSingle()
+  if (!payment) return res.status(404).json({ error: 'Payment not found' })
+
+  const successful = event === 'charge.success' || isKoraChargeSuccessful({ data })
+  if (!successful) {
+    await supabase.from('payments').update({ status: normalizeKoraStatus({ data }) || 'pending' }).eq('id', payment.id)
+    return res.json({ received: true, credited: false })
+  }
+
+  if (payment.type === 'token_purchase') {
+    const result = await creditTokenPurchasePayment(payment, 'Kora webhook')
+    return res.json({ received: true, credited: result.credited, tokens: result.tokens })
+  }
+
+  await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+  res.json({ received: true, credited: false })
 })
 
 // ---------- VIDEO TOKEN ----------
