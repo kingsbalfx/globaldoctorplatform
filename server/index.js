@@ -433,17 +433,18 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
 
   try {
     if (role === 'patient') {
+      const patientEmail = email.toLowerCase()
       const patientProfile = {
-        email,
+        email: patientEmail,
         password: '',
-        name: name || email.split('@')[0],
+        name: name || patientEmail.split('@')[0],
         date_of_birth: dateOfBirth || null,
         phone: phone || '',
         country: country || 'NG',
         language: language || 'English',
         is_online: true,
       }
-      let { data: patient, error: patientLookupError } = await supabase.from('patients').select('*').eq('email', email).maybeSingle()
+      let { data: patient, error: patientLookupError } = await supabase.from('patients').select('*').eq('email', patientEmail).maybeSingle()
       if (patientLookupError) return res.status(500).json({ error: 'Failed to load patient: ' + patientLookupError.message })
       if (!patient) {
         const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
@@ -470,16 +471,17 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
     }
 
     // Doctor
+    const doctorEmail = email.toLowerCase()
     const doctorProfile = {
-      email,
+      email: doctorEmail,
       password: '',
-      name: name || email.split('@')[0],
+      name: name || doctorEmail.split('@')[0],
       specialty: specialty || 'General Practitioner',
       location: location || country || 'Nigeria',
       license_number: licenseNumber || 'PENDING',
       verified: false,
     }
-    let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', email).maybeSingle()
+    let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', doctorEmail).maybeSingle()
     if (doctorLookupError) return res.status(500).json({ error: 'Failed to load doctor: ' + doctorLookupError.message })
     if (!doctor) {
       const id = generateId('doc')
@@ -558,9 +560,16 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
   }
 })
 
-// ---------- PATIENT AUTH (email) ----------
+// ---------- PATIENT AUTH (email) – lowercased ----------
 app.post('/api/patients/register', async (req, res) => {
-  const { email, password, name, dateOfBirth, phone, country, language } = req.body
+  const email = String(req.body.email || '').trim().toLowerCase()
+  const password = String(req.body.password || '')
+  const name = String(req.body.name || '')
+  const dateOfBirth = req.body.dateOfBirth || ''
+  const phone = String(req.body.phone || '')
+  const country = String(req.body.country || '')
+  const language = String(req.body.language || 'English')
+
   if (!email || !password || !name || !dateOfBirth || !phone || !country) {
     return res.status(400).json({ error: 'All required fields must be provided' })
   }
@@ -581,7 +590,9 @@ app.post('/api/patients/register', async (req, res) => {
 })
 
 app.post('/api/patients/login', async (req, res) => {
-  const { email, password } = req.body
+  const email = String(req.body.email || '').trim().toLowerCase()
+  const password = String(req.body.password || '')
+
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
 
   const { data: patient } = await supabase.from('patients').select('*').eq('email', email).eq('password', password).maybeSingle()
@@ -715,10 +726,13 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   }
 
   try {
+    // Kora expects amount in minor units (cents for USD)
+    const amountInCents = Math.round(amountUSD * 100)
+
     const { data: response } = await axios.post(
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
       {
-        amount: amountUSD,
+        amount: amountInCents,
         currency: 'USD',
         reference,
         redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,

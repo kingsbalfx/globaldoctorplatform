@@ -39,7 +39,6 @@ function TokenManager({ patient, onTokensUpdated }) {
       if (response.ok) {
         const data = await response.json()
         setTokens(data.tokens || 0)
-        // Check history for prior purchases
         const historyRes = await apiFetch(`/api/patients/${patient.id}/tokens/history`).catch(() => null)
         if (historyRes?.ok) {
           const historyData = await historyRes.json()
@@ -67,10 +66,16 @@ function TokenManager({ patient, onTokensUpdated }) {
   const handlePurchaseTokens = async () => {
     setLoading(true)
     try {
+      const amountInCents = Math.round(Math.max(10, Number(purchaseUSD) || 10) * 100)
       const response = await apiFetch(`/api/patients/${patient.id}/tokens/purchase/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amountUSD: Math.max(10, Math.round(Number(purchaseUSD) || 10)), email: patient.email, name: patient.name }),
+        body: JSON.stringify({
+          amountUSD: Math.max(10, Math.round(Number(purchaseUSD) || 10)),
+          email: patient.email,
+          name: patient.name,
+          amount_in_minor: amountInCents
+        }),
       })
 
       if (!response.ok) {
@@ -165,6 +170,7 @@ function TokenManager({ patient, onTokensUpdated }) {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-slate-900">Token Balance</h2>
         <button
+          type="button"
           onClick={() => setShowPurchase(true)}
           className="bg-brand-700 text-white px-4 py-2 rounded-2xl text-sm font-semibold hover:bg-brand-600 transition"
         >
@@ -180,7 +186,6 @@ function TokenManager({ patient, onTokensUpdated }) {
         <p className="text-sm text-slate-600 mt-2 capitalize">{tokenStatus.status} balance</p>
       </div>
 
-      {/* Subscription Status */}
       {subscription && (
         <div className="bg-slate-50 rounded-2xl p-4 mb-6">
           <h3 className="font-semibold text-slate-900 mb-2">Active Subscription</h3>
@@ -193,7 +198,6 @@ function TokenManager({ patient, onTokensUpdated }) {
         </div>
       )}
 
-      {/* Subscription Plans */}
       <div className="space-y-4">
         <h3 className="font-semibold text-slate-900">Subscription Plans</h3>
         <div className="grid md:grid-cols-3 gap-4">
@@ -210,6 +214,7 @@ function TokenManager({ patient, onTokensUpdated }) {
             />
             <p className="text-lg font-bold text-brand-700 mt-2">${Math.max(10, Number(purchaseUSD) || minSubscriptionUSD)}</p>
             <button
+              type="button"
               onClick={() => handleSubscribe('payperuse')}
               disabled={loading}
               className="w-full mt-3 bg-slate-100 text-slate-700 py-2 px-4 rounded-2xl text-sm font-semibold hover:bg-slate-200 transition disabled:opacity-50"
@@ -223,6 +228,7 @@ function TokenManager({ patient, onTokensUpdated }) {
             <p className="text-sm text-slate-600 mt-1">500 tokens/month</p>
             <p className="text-lg font-bold text-brand-700 mt-2">$50</p>
             <button
+              type="button"
               onClick={() => handleSubscribe('monthly')}
               disabled={loading}
               className="w-full mt-3 bg-brand-700 text-white py-2 px-4 rounded-2xl text-sm font-semibold hover:bg-brand-600 transition disabled:opacity-50"
@@ -236,6 +242,7 @@ function TokenManager({ patient, onTokensUpdated }) {
             <p className="text-sm text-slate-600 mt-1">6000 tokens/year</p>
             <p className="text-lg font-bold text-brand-700 mt-2">$500</p>
             <button
+              type="button"
               onClick={() => handleSubscribe('yearly')}
               disabled={loading}
               className="w-full mt-3 bg-green-600 text-white py-2 px-4 rounded-2xl text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50"
@@ -246,7 +253,6 @@ function TokenManager({ patient, onTokensUpdated }) {
         </div>
       </div>
 
-      {/* Token Purchase Modal */}
       {showPurchase && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl p-6 w-full max-w-md">
@@ -260,12 +266,14 @@ function TokenManager({ patient, onTokensUpdated }) {
                   <p className="text-xs text-slate-500 mt-1">Expected tokens: {pendingPurchase.tokensExpected}</p>
                   <div className="flex gap-3 mt-4">
                     <button
+                      type="button"
                       onClick={() => pendingPurchase.checkoutUrl && window.open(pendingPurchase.checkoutUrl, '_blank', 'noopener,noreferrer')}
                       className="flex-1 bg-slate-100 text-slate-700 py-3 px-4 rounded-2xl font-semibold hover:bg-slate-200 transition"
                     >
                       Open Checkout
                     </button>
                     <button
+                      type="button"
                       onClick={confirmPurchase}
                       disabled={loading}
                       className="flex-1 bg-brand-700 text-white py-3 px-4 rounded-2xl font-semibold hover:bg-brand-600 transition disabled:opacity-50"
@@ -286,6 +294,7 @@ function TokenManager({ patient, onTokensUpdated }) {
                     <div className="grid grid-cols-3 gap-3">
                       {[10, 20, 50].map(usd => (
                         <button
+                          type="button"
                           key={usd}
                           onClick={() => setPurchaseUSD(usd)}
                           className={`p-3 rounded-2xl text-sm font-medium transition ${
@@ -327,6 +336,7 @@ function TokenManager({ patient, onTokensUpdated }) {
 
                   <div className="flex space-x-3">
                     <button
+                      type="button"
                       onClick={() => {
                         setPendingPurchase(null)
                         setShowPurchase(false)
@@ -336,6 +346,7 @@ function TokenManager({ patient, onTokensUpdated }) {
                       Cancel
                     </button>
                     <button
+                      type="button"
                       onClick={handlePurchaseTokens}
                       disabled={loading}
                       className="flex-1 bg-brand-700 text-white py-3 px-4 rounded-2xl font-semibold hover:bg-brand-600 transition disabled:opacity-50"
