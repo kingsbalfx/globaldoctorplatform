@@ -19,7 +19,7 @@ import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 import { supabase } from '../lib/supabaseClient'
 
-function PatientDashboard({ logoutSignal = 0, onLoggedOut }) {
+function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   const { addError } = useError()
   const [currentStep, setCurrentStep] = useState('auth') // auth -> doctor -> calendar -> dashboard
   const [patient, setPatient] = useState(null)
@@ -68,6 +68,14 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut }) {
   const unreadNotifications = notifications.filter((item) => !item.is_read).length
 
   const cleanLogout = (reason = 'logout') => {
+    const patientId = patient?.id
+    if (patientId) {
+      void apiFetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOnline: false }),
+      }).catch(() => null)
+    }
     setPatient(null)
     setSelectedDoctor(null)
     setSubscriptionType('basic')
@@ -87,6 +95,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut }) {
     }
     void supabase.auth.signOut().catch(() => null)
     if (reason === 'idle') addError('You were logged out after 15 minutes of inactivity.', 'info', 9000)
+    onSessionChange?.('')
     onLoggedOut?.()
   }
 
@@ -130,6 +139,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut }) {
         setPatient(parsed)
         setTokens(parsed.tokens || 0)
         setCurrentStep('doctor')
+        onSessionChange?.('patient')
       } else {
         // Clear corrupted / incomplete session
         window.localStorage.removeItem('gd_patient_session')
@@ -182,6 +192,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut }) {
     } catch {
       // ignore
     }
+    onSessionChange?.('patient')
     setCurrentStep('doctor')
   }
 

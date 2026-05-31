@@ -52,15 +52,24 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
 
           if (sessionError) {
             if (sessionError.message?.toLowerCase().includes('pkce code verifier not found')) {
-              setError('Authentication session expired. Please sign in again from the same browser.')
-              setStatus('')
-              return
+              const { data: existingSession } = await supabase.auth.getSession()
+              if (!existingSession?.session) {
+                setError('Authentication session expired. Please sign in again from the same browser.')
+                setStatus('')
+                return
+              }
+            } else {
+              throw sessionError
             }
-            throw sessionError
           }
 
           if (!sessionData?.session) {
-            throw new Error('OAuth session was not created. Please sign in again.')
+            const { data: existingSession } = await supabase.auth.getSession()
+            if (existingSession?.session) {
+              window.history.replaceState({}, document.title, window.location.pathname)
+            } else {
+              throw new Error('OAuth session was not created. Please sign in again.')
+            }
           }
 
           // Clean callback query params from the URL after sign-in.

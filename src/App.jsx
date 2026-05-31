@@ -13,6 +13,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy'
 import Contact from './pages/Contact'
 import Footer from './components/Footer'
 import { ErrorProvider } from './components/ErrorHandler'
+import { apiFetch } from './lib/apiFetch'
 import './lib/i18n' // Initialize i18n
 
 function viewFromPath(pathname) {
@@ -62,14 +63,43 @@ function pathFromView(view) {
   }
 }
 
+function portalFromView(view) {
+  if (view === 'patient' || view === 'payment-success') return 'patient'
+  if (view === 'doctor-auth' || view === 'admin') return 'doctor'
+  if (view === 'facility') return 'facility'
+  if (view === 'platform-admin') return 'platform-admin'
+  return ''
+}
+
 function App() {
   const [currentView, setCurrentView] = useState(() => viewFromPath(window.location.pathname)) // 'landing', 'patient', 'doctor-auth', 'admin', 'platform-admin', 'facility', 'auth-callback', 'terms', 'privacy', 'contact'
   const [authDoctor, setAuthDoctor] = useState(null)
   const [authAdmin, setAuthAdmin] = useState(null)
+  const [activePortal, setActivePortal] = useState(() => {
+    try {
+      return window.localStorage.getItem('gd_active_portal') || ''
+    } catch {
+      return ''
+    }
+  })
   const [patientLogoutSignal, setPatientLogoutSignal] = useState(0)
+  const [facilityLogoutSignal, setFacilityLogoutSignal] = useState(0)
+
+  const setPortalSession = (portal) => {
+    const nextPortal = portal || ''
+    setActivePortal(nextPortal)
+    try {
+      if (nextPortal) window.localStorage.setItem('gd_active_portal', nextPortal)
+      else window.localStorage.removeItem('gd_active_portal')
+    } catch {
+      // ignore
+    }
+  }
 
   const navigate = (view) => {
     const nextView = viewFromPath(pathFromView(view))
+    const nextPortal = portalFromView(nextView)
+    if (activePortal && nextPortal !== activePortal) return
     setCurrentView(nextView)
     try {
       const nextPath = pathFromView(nextView)
@@ -83,10 +113,33 @@ function App() {
 
   // Handle back/forward navigation.
   useEffect(() => {
-    const handler = () => setCurrentView(viewFromPath(window.location.pathname))
+    const handler = () => {
+      const nextView = viewFromPath(window.location.pathname)
+      const nextPortal = portalFromView(nextView)
+      if (activePortal && nextPortal !== activePortal) {
+        const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
+        const fallbackPath = pathFromView(fallbackView)
+        window.history.replaceState({ view: fallbackView }, '', fallbackPath)
+        setCurrentView(fallbackView)
+        return
+      }
+      setCurrentView(nextView)
+    }
     window.addEventListener('popstate', handler)
     return () => window.removeEventListener('popstate', handler)
-  }, [])
+  }, [activePortal, authDoctor])
+
+  useEffect(() => {
+    if (!activePortal) return
+    if (portalFromView(currentView) === activePortal) return
+    const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
+    setCurrentView(fallbackView)
+    try {
+      window.history.replaceState({ view: fallbackView }, '', pathFromView(fallbackView))
+    } catch {
+      // ignore
+    }
+  }, [activePortal, authDoctor, currentView])
 
   // Restore doctor session (OAuth bridge or prior login).
   useEffect(() => {
@@ -94,7 +147,10 @@ function App() {
       const stored = window.localStorage.getItem('gd_doctor_session')
       if (!stored) return
       const parsed = JSON.parse(stored)
-      if (parsed?.id) setAuthDoctor({ type: 'login', ...parsed })
+      if (parsed?.id) {
+        setAuthDoctor({ type: 'login', ...parsed })
+        setPortalSession('doctor')
+      }
     } catch {
       // ignore
     }
@@ -104,6 +160,7 @@ function App() {
     if (authData.type === 'admin-login') {
       setAuthAdmin(authData)
       setAuthDoctor(null)
+      setPortalSession('platform-admin')
       setCurrentView('platform-admin')
       try {
         window.history.pushState({ view: 'platform-admin' }, '', '/platform-admin')
@@ -116,6 +173,7 @@ function App() {
     if (authData.type === 'login' || authData.type === 'register') {
       setAuthDoctor(authData)
       setAuthAdmin(null)
+      setPortalSession('doctor')
       setCurrentView('admin')
       try {
         window.history.pushState({ view: 'admin' }, '', '/doctor/dashboard')
@@ -126,14 +184,24 @@ function App() {
   }
 
   const handleLogout = () => {
+    if (authDoctor?.id) {
+      void apiFetch(`/api/doctors/${encodeURIComponent(authDoctor.id)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOnline: false }),
+      }).catch(() => null)
+    }
     setAuthDoctor(null)
     setAuthAdmin(null)
     setPatientLogoutSignal((value) => value + 1)
+    setFacilityLogoutSignal((value) => value + 1)
+    setPortalSession('')
     setCurrentView('landing')
     try {
       window.localStorage.removeItem('gd_doctor_session')
       window.localStorage.removeItem('gd_platform_admin_session')
       window.localStorage.removeItem('gd_patient_session')
+      window.localStorage.removeItem('gd_facility_session_active')
       window.localStorage.removeItem('gd_pending_patient_profile')
       window.localStorage.removeItem('gd_pending_doctor_profile')
     } catch {
@@ -155,39 +223,47 @@ function App() {
           <span className="text-lg font-semibold text-brand-700">GlobalDoc Connect</span>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600">
-          <button
-            onClick={() => navigate('landing')}
-            className={`hover:text-brand-700 ${currentView === 'landing' ? 'text-brand-700' : ''}`}
-          >
-            Home
-          </button>
-          <button
-            onClick={() => navigate('patient')}
-            className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}
-          >
-            Patient Portal
-          </button>
-          <button
-            onClick={() => navigate('doctor-auth')}
-            className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}
-          >
-            Doctor Portal
-          </button>
-          <button
-            onClick={() => navigate('facility')}
-            className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}
-          >
-            Facility Portal
-          </button>
-          {authAdmin && (
-            <button
-              onClick={() => setCurrentView('platform-admin')}
-              className={`hover:text-brand-700 ${currentView === 'platform-admin' ? 'text-brand-700' : ''}`}
-            >
-              Platform Admin
-            </button>
+          {!activePortal && (
+            <>
+              <button
+                onClick={() => navigate('landing')}
+                className={`hover:text-brand-700 ${currentView === 'landing' ? 'text-brand-700' : ''}`}
+              >
+                Home
+              </button>
+              <button
+                onClick={() => navigate('patient')}
+                className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}
+              >
+                Patient Portal
+              </button>
+              <button
+                onClick={() => navigate('doctor-auth')}
+                className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}
+              >
+                Doctor Portal
+              </button>
+              <button
+                onClick={() => navigate('facility')}
+                className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}
+              >
+                Facility Portal
+              </button>
+            </>
           )}
-          {(authDoctor || authAdmin) && (
+          {activePortal === 'patient' && (
+            <button onClick={() => navigate('patient')} className="font-semibold text-brand-700">Patient Portal</button>
+          )}
+          {activePortal === 'doctor' && (
+            <button onClick={() => navigate(authDoctor ? 'admin' : 'doctor-auth')} className="font-semibold text-brand-700">Doctor Portal</button>
+          )}
+          {activePortal === 'facility' && (
+            <button onClick={() => navigate('facility')} className="font-semibold text-brand-700">Facility Portal</button>
+          )}
+          {activePortal === 'platform-admin' && (
+            <button onClick={() => navigate('platform-admin')} className="font-semibold text-brand-700">Platform Admin</button>
+          )}
+          {(authDoctor || authAdmin || activePortal) && (
             <button
               onClick={handleLogout}
               className="text-red-600 hover:text-red-700"
@@ -199,11 +275,11 @@ function App() {
       </nav>
 
       {currentView === 'landing' && <LandingPage />}
-      {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} />}
+      {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
       {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
       {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
       {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
-      {currentView === 'facility' && <FacilityPortal />}
+      {currentView === 'facility' && <FacilityPortal logoutSignal={facilityLogoutSignal} onSessionChange={setPortalSession} />}
       {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
       {currentView === 'payment-success' && <PaymentSuccess onNavigate={navigate} />}
       {currentView === 'reset-password' && <ResetPassword />}

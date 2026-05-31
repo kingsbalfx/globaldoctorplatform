@@ -156,13 +156,16 @@ function parsePaymentMetadata(payment) {
   if (!payment) return {}
   if (!payment.metadata) {
     const reference = String(payment.reference || payment.provider_reference || payment.id || '')
-    const match = reference.match(/^kora-token-(\d+)-/)
+    const tokenMatch = reference.match(/^kora-token-(\d+)-(\d+)-/)
+    const legacyMatch = reference.match(/^kora-token-(\d+)-/)
     return {
       patientId: payment.patient_id || '',
-      tokensExpected: Math.round(Number(payment.amount || 0) / Math.max(1, KORA_USD_EXCHANGE_RATE) * 10),
+      tokensExpected: tokenMatch
+        ? Number(tokenMatch[1])
+        : Math.round(Number(payment.amount || 0) / Math.max(1, KORA_USD_EXCHANGE_RATE) * 10),
       koraAmount: payment.amount,
       koraCurrency: payment.currency,
-      createdMs: match ? Number(match[1]) : null,
+      createdMs: tokenMatch ? Number(tokenMatch[2]) : legacyMatch ? Number(legacyMatch[1]) : null,
     }
   }
   if (typeof payment.metadata === 'string') {
@@ -196,23 +199,27 @@ async function creditTokenPurchasePayment(payment, source = 'kora') {
 }
 
 async function insertPaymentRecord(row) {
-  const { error } = await supabase.from('payments').insert(row)
+  const normalizedRow = {
+    ...row,
+    doctor_id: await resolvePaymentDoctorId(row.doctor_id),
+  }
+  const { error } = await supabase.from('payments').insert(normalizedRow)
   if (!error) return { error: null, mode: 'full' }
   if (!isMissingColumnError(error)) return { error, mode: 'full' }
 
   const fallback = {
-    id: row.id,
-    patient_id: row.patient_id,
-    amount: row.amount,
-    currency: row.currency || 'NGN',
-    type: row.type || row.payment_type || 'token_purchase',
-    status: row.status || 'pending',
-    provider: row.provider || row.payment_provider || 'kora',
-    reference: row.reference || row.provider_reference || row.id,
-    provider_reference: row.reference || row.provider_reference || row.id,
-    created_at: row.created_at || new Date().toISOString(),
+    id: normalizedRow.id,
+    patient_id: normalizedRow.patient_id,
+    doctor_id: normalizedRow.doctor_id,
+    amount: normalizedRow.amount,
+    currency: normalizedRow.currency || 'NGN',
+    type: normalizedRow.type || normalizedRow.payment_type || 'token_purchase',
+    status: normalizedRow.status || 'pending',
+    provider: normalizedRow.provider || normalizedRow.payment_provider || 'kora',
+    reference: normalizedRow.reference || normalizedRow.provider_reference || normalizedRow.id,
+    provider_reference: normalizedRow.reference || normalizedRow.provider_reference || normalizedRow.id,
+    created_at: normalizedRow.created_at || new Date().toISOString(),
   }
-  if (row.doctor_id && row.doctor_id !== 'system') fallback.doctor_id = row.doctor_id
 
   let candidate = { ...fallback }
   let lastError = null
@@ -227,6 +234,13 @@ async function insertPaymentRecord(row) {
     candidate = nextCandidate
   }
   return { error: lastError || error, mode: 'adaptive' }
+}
+
+async function resolvePaymentDoctorId(value) {
+  const requested = String(value || '').trim()
+  if (requested && requested !== 'system') return requested
+  const { data } = await supabase.from('doctors').select('id').limit(1).maybeSingle()
+  return data?.id ? String(data.id) : requested || 'system'
 }
 
 function isMissingColumnError(error) {
@@ -266,8 +280,11 @@ function sanitizePatientForResponse(patient) {
 function sanitizeDoctorForResponse(doctor) {
   if (!doctor) return null
   const { password, doctors, ...rest } = doctor
+  const isOnline = Boolean(doctor.isOnline || doctor.is_online || doctors?.is_online)
   return {
     ...rest,
+    isOnline,
+    is_online: isOnline,
     verified: Boolean(doctor.verified || doctors?.verified),
     license_verified: Boolean(doctor.license_verified || doctors?.license_verified),
     approval_status: (doctor.verified || doctors?.verified) ? 'approved' : 'pending_review',
@@ -748,8 +765,47 @@ app.post('/api/patients/register', async (req, res) => {
     return res.status(400).json({ error: 'All required fields must be provided' })
   }
 
-  const { data: existing } = await supabase.from('patients').select('id').eq('email', email).maybeSingle()
-  if (existing) return res.status(409).json({ error: 'Patient already exists' })
+  const { data: existing } = await supabase.from('patients').select('*').eq('email', email).maybeSingle()
+  if (existing) {
+    const updatedPatient = {
+      ...existing,
+      email,
+      password,
+      name,
+      date_of_birth: dateOfBirth,
+      phone,
+      country,
+      language: language || existing.language || 'English',
+      is_online: true,
+    }
+    const { data: savedPatient, error: updateError } = await supabase
+      .from('patients')
+      .update({
+        password,
+        name,
+        date_of_birth: dateOfBirth,
+        phone,
+        country,
+        language: updatedPatient.language,
+        is_online: true,
+      })
+      .eq('id', existing.id)
+      .select('*')
+      .maybeSingle()
+    if (updateError) return res.status(500).json({ error: updateError.message })
+    const { data: existingTokenRow } = await supabase
+      .from('patient_tokens')
+      .select('patient_id')
+      .eq('patient_id', existing.id)
+      .maybeSingle()
+    if (!existingTokenRow) {
+      await supabase.from('patient_tokens').insert({ patient_id: existing.id, balance: Number(existing.tokens || 0) })
+    }
+    return res.status(200).json({
+      patient: sanitizePatientForResponse(savedPatient || updatedPatient),
+      message: 'Patient profile updated and signed in',
+    })
+  }
 
   const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
   const newPatient = {
@@ -758,7 +814,7 @@ app.post('/api/patients/register', async (req, res) => {
     tokens: 0, is_online: true, created_at: new Date().toISOString()
   }
   await supabase.from('patients').insert(newPatient)
-  await supabase.from('patient_tokens').insert({ patient_id: id, balance: 0 })
+  await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
 
   res.status(201).json({ patient: sanitizePatientForResponse(newPatient), message: 'Registration successful' })
 })
@@ -865,7 +921,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   const tokensExpected = Math.round(amountUSD * rate)
   const koraCharge = buildKoraTokenCharge(amountUSD)
 
-  const reference = `kora-token-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  const reference = `kora-token-${tokensExpected}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
   // *** FORCE production origin for Kora URLs – NEVER rely on request headers on Vercel ***
   const origin = getApiOrigin(req) || 'https://globaldoctorplatform.vercel.app'
@@ -1095,7 +1151,7 @@ app.get('/api/doctors', async (req, res) => {
   if (req.query.online !== undefined && req.query.online !== '') query = query.eq('is_online', req.query.online === 'true')
   query = query.order('rating', { ascending: false })
   const { data } = await query
-  res.json({ doctors: data || [] })
+  res.json({ doctors: (data || []).map(sanitizeDoctorForResponse) })
 })
 
 // ---------- DOCTOR AVAILABILITY (mock) ----------

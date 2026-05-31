@@ -35,7 +35,7 @@ function computeNetwork() {
   return { bars, label }
 }
 
-function FacilityPortal() {
+function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
   const { addError } = useError()
   const [step, setStep] = useState('login') // login -> dashboard
   const [facilityType, setFacilityType] = useState('phc')
@@ -147,6 +147,12 @@ function FacilityPortal() {
       setConsultation(null)
       setConsultSplit(null)
       setActiveTab('consult')
+      try {
+        window.localStorage.setItem('gd_facility_session_active', '1')
+      } catch {
+        // ignore
+      }
+      onSessionChange?.('facility')
       addError(`Signed in to ${data.facility?.name || 'facility dashboard'}.`, 'success')
     } catch (err) {
       setError(err.message)
@@ -427,7 +433,18 @@ function FacilityPortal() {
     setConsultation(null)
     setConsultSplit(null)
     setError('')
+    try {
+      window.localStorage.removeItem('gd_facility_session_active')
+    } catch {
+      // ignore
+    }
+    onSessionChange?.('')
   }
+
+  useEffect(() => {
+    if (logoutSignal > 0) logout()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logoutSignal])
 
   if (step === 'login') {
     return (
