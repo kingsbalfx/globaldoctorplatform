@@ -57,7 +57,7 @@ const ErrorToastContainer = () => {
   if (errors.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+    <div className="fixed right-4 top-4 z-50 w-[min(420px,calc(100vw-2rem))] space-y-3">
       {errors.map((error) => (
         <ErrorToast key={error.id} error={error} onClose={() => removeError(error.id)} />
       ))}
@@ -82,22 +82,26 @@ const ErrorToast = ({ error, onClose }) => {
   const getBgColor = () => {
     switch (error.type) {
       case 'success':
-        return 'bg-green-50 border-green-200';
+        return 'border-emerald-200 bg-white shadow-emerald-900/10';
       case 'warning':
-        return 'bg-yellow-50 border-yellow-200';
+        return 'border-amber-200 bg-white shadow-amber-900/10';
       case 'info':
-        return 'bg-blue-50 border-blue-200';
+        return 'border-blue-200 bg-white shadow-blue-900/10';
       default:
-        return 'bg-red-50 border-red-200';
+        return 'border-rose-200 bg-white shadow-rose-900/10';
     }
   };
 
   return (
-    <div className={`p-4 rounded-lg border shadow-lg animate-in slide-in-from-right-2 ${getBgColor()}`}>
-      <div className="flex items-start space-x-3">
-        {getIcon()}
+    <div className={`overflow-hidden rounded-2xl border shadow-2xl animate-in slide-in-from-right-2 ${getBgColor()}`}>
+      <div className="h-1 bg-gradient-to-r from-brand-700 via-cyan-500 to-emerald-500" />
+      <div className="flex items-start gap-3 p-4">
+        <div className="mt-0.5 rounded-full bg-slate-50 p-2 ring-1 ring-slate-100">{getIcon()}</div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-900">{error.message}</p>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+            {error.type === 'success' ? 'Completed' : error.type === 'warning' ? 'Attention' : error.type === 'info' ? 'Update' : 'Action needed'}
+          </p>
+          <p className="mt-1 text-sm font-semibold leading-6 text-slate-900">{error.message}</p>
         </div>
         <button
           onClick={onClose}

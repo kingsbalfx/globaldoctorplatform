@@ -3,19 +3,19 @@ import { apiFetch } from '../lib/apiFetch'
 
 const SEVERITY_STYLES = {
   info: {
-    wrapper: 'border-blue-200 bg-gradient-to-r from-blue-50 to-white text-blue-900',
-    badge: 'bg-blue-600 text-white',
-    label: 'Info',
+    wrapper: 'border-cyan-200 bg-[linear-gradient(110deg,#ecfeff,#ffffff,#dbeafe,#f0f9ff)] text-slate-950 shadow-cyan-900/10',
+    badge: 'bg-cyan-700 text-white',
+    label: 'Public Notice',
   },
   warning: {
-    wrapper: 'border-amber-200 bg-gradient-to-r from-amber-50 to-white text-amber-900',
+    wrapper: 'border-amber-200 bg-[linear-gradient(110deg,#fffbeb,#ffffff,#fef3c7,#fff7ed)] text-amber-950 shadow-amber-900/10',
     badge: 'bg-amber-500 text-white',
-    label: 'Warning',
+    label: 'Featured',
   },
   urgent: {
-    wrapper: 'border-red-200 bg-gradient-to-r from-red-50 to-white text-red-900',
-    badge: 'bg-red-600 text-white',
-    label: 'Urgent',
+    wrapper: 'border-rose-200 bg-[linear-gradient(110deg,#fff1f2,#ffffff,#ffe4e6,#fdf2f8)] text-rose-950 shadow-rose-900/10',
+    badge: 'bg-rose-700 text-white',
+    label: 'Breaking',
   },
 }
 
@@ -71,28 +71,29 @@ function AnnouncementBanner({ audience }) {
   }
 
   return (
-    <div className={`mb-6 overflow-hidden rounded-3xl border px-5 py-4 shadow-lg ${style.wrapper}`}>
+    <div className={`relative mb-6 overflow-hidden rounded-[2rem] border px-5 py-4 shadow-2xl ${style.wrapper}`}>
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-white/40 blur-2xl" />
       <div className="flex items-center gap-4">
-        {/* Badge */}
-        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${style.badge}`}>
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.18em] shadow-lg ${style.badge}`}>
           {style.label}
         </span>
 
-        {/* Scrolling text */}
         <div className="relative flex-1 overflow-hidden whitespace-nowrap">
-          <div className="marquee inline-block animate-marquee">
-            <span className="text-sm font-semibold">{top.title}</span>
-            <span className="mx-4 opacity-50">•</span>
-            <span className="text-sm opacity-90">{top.message}</span>
+          <div className="inline-block animate-marquee">
+            <span className="text-base font-black uppercase tracking-wide sm:text-lg">{top.title}</span>
+            <span className="mx-5 opacity-50">|</span>
+            <span className="text-sm font-bold opacity-95 sm:text-base">{top.message}</span>
+            <span className="mx-5 opacity-50">|</span>
+            <span className="text-base font-black uppercase tracking-wide sm:text-lg">{top.title}</span>
           </div>
         </div>
 
         <button
           type="button"
           onClick={dismiss}
-          className="shrink-0 rounded-full bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-300 hover:bg-white"
+          className="shrink-0 rounded-full bg-white/80 px-4 py-2 text-xs font-bold text-slate-800 ring-1 ring-white/80 hover:bg-white"
         >
-          Dismiss
+          Close
         </button>
       </div>
     </div>

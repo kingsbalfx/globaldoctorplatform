@@ -35,7 +35,7 @@ export async function submitReview(reviewData) {
 }
 
 export async function createPaymentSession(paymentData) {
-  const response = await apiFetch(`/api/payments`, {
+  const response = await apiFetch(`/api/payments/kora/initialize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(paymentData),

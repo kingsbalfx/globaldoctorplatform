@@ -31,8 +31,8 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false }
 })
 
-const KORA_SECRET_KEY = process.env.KORA_SECRET_KEY
-const KORA_BASE_URL = process.env.KORA_BASE_URL || 'https://api.korapay.com'
+const KORA_SECRET_KEY = String(process.env.KORA_SECRET_KEY || '').trim()
+const KORA_BASE_URL = String(process.env.KORA_BASE_URL || 'https://api.korapay.com').trim().replace(/\/+$/, '')
 
 // ---------- STARTUP DIAGNOSTICS ----------
 ;(async () => {
@@ -92,6 +92,36 @@ function getApiOrigin(req) {
   const host = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0].trim()
   if (!host) return ''
   return `${proto}://${host}`
+}
+
+function extractKoraCheckoutUrl(payload) {
+  return payload?.data?.checkout_url
+    || payload?.data?.checkoutUrl
+    || payload?.checkout_url
+    || payload?.checkoutUrl
+    || payload?.data?.payment_url
+    || payload?.payment_url
+    || ''
+}
+
+function isMissingColumnError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase()
+  return text.includes('schema cache') || text.includes('column')
+}
+
+function withoutOptionalDoctorPayoutColumns(row) {
+  const {
+    bank_code,
+    bank_account,
+    currency,
+    payout_method,
+    mobile_money_operator,
+    mobile_money_number,
+    license_issuer,
+    license_expiry,
+    ...safeRow
+  } = row
+  return safeRow
 }
 
 function sanitizePatientForResponse(patient) {
@@ -373,8 +403,8 @@ app.post('/api/doctors/login', async (req, res) => {
       })
     }
 
-    await supabase.from('doctors').update({ is_online: true }).eq('id', doctor.id)
-    res.json({ doctor: sanitizeDoctorForResponse(doctor), message: 'Login successful' })
+    await supabase.from('doctors').update({ is_online: true }).eq('id', String(doctor.id))
+    res.json({ doctor: sanitizeDoctorForResponse({ ...doctor, id: String(doctor.id) }), message: 'Login successful' })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -390,26 +420,33 @@ app.post('/api/doctors/register', async (req, res) => {
   const { data: existing } = await supabase.from('doctors_auth').select('id').eq('email', email).maybeSingle()
   if (existing) return res.status(409).json({ error: 'Doctor already exists' })
 
-  const id = generateId('doc')
   const newDoctor = {
-    id, email, password, name, specialty, location,
+    email, password, name, specialty, location,
     license_number: licenseNumber,
     verified: false, created_at: new Date().toISOString()
   }
-  await supabase.from('doctors_auth').insert(newDoctor)
+  const { data: authRow, error: authInsertError } = await supabase
+    .from('doctors_auth')
+    .insert(newDoctor)
+    .select('*')
+    .maybeSingle()
+  if (authInsertError) return res.status(500).json({ error: authInsertError.message })
+
+  const profileId = String(authRow.id)
 
   const profile = {
-    id, name, specialty, location,
+    id: profileId, name, specialty, location,
     languages: ['English'], rating: 0, rating_count: 0,
     availability: 'Available upon request', verified: false, is_online: false,
     fee: 50, price: { basic: 50, premium: 100 },
     license_verified: false, license_number: licenseNumber,
     created_at: new Date().toISOString()
   }
-  await supabase.from('doctors').insert(profile)
+  const { error: profileInsertError } = await supabase.from('doctors').insert(profile)
+  if (profileInsertError) return res.status(500).json({ error: profileInsertError.message })
 
   res.status(201).json({
-    doctor: sanitizeDoctorForResponse(newDoctor),
+    doctor: sanitizeDoctorForResponse({ ...profile, ...authRow }),
     pendingApproval: true,
     message: 'Registration submitted. A platform admin must review and approve your account before you can sign in.'
   })
@@ -479,21 +516,24 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       specialty: specialty || 'General Practitioner',
       location: location || country || 'Nigeria',
       license_number: licenseNumber || 'PENDING',
-      verified: false,
     }
     let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', doctorEmail).maybeSingle()
     if (doctorLookupError) return res.status(500).json({ error: 'Failed to load doctor: ' + doctorLookupError.message })
     if (!doctor) {
-      const id = generateId('doc')
-      const newDoc = { id, ...doctorProfile, created_at: new Date().toISOString() }
-      const { error: insertDocErr } = await supabase.from('doctors_auth').insert(newDoc)
+      const newDoc = { ...doctorProfile, verified: false, created_at: new Date().toISOString() }
+      const { data: insertedDoctor, error: insertDocErr } = await supabase
+        .from('doctors_auth')
+        .insert(newDoc)
+        .select('*')
+        .maybeSingle()
       if (insertDocErr) return res.status(500).json({ error: 'Failed to create doctor auth: ' + insertDocErr.message })
+      const profileId = String(insertedDoctor.id)
 
       const { error: insertProfErr } = await supabase.from('doctors').insert({
-        id,
-        name: newDoc.name,
-        specialty: newDoc.specialty,
-        location: newDoc.location,
+        id: profileId,
+        name: insertedDoctor.name,
+        specialty: insertedDoctor.specialty,
+        location: insertedDoctor.location,
         languages: ['English'],
         rating: 0,
         rating_count: 0,
@@ -501,13 +541,13 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         fee: 35,
         price: { basic: 50, premium: 100 },
         license_verified: false,
-        license_number: newDoc.license_number,
+        license_number: insertedDoctor.license_number,
         created_at: new Date().toISOString()
       })
       if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
 
       return res.status(403).json({
-        doctor: sanitizeDoctorForResponse(newDoc),
+        doctor: sanitizeDoctorForResponse({ ...insertedDoctor, id: profileId }),
         pendingApproval: true,
         message: 'Doctor profile submitted. A platform admin must approve your account before dashboard access is enabled.'
       })
@@ -519,7 +559,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         .select('*')
         .maybeSingle()
       if (updateDocErr) return res.status(500).json({ error: 'Failed to update doctor auth: ' + updateDocErr.message })
-      const { data: existingDoctorProfile } = await supabase.from('doctors').select('id').eq('id', doctor.id).maybeSingle()
+      const profileId = String(doctor.id)
+      const { data: existingDoctorProfile } = await supabase.from('doctors').select('id').eq('id', profileId).maybeSingle()
       if (existingDoctorProfile) {
         await supabase.from('doctors').update({
           name: doctorProfile.name,
@@ -527,10 +568,10 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           location: doctorProfile.location,
           is_online: true,
           license_number: doctorProfile.license_number,
-        }).eq('id', doctor.id)
+        }).eq('id', profileId)
       } else {
         await supabase.from('doctors').insert({
-          id: doctor.id,
+          id: profileId,
           name: doctorProfile.name,
           specialty: doctorProfile.specialty,
           location: doctorProfile.location,
@@ -693,7 +734,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   const reference = `kora-token-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
   // *** FORCE production origin for Kora URLs – NEVER rely on request headers on Vercel ***
-  const origin = 'https://globaldoctorplatform.vercel.app'
+  const origin = getApiOrigin(req) || 'https://globaldoctorplatform.vercel.app'
 
   // *** Fetch patient email as fallback ***
   let patientEmail = req.body.email || ''
@@ -714,6 +755,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     status: 'pending',
     provider: 'kora',
     reference,
+    metadata: { purpose: 'token_purchase', patientId, tokensExpected, rate, amountUSD },
     created_at: new Date().toISOString()
   })
 
@@ -747,11 +789,11 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
       { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
     )
 
-    const checkoutUrl = response.data?.data?.checkout_url || response.data?.data?.checkoutUrl
+    const checkoutUrl = extractKoraCheckoutUrl(response)
     if (!checkoutUrl) {
       return res.status(500).json({
         error: 'Kora did not return a checkout URL',
-        details: response.data
+        details: response
       })
     }
 
@@ -811,7 +853,7 @@ app.patch('/api/doctors/:doctorId/payout-details', async (req, res) => {
   if (currency) updates.currency = currency
   if (mobileMoneyOperator) updates.mobile_money_operator = mobileMoneyOperator
   if (mobileMoneyNumber) updates.mobile_money_number = mobileMoneyNumber
-  await supabase.from('doctors').update(updates).eq('id', doctorId)
+  await supabase.from('doctors').update(updates).eq('id', String(doctorId))
   res.json({ message: 'Payout details updated' })
 })
 
@@ -830,12 +872,12 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   if (tokensToWithdraw > available) return res.status(400).json({ error: 'Requested tokens exceed available balance' })
   if (tokensToWithdraw < minTokens) return res.status(400).json({ error: `Minimum withdrawal is ${minTokens} tokens ($${settings.doctorMinimumWithdrawalUSD})` })
 
-  await updateDoctorEarnings(doctorId, -tokensToWithdraw)
+  await updateDoctorEarnings(String(doctorId), -tokensToWithdraw)
 
   const reference = `kora-wd-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   await supabase.from('payouts').insert({
     id: reference,
-    doctor_id: doctorId,
+    doctor_id: String(doctorId),
     tokens: tokensToWithdraw,
     amount_usd: tokensToWithdraw / settings.tokenToUSD,
     status: 'pending',
@@ -844,7 +886,9 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   })
 
   res.json({
-    message: `Withdrawal of ${tokensToWithdraw} tokens initiated (mock)`,
+    message: KORA_SECRET_KEY
+      ? `Withdrawal request for ${tokensToWithdraw} tokens has been queued for payout review.`
+      : `Withdrawal request for ${tokensToWithdraw} tokens has been queued. Add KORA_SECRET_KEY on the server to enable live Kora payout processing.`,
     reference,
     tokensDebited: tokensToWithdraw,
     remainingTokens: available - tokensToWithdraw,
@@ -1163,8 +1207,11 @@ app.get('/api/admin/doctors', async (req, res) => {
   if (authError) return res.status(500).json({ error: authError.message })
   const { data: profiles, error: profileError } = await supabase.from('doctors').select('*')
   if (profileError) return res.status(500).json({ error: profileError.message })
-  const profileById = new Map((profiles || []).map((item) => [item.id, item]))
-  const doctors = (authRows || []).map((row) => sanitizeDoctorForResponse({ ...profileById.get(row.id), ...row }))
+  const profileById = new Map((profiles || []).map((item) => [String(item.id), item]))
+  const doctors = (authRows || []).map((row) => {
+    const profileId = String(row.id)
+    return sanitizeDoctorForResponse({ ...profileById.get(profileId), ...row, id: profileId })
+  })
   res.json({ doctors })
 })
 
@@ -1177,23 +1224,26 @@ app.post('/api/admin/doctors', async (req, res) => {
   const { data: existing } = await supabase.from('doctors_auth').select('id').eq('email', payload.email).maybeSingle()
   if (existing) return res.status(409).json({ error: 'A doctor already exists with this email' })
 
-  const id = generateId('doc')
   const authRow = {
-    id,
     email: payload.email,
     password: payload.password,
     name: payload.name,
     specialty: payload.specialty,
     location: payload.location,
     license_number: payload.licenseNumber,
-    bank_code: payload.bankCode || null,
-    bank_account: payload.bankAccount || null,
-    currency: payload.currency || null,
     verified: true,
     created_at: new Date().toISOString(),
   }
+  const { data: insertedAuthRow, error: authInsertError } = await supabase
+    .from('doctors_auth')
+    .insert(authRow)
+    .select('*')
+    .maybeSingle()
+  if (authInsertError) return res.status(500).json({ error: authInsertError.message })
+  const profileId = String(insertedAuthRow.id)
+
   const doctor = {
-    id, name: payload.name, specialty: payload.specialty, location: payload.location, languages: payload.languages,
+    id: profileId, name: payload.name, specialty: payload.specialty, location: payload.location, languages: payload.languages,
     rating: 0, rating_count: 0, availability: 'Available upon request', verified: true, is_online: false,
     fee: payload.consultationFee, license_number: payload.licenseNumber, license_issuer: payload.licenseIssuer || null,
     license_expiry: payload.licenseExpiry || null, bank_code: payload.bankCode || null, bank_account: payload.bankAccount || null,
@@ -1202,16 +1252,19 @@ app.post('/api/admin/doctors', async (req, res) => {
     license_verified: true,
     created_at: new Date().toISOString()
   }
-  const { error: authInsertError } = await supabase.from('doctors_auth').insert(authRow)
-  if (authInsertError) return res.status(500).json({ error: authInsertError.message })
-  await supabase.from('doctors').insert(doctor)
-  const emailResult = await sendDoctorApprovalEmail(authRow).catch((error) => ({ sent: false, reason: error.message }))
-  res.status(201).json({ doctor: sanitizeDoctorForResponse({ ...doctor, ...authRow }), email: emailResult, message: 'Doctor added and approved' })
+  let { error: profileInsertError } = await supabase.from('doctors').insert(doctor)
+  if (profileInsertError && isMissingColumnError(profileInsertError)) {
+    const retry = await supabase.from('doctors').insert(withoutOptionalDoctorPayoutColumns(doctor))
+    profileInsertError = retry.error
+  }
+  if (profileInsertError) return res.status(500).json({ error: profileInsertError.message })
+  const emailResult = await sendDoctorApprovalEmail(insertedAuthRow).catch((error) => ({ sent: false, reason: error.message }))
+  res.status(201).json({ doctor: sanitizeDoctorForResponse({ ...doctor, ...insertedAuthRow, id: profileId }), email: emailResult, message: 'Doctor added and approved' })
 })
 
 app.delete('/api/admin/doctors/:doctorId', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  await supabase.from('doctors').delete().eq('id', req.params.doctorId)
+  await supabase.from('doctors').delete().eq('id', String(req.params.doctorId))
   await supabase.from('doctors_auth').delete().eq('id', req.params.doctorId)
   res.json({ message: 'Doctor deleted' })
 })
@@ -1227,9 +1280,6 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
     specialty: payload.specialty,
     location: payload.location,
     license_number: payload.licenseNumber,
-    bank_code: payload.bankCode || null,
-    bank_account: payload.bankAccount || null,
-    currency: payload.currency || null,
   }
   if (payload.email) authUpdates.email = payload.email
   if (payload.password) authUpdates.password = payload.password
@@ -1251,9 +1301,19 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
   }
   const { data: authRow, error: authError } = await supabase.from('doctors_auth').update(authUpdates).eq('id', req.params.doctorId).select('*').maybeSingle()
   if (authError) return res.status(500).json({ error: authError.message })
-  const { data: profile, error: profileError } = await supabase.from('doctors').update(profileUpdates).eq('id', req.params.doctorId).select('*').maybeSingle()
+  let { data: profile, error: profileError } = await supabase.from('doctors').update(profileUpdates).eq('id', String(req.params.doctorId)).select('*').maybeSingle()
+  if (profileError && isMissingColumnError(profileError)) {
+    const retry = await supabase
+      .from('doctors')
+      .update(withoutOptionalDoctorPayoutColumns(profileUpdates))
+      .eq('id', String(req.params.doctorId))
+      .select('*')
+      .maybeSingle()
+    profile = retry.data
+    profileError = retry.error
+  }
   if (profileError) return res.status(500).json({ error: profileError.message })
-  res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...authRow }), message: 'Doctor updated' })
+  res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...authRow, id: String(req.params.doctorId) }), message: 'Doctor updated' })
 })
 
 app.patch('/api/admin/doctors/:doctorId/verify', async (req, res) => {
@@ -1269,12 +1329,12 @@ app.patch('/api/admin/doctors/:doctorId/verify', async (req, res) => {
   const { data: profile, error: profileError } = await supabase
     .from('doctors')
     .update({ verified: true, license_verified: true, is_online: false })
-    .eq('id', req.params.doctorId)
+    .eq('id', String(req.params.doctorId))
     .select('*')
     .maybeSingle()
   if (profileError) return res.status(500).json({ error: profileError.message })
   if (!authRow && !profile) return res.status(404).json({ error: 'Doctor not found' })
-  const doctor = sanitizeDoctorForResponse({ ...profile, ...authRow, approved_at: approvedAt })
+  const doctor = sanitizeDoctorForResponse({ ...profile, ...authRow, id: String(req.params.doctorId), approved_at: approvedAt })
   const emailResult = await sendDoctorApprovalEmail(doctor).catch((error) => ({ sent: false, reason: error.message }))
   res.json({ doctor, email: emailResult, message: 'Doctor approved and access granted' })
 })
@@ -1408,7 +1468,13 @@ app.get('/api/facilities', async (req, res) => {
   const type = req.query.type
   let query = supabase.from('facilities').select('*, facility_wallets(balance_ngn)')
   if (type) query = query.eq('type', type)
-  const { data } = await query
+  let { data, error } = await query
+  if (error) {
+    let fallback = supabase.from('facilities').select('*')
+    if (type) fallback = fallback.eq('type', type)
+    const fallbackResult = await fallback
+    data = fallbackResult.data || []
+  }
   const result = (data || []).map(f => ({ ...f, wallet_balance_ngn: f.facility_wallets?.[0]?.balance_ngn || 0 }))
   res.json({ facilities: result })
 })
@@ -1655,7 +1721,10 @@ app.get('/api/announcements', async (req, res) => {
   const now = new Date().toISOString()
   let query = supabase.from('announcements').select('*').eq('is_active', true)
     .or(`expires_at.is.null, expires_at.gt.${now}`)
-  if (audience && audience !== 'all') query = query.ilike('audience', audience)
+  if (audience && audience !== 'all') {
+    const audiences = audience === 'landing' ? ['landing', 'public', 'all'] : [audience, 'all']
+    query = query.in('audience', audiences)
+  }
   query = query.order('created_at', { ascending: false })
   const { data } = await query
   res.json({ announcements: data || [] })
@@ -1689,12 +1758,60 @@ app.get('/api/admin/audit-logs', async (req, res) => {
 // ---------- PAYMENTS / WEBHOOKS ----------
 app.post('/api/payments/kora/initialize', async (req, res) => {
   const { amount, currency, description, customer, metadata } = req.body
+  const numericAmount = safeNumber(amount)
+  if (numericAmount === null || numericAmount <= 0) return res.status(400).json({ error: 'Valid payment amount is required' })
+
   const reference = `kora-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   await supabase.from('payments').insert({
-    id: reference, amount: amount, currency: currency || 'USD', description,
+    id: reference, amount: numericAmount, currency: currency || 'USD', description,
     customer, metadata, status: 'pending', provider: 'kora', reference, created_at: new Date().toISOString()
   })
-  res.json({ reference, checkout_url: `https://kora-pay.com/pay/${reference}`, message: 'Payment initialized (mock)' })
+
+  if (!KORA_SECRET_KEY) {
+    return res.json({
+      reference,
+      checkout_url: `https://kora-pay.com/pay/${reference}`,
+      message: 'Payment request queued. Add KORA_SECRET_KEY on the server to enable live checkout.',
+    })
+  }
+
+  try {
+    const origin = getApiOrigin(req) || 'https://globaldoctorplatform.vercel.app'
+    const amountInMinor = Math.round(numericAmount * 100)
+    const { data: response } = await axios.post(
+      `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
+      {
+        amount: amountInMinor,
+        currency: currency || 'USD',
+        reference,
+        redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
+        notification_url: `${origin}/api/webhooks/kora`,
+        narration: description || 'GlobalDoc payment',
+        customer: {
+          email: customer?.email || metadata?.email || 'patient@globaldoc.com',
+          name: customer?.name || metadata?.name || 'GlobalDoc Patient',
+        },
+        metadata: metadata || {},
+      },
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+    )
+
+    const checkoutUrl = extractKoraCheckoutUrl(response)
+    if (!checkoutUrl) {
+      return res.status(500).json({ error: 'Kora did not return a checkout URL', details: response })
+    }
+
+    return res.json({ reference, checkout_url: checkoutUrl, message: response?.message || 'Payment initialized' })
+  } catch (error) {
+    const koraError = error.response?.data || error.message
+    console.error('Kora initialization error:', koraError)
+    return res.status(500).json({ error: 'Failed to initialize Kora payment', details: koraError })
+  }
+})
+
+app.post('/api/payments', (req, res) => {
+  req.url = '/api/payments/kora/initialize'
+  app.handle(req, res)
 })
 
 app.get('/api/payments/kora/verify/:reference', async (req, res) => {

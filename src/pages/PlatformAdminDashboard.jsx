@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import DoctorManagement from '../components/DoctorManagement'
+import { useError } from '../components/ErrorHandler'
 
 const AUDIENCES = [
   { id: 'landing', label: 'Landing Page' },
@@ -16,6 +17,7 @@ const SEVERITIES = [
 ]
 
 function PlatformAdminDashboard({ adminSession, onLogout }) {
+  const { addError } = useError()
   const credentials = adminSession?.credentials || null
   const admin = adminSession?.admin || null
 
@@ -83,11 +85,11 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const publishAnnouncement = async (event) => {
     event.preventDefault()
     if (!headers) {
-      alert('Missing admin credentials. Please log in again.')
+      addError('Missing admin credentials. Please log in again.', 'error')
       return
     }
     if (!title.trim() || !message.trim()) {
-      alert('Title and message are required.')
+      addError('Title and message are required.', 'warning')
       return
     }
 
@@ -116,9 +118,9 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       setTitle('')
       setMessage('')
       await loadAnnouncements(selectedAudience)
-      alert('Announcement published.')
+      addError('Announcement published to the selected audience.', 'success')
     } catch (err) {
-      alert(err.message)
+      addError(err.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -137,7 +139,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       if (!response.ok) throw new Error(data.error || 'Failed to delete announcement')
       await loadAnnouncements(selectedAudience)
     } catch (err) {
-      alert(err.message)
+      addError(err.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -165,7 +167,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     event.preventDefault()
     if (!headers) return
     if (!facilityForm.name.trim()) {
-      alert('Facility name is required.')
+      addError('Facility name is required.', 'warning')
       return
     }
 
@@ -194,9 +196,9 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
         pin: '',
       }))
       await loadFacilities()
-      alert(`Facility created. PIN: ${data.facility?.pin || '(hidden)'}`)
+      addError(`Facility created. PIN: ${data.facility?.pin || '(hidden)'}`, 'success')
     } catch (err) {
-      alert(err.message)
+      addError(err.message, 'error')
     } finally {
       setLoading(false)
     }
@@ -206,12 +208,12 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     event.preventDefault()
     if (!headers) return
     if (!funding.facilityId) {
-      alert('Select a facility to fund.')
+      addError('Select a facility to fund.', 'warning')
       return
     }
     const amount = Math.round(Number(funding.amount_ngn) || 0)
     if (amount <= 0) {
-      alert('Enter a valid NGN amount.')
+      addError('Enter a valid NGN amount.', 'warning')
       return
     }
 
@@ -226,9 +228,9 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       if (!response.ok) throw new Error(data.error || 'Funding failed')
       setFunding({ facilityId: '', amount_ngn: '' })
       await loadFacilities()
-      alert('Wallet funded.')
+      addError('Wallet funded.', 'success')
     } catch (err) {
-      alert(err.message)
+      addError(err.message, 'error')
     } finally {
       setLoading(false)
     }

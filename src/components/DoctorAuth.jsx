@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Eye, EyeOff } from 'lucide-react'
-import { API_BASE } from '../lib/apiBase'
 import { apiFetch } from '../lib/apiFetch'
 import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
@@ -119,7 +118,7 @@ function DoctorAuth({ onAuth }) {
         body: JSON.stringify({ role: 'doctor', ...profile }),
       })
     } catch {
-      throw new Error(`Could not reach the app server at ${API_BASE}. Your Google account is signed in, but the doctor dashboard needs the app server.`)
+      throw new Error('Your Google account is signed in, but the medical server could not be reached to prepare the doctor dashboard.')
     }
 
     const result = await response.json().catch(() => ({}))
@@ -197,7 +196,7 @@ function DoctorAuth({ onAuth }) {
         })
       } catch (networkError) {
         throw new Error(
-          `Could not reach the server at ${API_BASE}. Please check your connection or try again later.`
+          'Could not reach the medical server. Please check your connection or try again later.'
         )
       }
 

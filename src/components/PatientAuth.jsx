@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Eye, EyeOff } from 'lucide-react'
-import { API_BASE } from '../lib/apiBase'
 import { apiFetch } from '../lib/apiFetch'
 import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
@@ -96,7 +95,7 @@ function PatientAuth({ onAuth }) {
         body: JSON.stringify({ role: 'patient', ...profile }),
       })
     } catch {
-      throw new Error(`Could not reach the app server at ${API_BASE}. Your Google account is signed in, but your medical records need the app server.`)
+      throw new Error('Your Google account is signed in, but the medical server could not be reached to load your records.')
     }
 
     const result = await response.json().catch(() => ({}))

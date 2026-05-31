@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { API_BASE } from '../lib/apiBase'
 import { apiFetch } from '../lib/apiFetch'
 import { supabase } from '../lib/supabaseClient'
 
@@ -127,7 +126,7 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
           })
         } catch (networkError) {
           throw new Error(
-            `Could not reach the app server at ${API_BASE}. Sign-in succeeded, but the dashboard needs the app server to load your records.`
+            'Sign-in succeeded, but the medical server could not be reached to load your records.'
           )
         }
         const data = await response.json().catch(() => ({}))
