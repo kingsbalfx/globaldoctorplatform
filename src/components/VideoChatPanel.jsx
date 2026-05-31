@@ -1,73 +1,49 @@
-import { useEffect, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import VitalParametersMonitor from './VitalParametersMonitor'
+import { useError } from './ErrorHandler'
 
-const SDK_URL = 'https://unpkg.com/@daily-co/daily-js@0.22.1/dist/daily-js.min.js'
+const DEFAULT_ROOM_URL = 'https://demo.daily.co/meeting-room'
 
-function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId }) {
-  const videoRef = useRef(null)
-  const [roomUrl, setRoomUrl] = useState('https://demo.daily.co/meeting-room')
+function normalizeRoomUrl(value) {
+  const room = String(value || '').trim()
+  if (!room) return ''
+  try {
+    const url = new URL(room)
+    if (url.protocol !== 'https:') return ''
+    return url.toString()
+  } catch {
+    return ''
+  }
+}
+
+function VideoChatPanel({ consultationId, userType, patientId, doctorId }) {
+  const { addError } = useError()
+  const [roomUrl, setRoomUrl] = useState(DEFAULT_ROOM_URL)
   const [loading, setLoading] = useState(false)
-  const [sdkLoaded, setSdkLoaded] = useState(false)
   const [callStarted, setCallStarted] = useState(false)
-  const [dailyFrame, setDailyFrame] = useState(null)
 
-  useEffect(() => {
-    if (!window.DailyIframe) {
-      const script = document.createElement('script')
-      script.src = SDK_URL
-      script.async = true
-      script.onload = () => setSdkLoaded(true)
-      script.onerror = () => console.error('Failed to load video SDK')
-      document.body.appendChild(script)
-    } else {
-      setSdkLoaded(true)
-    }
-
-    return () => {
-      if (dailyFrame) {
-        dailyFrame.destroy()
-      }
-    }
-  }, [dailyFrame])
+  const normalizedRoomUrl = useMemo(() => normalizeRoomUrl(roomUrl), [roomUrl])
 
   const startCall = async () => {
-    if (!sdkLoaded || !videoRef.current) {
-      alert('Video SDK is not loaded yet. Please try again.')
+    if (!normalizedRoomUrl) {
+      addError('Enter a valid HTTPS video room URL before starting the call.', 'warning')
       return
     }
 
     setLoading(true)
     try {
-      const DailyIframe = window.DailyIframe
-      const frame = DailyIframe.createFrame(videoRef.current, {
-        showLeaveButton: true,
-        iframeStyle: {
-          position: 'relative',
-          width: '100%',
-          height: '100%',
-          border: '0',
-          borderRadius: '24px',
-        },
-      })
-
-      await frame.join({ url: roomUrl })
-      setDailyFrame(frame)
       setCallStarted(true)
+      addError('Video room opened. Allow camera and microphone access when prompted.', 'success')
     } catch (error) {
-      console.error('Video call failed to start', error)
-      alert('Unable to start the video call.')
+      addError(error.message || 'Unable to start the video call.', 'error')
     } finally {
       setLoading(false)
     }
   }
 
   const endCall = () => {
-    if (dailyFrame) {
-      dailyFrame.leave()
-      dailyFrame.destroy()
-      setDailyFrame(null)
-    }
     setCallStarted(false)
+    addError('Video call closed.', 'info')
   }
 
   return (
@@ -76,7 +52,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-xl font-semibold text-slate-900">Video Consultation</h2>
-            <p className="text-sm text-slate-500">Use the video SDK for secure telehealth consultations.</p>
+            <p className="text-sm text-slate-500">Secure browser video room for live telehealth consultations.</p>
           </div>
           <div className="flex flex-wrap gap-3">
             <button
@@ -85,7 +61,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId 
               disabled={loading || callStarted}
               className="rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
             >
-              {callStarted ? 'Call started' : 'Start Video Call'}
+              {callStarted ? 'Call started' : loading ? 'Starting...' : 'Start Video Call'}
             </button>
             {callStarted && (
               <button
@@ -103,19 +79,34 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId 
       <div className="rounded-3xl bg-slate-50 p-6 shadow-lg shadow-slate-200/40">
         <label className="block text-sm font-medium text-slate-700 mb-2">Video Room URL</label>
         <input
-          type="text"
+          type="url"
           value={roomUrl}
           onChange={(e) => setRoomUrl(e.target.value)}
           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
         />
-        <p className="mt-3 text-sm text-slate-500">Use your Daily.co room URL or a valid video room URL to connect.</p>
+        <p className="mt-3 text-sm text-slate-500">Use a Daily room URL or another embeddable HTTPS video room.</p>
       </div>
 
       <div className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200/40">
-        <div ref={videoRef} className="h-[420px] rounded-3xl bg-slate-900/5 overflow-hidden" />
+        <div className="h-[420px] overflow-hidden rounded-3xl bg-slate-950">
+          {callStarted ? (
+            <iframe
+              title="Video consultation room"
+              src={normalizedRoomUrl}
+              allow="camera; microphone; fullscreen; speaker; display-capture"
+              className="h-full w-full border-0"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center px-6 text-center text-slate-300">
+              <div>
+                <p className="text-lg font-semibold text-white">Video room ready</p>
+                <p className="mt-2 max-w-md text-sm">Start the call to open the secure consultation room inside this panel.</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Vital Parameters Monitor - Available during call */}
       {callStarted && (
         <VitalParametersMonitor
           consultationId={consultationId}

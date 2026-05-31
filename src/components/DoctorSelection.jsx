@@ -119,7 +119,12 @@ function DoctorSelection({ patient, onDoctorSelected }) {
         }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.error || 'Payment initialization failed')
+      if (!response.ok) {
+        const details = typeof data.details === 'string'
+          ? data.details
+          : data.details?.message || data.provider?.message || data.provider?.error || ''
+        throw new Error([data.error || 'Payment initialization failed', details].filter(Boolean).join(': '))
+      }
       if (data.checkout_url) window.location.href = data.checkout_url
     } catch (error) {
       addError(error.message, 'error')

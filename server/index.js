@@ -33,6 +33,8 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 
 const KORA_SECRET_KEY = String(process.env.KORA_SECRET_KEY || '').trim()
 const KORA_BASE_URL = String(process.env.KORA_BASE_URL || 'https://api.korapay.com').trim().replace(/\/+$/, '')
+const KORA_CHARGE_CURRENCY = String(process.env.KORA_CHARGE_CURRENCY || 'NGN').trim().toUpperCase()
+const KORA_USD_EXCHANGE_RATE = Number(process.env.KORA_USD_EXCHANGE_RATE || 1600)
 
 // ---------- STARTUP DIAGNOSTICS ----------
 ;(async () => {
@@ -102,6 +104,23 @@ function extractKoraCheckoutUrl(payload) {
     || payload?.data?.payment_url
     || payload?.payment_url
     || ''
+}
+
+function buildKoraTokenCharge(amountUSD) {
+  const currency = KORA_CHARGE_CURRENCY || 'NGN'
+  const exchangeRate = Number.isFinite(KORA_USD_EXCHANGE_RATE) && KORA_USD_EXCHANGE_RATE > 0
+    ? KORA_USD_EXCHANGE_RATE
+    : 1600
+  const amount = currency === 'USD'
+    ? Math.round(Number(amountUSD))
+    : Math.round(Number(amountUSD) * exchangeRate)
+  return { amount, currency, exchangeRate }
+}
+
+function getKoraErrorMessage(error) {
+  const data = error?.response?.data
+  if (!data) return error?.message || 'Unknown Kora error'
+  return data.message || data.error || data.data?.message || JSON.stringify(data)
 }
 
 function normalizeKoraStatus(payload) {
@@ -791,6 +810,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   const purchasedBefore = (count || 0) > 0
   const rate = purchasedBefore ? settings.tokenPerUSDRepeatPurchase : settings.tokenPerUSDFirstPurchase
   const tokensExpected = Math.round(amountUSD * rate)
+  const koraCharge = buildKoraTokenCharge(amountUSD)
 
   const reference = `kora-token-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
@@ -808,23 +828,34 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     patientEmail = patientProfile?.email || 'patient@globaldoc.com'
   }
 
-  await supabase.from('payments').insert({
+  const { error: paymentInsertError } = await supabase.from('payments').insert({
     id: reference,
     patient_id: patientId,
-    amount: amountUSD,
+    amount: koraCharge.amount,
+    currency: koraCharge.currency,
     type: 'token_purchase',
     status: 'pending',
     provider: 'kora',
     reference,
-    metadata: { purpose: 'token_purchase', patientId, tokensExpected, rate, amountUSD },
+    metadata: {
+      purpose: 'token_purchase',
+      patientId,
+      tokensExpected,
+      rate,
+      amountUSD,
+      koraAmount: koraCharge.amount,
+      koraCurrency: koraCharge.currency,
+      exchangeRate: koraCharge.exchangeRate,
+    },
     created_at: new Date().toISOString()
   })
+  if (paymentInsertError) return res.status(500).json({ error: `Could not create payment record: ${paymentInsertError.message}` })
 
   if (!KORA_SECRET_KEY) {
     return res.json({
       reference, tokensExpected, rate,
       checkout_url: `https://kora-pay.com/pay/${reference}`,
-      message: 'Payment initialized (mock – no KORA key)'
+      message: 'Payment initialized (mock - no KORA key)'
     })
   }
 
@@ -832,17 +863,23 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     const { data: response } = await axios.post(
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
       {
-        amount: amountUSD,
-        currency: 'USD',
+        amount: koraCharge.amount,
+        currency: koraCharge.currency,
         reference,
         redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
         notification_url: `${origin}/api/webhooks/kora`,
-        narration: `Token purchase (${tokensExpected} tokens)`,
+        narration: `GlobalDoc token purchase (${tokensExpected} tokens)`,
         customer: {
           email: patientEmail,
           name: req.body.name || 'Patient'
         },
-        metadata: { purpose: 'token_purchase', patientId }
+        metadata: {
+          purpose: 'tokens',
+          patientId,
+          amountUSD,
+          tokens: tokensExpected,
+          rate,
+        }
       },
       { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
     )
@@ -865,7 +902,12 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     console.error('Kora initialization error:', koraError)
     return res.status(500).json({
       error: 'Failed to initialize Kora payment',
-      details: koraError
+      details: getKoraErrorMessage(error),
+      provider: koraError,
+      kora: {
+        amount: koraCharge.amount,
+        currency: koraCharge.currency,
+      }
     })
   }
 })
@@ -1825,12 +1867,14 @@ app.post('/api/payments/kora/initialize', async (req, res) => {
   const { amount, currency, description, customer, metadata } = req.body
   const numericAmount = safeNumber(amount)
   if (numericAmount === null || numericAmount <= 0) return res.status(400).json({ error: 'Valid payment amount is required' })
+  const chargeCurrency = String(currency || KORA_CHARGE_CURRENCY || 'NGN').trim().toUpperCase()
 
   const reference = `kora-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-  await supabase.from('payments').insert({
-    id: reference, amount: numericAmount, currency: currency || 'USD', description,
+  const { error: paymentInsertError } = await supabase.from('payments').insert({
+    id: reference, amount: numericAmount, currency: chargeCurrency, description,
     customer, metadata, status: 'pending', provider: 'kora', reference, created_at: new Date().toISOString()
   })
+  if (paymentInsertError) return res.status(500).json({ error: `Could not create payment record: ${paymentInsertError.message}` })
 
   if (!KORA_SECRET_KEY) {
     return res.json({
@@ -1846,7 +1890,7 @@ app.post('/api/payments/kora/initialize', async (req, res) => {
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
       {
         amount: numericAmount,
-        currency: currency || 'USD',
+        currency: chargeCurrency,
         reference,
         redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
         notification_url: `${origin}/api/webhooks/kora`,
@@ -1869,7 +1913,12 @@ app.post('/api/payments/kora/initialize', async (req, res) => {
   } catch (error) {
     const koraError = error.response?.data || error.message
     console.error('Kora initialization error:', koraError)
-    return res.status(500).json({ error: 'Failed to initialize Kora payment', details: koraError })
+    return res.status(500).json({
+      error: 'Failed to initialize Kora payment',
+      details: getKoraErrorMessage(error),
+      provider: koraError,
+      kora: { amount: numericAmount, currency: chargeCurrency },
+    })
   }
 })
 

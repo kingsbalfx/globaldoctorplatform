@@ -6,7 +6,8 @@ function unique(values) {
 
 export function getApiBaseCandidates() {
   const sameOrigin = typeof window !== 'undefined' ? window.location.origin : ''
-  return unique([API_BASE, PRODUCTION_ORIGIN, sameOrigin])
+  const isLocalPage = /localhost|127\.0\.0\.1/i.test(sameOrigin)
+  return unique([API_BASE, PRODUCTION_ORIGIN, isLocalPage ? '' : sameOrigin])
 }
 
 export async function apiFetch(path, options = {}) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 import VideoChatPanel from '../components/VideoChatPanel'
+import { useError } from '../components/ErrorHandler'
 
 const FACILITY_TYPES = [
   { id: 'phc', label: 'Primary Health Care (PHC)' },
@@ -35,6 +36,7 @@ function computeNetwork() {
 }
 
 function FacilityPortal() {
+  const { addError } = useError()
   const [step, setStep] = useState('login') // login -> dashboard
   const [facilityType, setFacilityType] = useState('phc')
   const [facilities, setFacilities] = useState([])
@@ -73,6 +75,10 @@ function FacilityPortal() {
   const facilityLabel = useMemo(() => {
     return FACILITY_TYPES.find((t) => t.id === facilityType)?.label || 'Facility'
   }, [facilityType])
+
+  useEffect(() => {
+    if (error) addError(error, 'error')
+  }, [error, addError])
 
   const loadFacilities = async (type) => {
     setLoading(true)
@@ -137,6 +143,7 @@ function FacilityPortal() {
       setConsultation(null)
       setConsultSplit(null)
       setActiveTab('consult')
+      addError(`Signed in to ${data.facility?.name || 'facility dashboard'}.`, 'success')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -214,6 +221,7 @@ function FacilityPortal() {
       setRedeemResult(data.referral || null)
       setRedeemCode('')
       await refresh()
+      addError('Referral code redeemed and wallet updated.', 'success')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -263,6 +271,7 @@ function FacilityPortal() {
       setPatientName('')
       setPatientPhone('')
       setPatientPin('')
+      addError(`Patient registered. ID: ${data.patient?.id || 'created'}`, 'success', 9000)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -279,6 +288,7 @@ function FacilityPortal() {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load patient record')
       setPatientRecord(data)
+      addError('Patient record loaded.', 'success')
     } catch (err) {
       setPatientRecord(null)
       setError(err.message)
@@ -323,6 +333,7 @@ function FacilityPortal() {
       setConsultation(data.consultation || null)
       setConsultSplit(data.split || null)
       await refresh()
+      addError('Consultation started. Video room is ready below.', 'success')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -349,6 +360,7 @@ function FacilityPortal() {
       setConsultation(data.consultation || consultation)
       setConsultSplit(data.split || consultSplit)
       await refresh()
+      addError('Consultation completed and wallet split recorded.', 'success')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -847,4 +859,3 @@ function FacilityPortal() {
 }
 
 export default FacilityPortal
-
