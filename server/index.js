@@ -768,13 +768,10 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   }
 
   try {
-    // Kora expects amount in minor units (cents for USD)
-    const amountInCents = Math.round(amountUSD * 100)
-
     const { data: response } = await axios.post(
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
       {
-        amount: amountInCents,
+        amount: amountUSD,
         currency: 'USD',
         reference,
         redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
@@ -810,6 +807,13 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
       details: koraError
     })
   }
+})
+
+app.get('/api/patients/:patientId/tokens/purchase/initialize', (_req, res) => {
+  res.status(405).json({
+    error: 'Payment initialization must be started from the Buy Tokens button, not opened directly in the browser.',
+    method: 'POST required',
+  })
 })
 
 // ---------- SUBSCRIPTIONS ----------
@@ -1777,11 +1781,10 @@ app.post('/api/payments/kora/initialize', async (req, res) => {
 
   try {
     const origin = getApiOrigin(req) || 'https://globaldoctorplatform.vercel.app'
-    const amountInMinor = Math.round(numericAmount * 100)
     const { data: response } = await axios.post(
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
       {
-        amount: amountInMinor,
+        amount: numericAmount,
         currency: currency || 'USD',
         reference,
         redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,

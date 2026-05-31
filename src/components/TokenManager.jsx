@@ -66,32 +66,37 @@ function TokenManager({ patient, onTokensUpdated }) {
   const handlePurchaseTokens = async () => {
     setLoading(true)
     try {
-      const amountInCents = Math.round(Math.max(10, Number(purchaseUSD) || 10) * 100)
+      const amountUSD = Math.max(10, Math.round(Number(purchaseUSD) || 10))
       const response = await apiFetch(`/api/patients/${patient.id}/tokens/purchase/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amountUSD: Math.max(10, Math.round(Number(purchaseUSD) || 10)),
+          amountUSD,
           email: patient.email,
           name: patient.name,
-          amount_in_minor: amountInCents
         }),
       })
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
-        throw new Error(error.error || 'Payment initialization failed')
+        const details = typeof error.details === 'string'
+          ? error.details
+          : error.details?.message || error.details?.error || error.details?.data?.message || ''
+        throw new Error([error.error || 'Payment initialization failed', details].filter(Boolean).join(': '))
       }
 
       const result = await response.json()
+      const checkoutUrl = String(result.checkout_url || '')
+      const checkoutHost = checkoutUrl ? new URL(checkoutUrl, window.location.origin).host : ''
+      const isApiUrl = checkoutUrl.includes('/api/')
 
       setPendingPurchase({
         reference: result.reference,
         tokensExpected: result.tokensExpected,
-        checkoutUrl: result.checkout_url,
+        checkoutUrl: isApiUrl ? '' : checkoutUrl,
       })
 
-      if (result.checkout_url) window.location.href = result.checkout_url
+      if (checkoutUrl && !isApiUrl && checkoutHost) window.location.assign(checkoutUrl)
     } catch (error) {
       addError('Payment failed: ' + error.message, 'error')
     } finally {
