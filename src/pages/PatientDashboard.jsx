@@ -98,12 +98,19 @@ function PatientDashboard() {
   }
 
   const handleAuth = (authResult) => {
+    const nextPatient = authResult.type === 'register'
+      ? { ...authResult.patient, tokens: 0 }
+      : authResult.patient
     if (authResult.type === 'register') {
-      setPatient({ ...authResult.patient, tokens: 0 })
       setTokens(0)
     } else {
-      setPatient(authResult.patient)
       setTokens(authResult.patient.tokens || 0)
+    }
+    setPatient(nextPatient)
+    try {
+      window.localStorage.setItem('gd_patient_session', JSON.stringify(nextPatient))
+    } catch {
+      // ignore
     }
     setCurrentStep('doctor')
   }

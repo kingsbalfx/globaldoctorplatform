@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'  // or use window.location
+import { useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 

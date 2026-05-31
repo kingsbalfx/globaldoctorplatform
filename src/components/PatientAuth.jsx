@@ -141,36 +141,58 @@ function PatientAuth({ onAuth }) {
         throw new Error('Please enter your email and password.')
       }
 
-      let endpoint = '/api/patients/login'
-      let payload = {
+      const loginPayload = {
         email: formData.email,
         password: formData.password,
       }
 
       let supabaseUser = null
       if (isLogin) {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: formData.email,
-          password: formData.password,
+        const response = await apiFetch('/api/patients/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(loginPayload),
         })
-        if (authError) {
-          throw authError
-        }
-        supabaseUser = authData?.user || null
-        if (!isPatientProfileComplete(supabaseUser)) {
-          setCompletingExistingUser(true)
-          setIsLogin(false)
-          setFormData((prev) => ({
-            ...prev,
-            name: supabaseUser?.user_metadata?.full_name || prev.name,
-            dateOfBirth: supabaseUser?.user_metadata?.date_of_birth || prev.dateOfBirth,
-            phone: supabaseUser?.user_metadata?.phone || prev.phone,
-            country: supabaseUser?.user_metadata?.country || prev.country,
-            language: supabaseUser?.user_metadata?.preferred_language || prev.language,
-          }))
-          addError('Complete your patient profile before entering the portal.', 'warning', 8000)
+
+        if (response.ok) {
+          const result = await response.json()
+          onAuth({ type: 'login', patient: result.patient })
+          void supabase.auth.signInWithPassword(loginPayload).catch(() => null)
           return
         }
+
+        const backendError = await response.json().catch(() => ({}))
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword(loginPayload)
+        if (authError) {
+          throw new Error(backendError.error || authError.message || 'Invalid login credentials')
+        }
+
+        supabaseUser = authData?.user || null
+        if (isPatientProfileComplete(supabaseUser)) {
+          const patient = await createBackendPatientSession({
+            email: supabaseUser.email || formData.email,
+            name: supabaseUser.user_metadata?.full_name,
+            dateOfBirth: supabaseUser.user_metadata?.date_of_birth,
+            phone: supabaseUser.user_metadata?.phone,
+            country: supabaseUser.user_metadata?.country,
+            language: supabaseUser.user_metadata?.preferred_language,
+          })
+          onAuth({ type: 'login', patient })
+          return
+        }
+
+        setCompletingExistingUser(true)
+        setIsLogin(false)
+        setFormData((prev) => ({
+          ...prev,
+          name: supabaseUser?.user_metadata?.full_name || prev.name,
+          dateOfBirth: supabaseUser?.user_metadata?.date_of_birth || prev.dateOfBirth,
+          phone: supabaseUser?.user_metadata?.phone || prev.phone,
+          country: supabaseUser?.user_metadata?.country || prev.country,
+          language: supabaseUser?.user_metadata?.preferred_language || prev.language,
+        }))
+        addError('Complete your patient profile before entering the portal.', 'warning', 8000)
+        return
       } else {
         if (completingExistingUser) {
           const { data: updateData, error: updateError } = await supabase.auth.updateUser({
@@ -216,17 +238,14 @@ function PatientAuth({ onAuth }) {
           }
           supabaseUser = signUpData.user
         }
-
-        endpoint = '/api/patients/register'
-        payload = formData
       }
 
       let response
       try {
-        response = await apiFetch(endpoint, {
+        response = await apiFetch('/api/patients/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(formData),
         })
       } catch {
         if (supabaseUser) {
