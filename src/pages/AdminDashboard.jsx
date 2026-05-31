@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import FacilityReferralManager from '../components/FacilityReferralManager'
 import NotificationCenter from '../components/NotificationCenter'
 import PatientRecordReview from '../components/PatientRecordReview'
@@ -32,6 +32,40 @@ function AdminDashboard({ doctor, onLogout }) {
     mobileMoneyOperator: doctor?.mobileMoneyOperator || '',
     mobileMoneyNumber: doctor?.mobileMoneyNumber || '',
   }))
+  const [facilityPatients, setFacilityPatients] = useState([])
+  const [facilityPatientTotal, setFacilityPatientTotal] = useState(0)
+  const [facilityPatientSearch, setFacilityPatientSearch] = useState('')
+  const [facilityPatientLimit, setFacilityPatientLimit] = useState(10)
+  const [loadingFacilityPatients, setLoadingFacilityPatients] = useState(false)
+
+  const loadAssignedFacilityPatients = async (limit = facilityPatientLimit, search = facilityPatientSearch) => {
+    if (!doctor?.id) return
+    setLoadingFacilityPatients(true)
+    try {
+      const params = new URLSearchParams({ limit: String(limit), offset: '0' })
+      if (search.trim()) params.set('search', search.trim())
+      const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/facility-patients?${params.toString()}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to load assigned facility patients')
+      setFacilityPatients(Array.isArray(data.patients) ? data.patients : [])
+      setFacilityPatientTotal(Number(data.total || 0))
+    } catch (err) {
+      setFacilityPatients([])
+      setFacilityPatientTotal(0)
+      addError(err.message, 'error')
+    } finally {
+      setLoadingFacilityPatients(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!doctor?.id) return
+    const timer = window.setTimeout(() => {
+      void loadAssignedFacilityPatients(facilityPatientLimit, facilityPatientSearch)
+    }, 250)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doctor?.id, facilityPatientSearch, facilityPatientLimit])
 
   const handleSavePayoutDetails = async () => {
     setSavingPayoutDetails(true)
@@ -389,7 +423,82 @@ function AdminDashboard({ doctor, onLogout }) {
       )}
 
       {/* Patients Tab */}
-      {activeTab === 'patients' && <PatientRecordReview />}
+      {activeTab === 'patients' && (
+        <div className="space-y-8">
+          <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-2xl font-bold text-slate-900">Assigned facility patients</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  Patients appear here automatically after a PHC or private clinic selects you and starts a consultation.
+                </p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  Showing {facilityPatients.length} of {facilityPatientTotal}.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  value={facilityPatientSearch}
+                  onChange={(e) => {
+                    setFacilityPatientLimit(10)
+                    setFacilityPatientSearch(e.target.value)
+                  }}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 sm:w-80"
+                  placeholder="Search patient ID, name, phone"
+                />
+                <button
+                  type="button"
+                  onClick={() => loadAssignedFacilityPatients(facilityPatientLimit, facilityPatientSearch)}
+                  disabled={loadingFacilityPatients}
+                  className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {loadingFacilityPatients ? 'Loading...' : 'Refresh'}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-3">
+              {facilityPatients.length === 0 ? (
+                <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-600">
+                  No assigned facility patients yet.
+                </div>
+              ) : (
+                facilityPatients.map((patient, index) => (
+                  <div key={patient.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <p className="text-sm font-black uppercase tracking-[0.18em]" style={{ color: adminSpecialtyInfo.color }}>
+                          Queue #{index + 1}
+                        </p>
+                        <h4 className="mt-1 text-lg font-bold text-slate-900">{patient.name || 'Unnamed patient'}</h4>
+                        <p className="mt-1 text-xs font-semibold text-slate-500">ID: {patient.id}</p>
+                        <p className="mt-1 text-xs text-slate-500">Phone: {patient.phone || 'Not provided'}</p>
+                      </div>
+                      <div className="text-sm text-slate-600 lg:text-right">
+                        <p className="font-semibold text-slate-900">{patient.latest_consultation?.channel?.replace(/_/g, ' ') || 'Facility consultation'}</p>
+                        <p>{patient.assigned_at ? new Date(patient.assigned_at).toLocaleString() : ''}</p>
+                        <p className="mt-1 text-xs text-slate-500">Facility: {patient.facility_id || 'N/A'}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {facilityPatients.length < facilityPatientTotal && (
+              <button
+                type="button"
+                onClick={() => setFacilityPatientLimit((value) => value + 10)}
+                className="mt-6 rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600"
+              >
+                View more patients
+              </button>
+            )}
+          </div>
+
+          <PatientRecordReview />
+        </div>
+      )}
 
       {/* Notifications Tab */}
       {activeTab === 'notifications' && (

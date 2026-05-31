@@ -1556,6 +1556,92 @@ app.get('/api/patients/:patientId/record', async (req, res) => {
   })
 })
 
+app.get('/api/facilities/:facilityId/patients', async (req, res) => {
+  const { facilityId } = req.params
+  const pin = String(req.query.pin || '').trim()
+  const search = String(req.query.search || '').trim()
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)))
+  const offset = Math.max(0, Number(req.query.offset || 0))
+
+  const facility = await getFacilityById(facilityId)
+  if (!facility || facility.pin !== pin) return res.status(401).json({ error: 'Invalid facility credentials' })
+
+  let query = supabase
+    .from('patients')
+    .select('*', { count: 'exact' })
+    .eq('facility_id', facilityId)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (search) {
+    const term = search.replace(/[%_,]/g, '')
+    query = query.or(`id.ilike.%${term}%,name.ilike.%${term}%,phone.ilike.%${term}%`)
+  }
+
+  const { data, error, count } = await query
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({
+    patients: (data || []).map(sanitizePatientForResponse),
+    total: count || 0,
+    limit,
+    offset,
+  })
+})
+
+app.get('/api/doctors/:doctorId/facility-patients', async (req, res) => {
+  const { doctorId } = req.params
+  const search = String(req.query.search || '').trim().toLowerCase()
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)))
+  const offset = Math.max(0, Number(req.query.offset || 0))
+
+  const { data: consultations, error: consultError } = await supabase
+    .from('consultations_ng')
+    .select('*')
+    .eq('doctor_id', String(doctorId))
+    .order('created_at', { ascending: false })
+    .limit(300)
+  if (consultError) return res.status(500).json({ error: consultError.message })
+
+  const patientIds = [...new Set((consultations || []).map((item) => item.patient_id).filter(Boolean))]
+  if (patientIds.length === 0) return res.json({ patients: [], total: 0, limit, offset })
+
+  const { data: patients, error: patientError } = await supabase.from('patients').select('*').in('id', patientIds)
+  if (patientError) return res.status(500).json({ error: patientError.message })
+
+  const consultationByPatient = new Map()
+  for (const item of consultations || []) {
+    if (!consultationByPatient.has(item.patient_id)) consultationByPatient.set(item.patient_id, item)
+  }
+
+  let rows = (patients || []).map((patient) => {
+    const latestConsultation = consultationByPatient.get(patient.id)
+    return {
+      ...sanitizePatientForResponse(patient),
+      latest_consultation: latestConsultation || null,
+      assigned_at: latestConsultation?.created_at || patient.created_at,
+      facility_id: latestConsultation?.facility_id || patient.facility_id,
+    }
+  })
+
+  if (search) {
+    rows = rows.filter((patient) => {
+      const haystack = [patient.id, patient.name, patient.phone, patient.email, patient.facility_id]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(search)
+    })
+  }
+
+  rows.sort((a, b) => new Date(b.assigned_at || 0) - new Date(a.assigned_at || 0))
+  res.json({
+    patients: rows.slice(offset, offset + limit),
+    total: rows.length,
+    limit,
+    offset,
+  })
+})
+
 // ---------- FACILITIES ----------
 app.post('/api/facilities', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })

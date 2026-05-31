@@ -64,6 +64,10 @@ function FacilityPortal() {
   const [patientPhone, setPatientPhone] = useState('')
   const [patientPin, setPatientPin] = useState('')
   const [createdPatient, setCreatedPatient] = useState(null)
+  const [facilityPatients, setFacilityPatients] = useState([])
+  const [facilityPatientTotal, setFacilityPatientTotal] = useState(0)
+  const [patientSearch, setPatientSearch] = useState('')
+  const [patientListLimit, setPatientListLimit] = useState(10)
 
   const [selectedPatientId, setSelectedPatientId] = useState('')
   const [patientRecord, setPatientRecord] = useState(null)
@@ -187,13 +191,44 @@ function FacilityPortal() {
     }
   }
 
+  const loadFacilityPatients = async (limit = patientListLimit, search = patientSearch) => {
+    if (!facility?.id || !pin.trim()) return
+    try {
+      const params = new URLSearchParams({
+        pin: pin.trim(),
+        limit: String(limit),
+        offset: '0',
+      })
+      if (search.trim()) params.set('search', search.trim())
+      const response = await apiFetch(`/api/facilities/${encodeURIComponent(facility.id)}/patients?${params.toString()}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to load facility patients')
+      setFacilityPatients(Array.isArray(data.patients) ? data.patients : [])
+      setFacilityPatientTotal(Number(data.total || 0))
+    } catch (err) {
+      setFacilityPatients([])
+      setFacilityPatientTotal(0)
+      setError(err.message)
+    }
+  }
+
   useEffect(() => {
     if (step !== 'dashboard') return
     if (facility?.type === 'phc' || facility?.type === 'private_clinic') {
       void loadOnlineDoctors()
     }
+    void loadFacilityPatients(10, '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, facility?.id])
+
+  useEffect(() => {
+    if (step !== 'dashboard' || !facility?.id) return
+    const timer = window.setTimeout(() => {
+      void loadFacilityPatients(patientListLimit, patientSearch)
+    }, 250)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientSearch, patientListLimit])
 
   const redeem = async (event) => {
     event.preventDefault()
@@ -267,11 +302,12 @@ function FacilityPortal() {
       if (!response.ok) throw new Error(data.error || 'Failed to register patient')
       setCreatedPatient(data)
       setSelectedPatientId(data.patient?.id || '')
-      setPatientRecord(null)
+      setPatientRecord(data.patient ? { patient: data.patient, files: [], referrals: { specialty: [], facility: [] }, appointments: [], consultations_ng: [], labs: { orders: [], payments: [] } } : null)
       setPatientName('')
       setPatientPhone('')
       setPatientPin('')
       addError(`Patient registered. ID: ${data.patient?.id || 'created'}`, 'success', 9000)
+      await loadFacilityPatients(patientListLimit, patientSearch)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -382,6 +418,10 @@ function FacilityPortal() {
     setPatientPhone('')
     setPatientPin('')
     setCreatedPatient(null)
+    setFacilityPatients([])
+    setFacilityPatientTotal(0)
+    setPatientSearch('')
+    setPatientListLimit(10)
     setSelectedPatientId('')
     setPatientRecord(null)
     setConsultation(null)
@@ -745,6 +785,72 @@ function FacilityPortal() {
                         {consultation.status === 'completed' ? 'Completed' : 'End & record split'}
                       </button>
                     </div>
+                  )}
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 lg:col-span-2">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-900">Facility patients</h2>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Showing {facilityPatients.length} of {facilityPatientTotal}. Search by patient ID, name, or phone for quick tracing.
+                      </p>
+                    </div>
+                    <input
+                      value={patientSearch}
+                      onChange={(e) => {
+                        setPatientListLimit(10)
+                        setPatientSearch(e.target.value)
+                      }}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 lg:w-80"
+                      placeholder="Search patient ID or name"
+                    />
+                  </div>
+
+                  <div className="mt-5 grid gap-3">
+                    {facilityPatients.length === 0 ? (
+                      <div className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-600">
+                        No patient found yet. Register a patient or change the search.
+                      </div>
+                    ) : (
+                      facilityPatients.map((item, index) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPatientId(item.id)
+                            setPatientRecord({ patient: item, files: [], referrals: { specialty: [], facility: [] }, appointments: [], consultations_ng: [], labs: { orders: [], payments: [] } })
+                            addError(`Selected ${item.name || item.id}.`, 'success')
+                          }}
+                          className={`rounded-2xl border px-4 py-3 text-left transition ${
+                            selectedPatientId === item.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 bg-slate-50 hover:border-brand-200'
+                          }`}
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm font-bold text-slate-900">
+                                {index + 1}. {item.name || 'Unnamed patient'}
+                              </p>
+                              <p className="mt-1 text-xs font-semibold text-slate-500">ID: {item.id}</p>
+                            </div>
+                            <div className="text-xs text-slate-500 sm:text-right">
+                              <p>{item.phone || 'No phone'}</p>
+                              <p>{item.created_at ? new Date(item.created_at).toLocaleString() : ''}</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+
+                  {facilityPatients.length < facilityPatientTotal && (
+                    <button
+                      type="button"
+                      onClick={() => setPatientListLimit((value) => value + 10)}
+                      className="mt-5 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+                    >
+                      View more patients
+                    </button>
                   )}
                 </div>
               </div>
