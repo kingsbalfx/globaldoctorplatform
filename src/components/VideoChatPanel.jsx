@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import VitalParametersMonitor from './VitalParametersMonitor'
 import { useError } from './ErrorHandler'
 
@@ -16,13 +16,19 @@ function normalizeRoomUrl(value) {
   }
 }
 
-function VideoChatPanel({ consultationId, userType, patientId, doctorId }) {
+function VideoChatPanel({ consultationId, userType, patientId, doctorId, autoStart = false }) {
   const { addError } = useError()
   const [roomUrl, setRoomUrl] = useState(DEFAULT_ROOM_URL)
   const [loading, setLoading] = useState(false)
   const [callStarted, setCallStarted] = useState(false)
 
   const normalizedRoomUrl = useMemo(() => normalizeRoomUrl(roomUrl), [roomUrl])
+
+  useEffect(() => {
+    if (autoStart && consultationId && normalizedRoomUrl) {
+      setCallStarted(true)
+    }
+  }, [autoStart, consultationId, normalizedRoomUrl])
 
   const startCall = async () => {
     if (!normalizedRoomUrl) {

@@ -5,6 +5,8 @@ import PatientRecordReview from '../components/PatientRecordReview'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import ManualDownload from '../components/ManualDownload'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
+import VideoChatPanel from '../components/VideoChatPanel'
+import ChatPanel from '../components/ChatPanel'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
@@ -37,6 +39,7 @@ function AdminDashboard({ doctor, onLogout }) {
   const [consultationPatientSearch, setConsultationPatientSearch] = useState('')
   const [consultationPatientLimit, setConsultationPatientLimit] = useState(10)
   const [loadingConsultationPatients, setLoadingConsultationPatients] = useState(false)
+  const [selectedConsultationPatient, setSelectedConsultationPatient] = useState(null)
 
   const loadConsultationPatients = async (limit = consultationPatientLimit, search = consultationPatientSearch) => {
     if (!doctor?.id) return
@@ -47,11 +50,20 @@ function AdminDashboard({ doctor, onLogout }) {
       const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/consultation-patients?${params.toString()}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load consultation patients')
-      setConsultationPatients(Array.isArray(data.patients) ? data.patients : [])
+      const patients = Array.isArray(data.patients) ? data.patients : []
+      setConsultationPatients(patients)
       setConsultationPatientTotal(Number(data.total || 0))
+      setSelectedConsultationPatient((current) => {
+        if (!patients.length) return null
+        const currentConsultationId = current?.latest_consultation?.id
+        const stillVisible = patients.find((patient) => patient.latest_consultation?.id === currentConsultationId)
+        if (stillVisible) return stillVisible
+        return patients.find((patient) => patient.latest_consultation?.status === 'in_progress') || patients[0]
+      })
     } catch (err) {
       setConsultationPatients([])
       setConsultationPatientTotal(0)
+      setSelectedConsultationPatient(null)
       addError(err.message, 'error')
     } finally {
       setLoadingConsultationPatients(false)
@@ -78,9 +90,11 @@ function AdminDashboard({ doctor, onLogout }) {
 
   useEffect(() => {
     if (consultationPatients.some((patient) => patient.latest_consultation?.status === 'in_progress')) {
-      setActiveTab((current) => (current === 'overview' ? 'patients' : current))
+      setActiveTab('patients')
     }
   }, [consultationPatients])
+
+  const selectedConsultation = selectedConsultationPatient?.latest_consultation || null
 
   const handleSavePayoutDetails = async () => {
     setSavingPayoutDetails(true)
@@ -478,26 +492,41 @@ function AdminDashboard({ doctor, onLogout }) {
                   No active consultation patients yet.
                 </div>
               ) : (
-                consultationPatients.map((patient, index) => (
-                  <div key={patient.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div>
-                        <p className="text-sm font-black uppercase tracking-[0.18em]" style={{ color: adminSpecialtyInfo.color }}>
-                          {patient.source === 'direct_patient' ? 'Direct patient' : `Queue #${index + 1}`}
-                        </p>
-                        <h4 className="mt-1 text-lg font-bold text-slate-900">{patient.name || 'Unnamed patient'}</h4>
-                        <p className="mt-1 text-xs font-semibold text-slate-500">ID: {patient.id}</p>
-                        <p className="mt-1 text-xs text-slate-500">Phone: {patient.phone || 'Not provided'}</p>
-                      </div>
-                      <div className="text-sm text-slate-600 lg:text-right">
-                        <p className="font-semibold text-slate-900">{patient.latest_consultation?.channel?.replace(/_/g, ' ') || 'Consultation'}</p>
-                        <p className="mt-1 font-bold text-emerald-700">{patient.latest_consultation?.status || 'in_progress'}</p>
-                        <p>{patient.assigned_at ? new Date(patient.assigned_at).toLocaleString() : ''}</p>
-                        <p className="mt-1 text-xs text-slate-500">Facility: {patient.facility_id || 'N/A'}</p>
+                consultationPatients.map((patient, index) => {
+                  const isSelected = selectedConsultation?.id === patient.latest_consultation?.id
+                  return (
+                    <div
+                      key={patient.latest_consultation?.id || patient.id}
+                      className={`rounded-3xl border p-5 ${
+                        isSelected ? 'border-brand-300 bg-brand-50' : 'border-slate-200 bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <p className="text-sm font-black uppercase tracking-[0.18em]" style={{ color: adminSpecialtyInfo.color }}>
+                            {patient.source === 'direct_patient' ? 'Direct patient' : `Queue #${index + 1}`}
+                          </p>
+                          <h4 className="mt-1 text-lg font-bold text-slate-900">{patient.name || 'Unnamed patient'}</h4>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">ID: {patient.id}</p>
+                          <p className="mt-1 text-xs text-slate-500">Phone: {patient.phone || 'Not provided'}</p>
+                        </div>
+                        <div className="text-sm text-slate-600 lg:text-right">
+                          <p className="font-semibold text-slate-900">{patient.latest_consultation?.channel?.replace(/_/g, ' ') || 'Consultation'}</p>
+                          <p className="mt-1 font-bold text-emerald-700">{patient.latest_consultation?.status || 'in_progress'}</p>
+                          <p>{patient.assigned_at ? new Date(patient.assigned_at).toLocaleString() : ''}</p>
+                          <p className="mt-1 text-xs text-slate-500">Facility: {patient.facility_id || 'N/A'}</p>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedConsultationPatient(patient)}
+                            className="mt-3 rounded-full bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600"
+                          >
+                            {isSelected ? 'Workspace open' : 'Open workspace'}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
 
@@ -511,6 +540,50 @@ function AdminDashboard({ doctor, onLogout }) {
               </button>
             )}
           </div>
+
+          {selectedConsultationPatient && selectedConsultation ? (
+            <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
+              <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-black uppercase tracking-[0.18em]" style={{ color: adminSpecialtyInfo.color }}>
+                    Live consultation workspace
+                  </p>
+                  <h3 className="mt-1 text-2xl font-bold text-slate-900">
+                    {selectedConsultationPatient.name || 'Unnamed patient'}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Patient ID: {selectedConsultationPatient.id} | Consultation ID: {selectedConsultation.id}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+                  {selectedConsultation.status || 'in_progress'}
+                </div>
+              </div>
+
+              <VideoChatPanel
+                key={selectedConsultation.id}
+                consultationId={selectedConsultation.id}
+                userType="doctor"
+                patientId={selectedConsultationPatient.id}
+                doctorId={doctor.id}
+                autoStart
+              />
+
+              <div className="mt-8">
+                <ChatPanel
+                  consultationId={selectedConsultation.id}
+                  userId={doctor.id}
+                  userType="doctor"
+                  recipientId={selectedConsultationPatient.id}
+                  recipientType="patient"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-3xl bg-white p-8 text-sm text-slate-600 shadow-xl shadow-slate-200/50">
+              When a patient starts a live consultation with you, the video room, chat, and vital signs monitor will open here.
+            </div>
+          )}
 
           <PatientRecordReview />
         </div>
