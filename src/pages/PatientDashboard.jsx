@@ -14,6 +14,9 @@ import AnnouncementBanner from '../components/AnnouncementBanner'
 import ManualDownload from '../components/ManualDownload'
 import AccessibilityPanel from '../components/AccessibilityPanel'
 import LanguageSelector from '../components/LanguageSelector'
+import PrescriptionManager from '../components/PrescriptionManager'
+import LabRequestManager from '../components/LabRequestManager'
+import PatientClinicalSummaryDownload from '../components/PatientClinicalSummaryDownload'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
@@ -378,6 +381,9 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
           { id: 'overview', label: 'Overview' },
           { id: 'appointments', label: 'Appointments' },
           { id: 'files', label: 'Files' },
+          { id: 'prescriptions', label: 'Prescriptions' },
+          { id: 'labs', label: 'Lab Requests' },
+          { id: 'review-pdf', label: 'Review PDF' },
           { id: 'chat', label: 'Chat' },
           { id: 'video', label: 'Video Call' },
           { id: 'notifications', label: 'Notifications' },
@@ -488,6 +494,30 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
 
       {activeTab === 'files' && <PatientFileManager patientId={patient.id} />}
 
+      {activeTab === 'prescriptions' && (
+        <PrescriptionManager
+          patientId={patient.id}
+          patientName={patient.name}
+        />
+      )}
+
+      {activeTab === 'labs' && (
+        <LabRequestManager
+          patientId={patient.id}
+          patientName={patient.name}
+        />
+      )}
+
+      {activeTab === 'review-pdf' && (
+        <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
+          <h2 className="text-xl font-semibold text-slate-900">Clinical Review Download</h2>
+          <p className="mt-2 text-sm text-slate-600">Download your uploaded files summary, reviews, referrals, vitals, and lab requests as a printable PDF.</p>
+          <div className="mt-6">
+            <PatientClinicalSummaryDownload patient={patient} />
+          </div>
+        </div>
+      )}
+
       {activeTab === 'chat' && (
         <ChatPanel
           consultationId={selectedConsultationId}
@@ -503,6 +533,8 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
           consultationId={selectedConsultationId}
           userId={patient.id}
           userType="patient"
+          patientId={patient.id}
+          doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
         />
       )}
 

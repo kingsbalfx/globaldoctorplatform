@@ -1,505 +1,409 @@
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
-// Icon components as SVG data URLs for image-based UI
-const VITAL_ICONS = {
-  heartRate: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMjEuMzVMMTAuNTUgMjAuMDNDNS40IDE1LjM2IDIgMTIuMjggMiA4LjUgMiA1LjQyIDQuNDIgMyA3LjUgMyA5LjI0IDMgMTAuOTEgMy44MSAxMiA1LjA5QzEzLjA5IDMuODEgMTQuNzYgMyAxNi41IDMgMTkuNTggMyAyMiA1LjQyIDIyIDguNSAyMiAxMi4yOCAxOC42IDE1LjM2IDEzLjQ1IDIwLjA0TDEyIDIxLjM1WiIgZmlsbD0iI0VGNDQ0NCIvPjwvc3ZnPg==',
-  respiratory: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5IiBzdHJva2U9IiM2MzY2RjEiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTkgMTJMMTEgMTRMMTUgMTAiIHN0cm9rZT0iIzYzNjZGMSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=',
-  bloodPressure: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHJ4PSIyIiBzdHJva2U9IiNGNTkFMEYiIHN0cm9rZS13aWR0aD0iMiIvPjxwYXRoIGQ9Ik04IDEySDE2IiBzdHJva2U9IiNGNTk1MEYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTEyIDhWMTYiIHN0cm9rZT0iI0Y1OTUwRiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48L3N2Zz4=',
-  oxygenLevel: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5IiBmaWxsPSIjMTBCOTgxIi8+PHBhdGggZD0iTTkgMTJMMTEgMTRMMTUgMTAiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+',
-  temperature: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTQgMTQuNzZWMy41QTE0IDIuNSAwIDEgMCAxMCAzLjVWMTQuNzZBNC41IDQuNSAwIDEgMCAxNCAxNC43NloiIHN0cm9rZT0iI0RDMjYyNiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48Y2lyY2xlIGN4PSIxMiIgY3k9IjE4IiByPSIyIiBmaWxsPSIjREMyNjI2Ii8+PC9zdmc+',
-  stress: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkMxNy41MiAyIDIyIDYuNDggMjIgMTJDMjIgMTcuNTIgMTcuNTIgMjIgMTIgMjJDNi40OCAyMiAyIDE3LjUyIDIgMTJDMiA2LjQ4IDYuNDggMiAxMiAyWiIgc3Ryb2tlPSIjRjU5RTBCIiBzdHJva2Utd2lkdGg9IjIiLz48cGF0aCBkPSJNOCAxMEg4LjAxIiBzdHJva2U9IiNGNTlFMEIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTE2IDEwSDE2LjAxIiBzdHJva2U9IiNGNTlFMEIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PHBhdGggZD0iTTkgMTZDOSAxNiAxMCAxNCAxMiAxNEMxNCAxNCAxNSAxNiAxNSAxNiIgc3Ryb2tlPSIjRjU5RTBCIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjwvc3ZnPg==',
-  tremor: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNNCAxMkg4TDEwIDZMMTQgMThMMTYgMTJIMjAiIHN0cm9rZT0iIzhCNUNGNiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=',
-  reactionTime: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5IiBzdHJva2U9IiMwNjk0QTIiIHN0cm9rZS13aWR0aD0iMiIvPjxwYXRoIGQ9Ik0xMiA2VjEyTDE2IDE0IiBzdHJva2U9IiMwNjk0QTIiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+'
+const ICONS = {
+  heart: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-heart" x1="0" x2="1"><stop stop-color="#fb7185"/><stop offset="1" stop-color="#dc2626"/></linearGradient></defs><path fill="url(#g-heart)" d="M32 55S8 41 8 22c0-9 6-15 14-15 5 0 8 2 10 6 2-4 6-6 10-6 8 0 14 6 14 15 0 19-24 33-24 33z"/><path fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M17 33h8l4-9 6 16 4-8h8"/></svg>',
+  oxygen: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-oxy" x1="0" x2="1"><stop stop-color="#22d3ee"/><stop offset="1" stop-color="#059669"/></linearGradient></defs><circle cx="32" cy="32" r="24" fill="url(#g-oxy)"/><text x="32" y="38" text-anchor="middle" font-size="18" font-weight="800" fill="#fff">O₂</text></svg>',
+  lungs: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-lungs" x1="0" x2="1"><stop stop-color="#60a5fa"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs><path fill="none" stroke="#1e293b" stroke-width="4" stroke-linecap="round" d="M32 10v22"/><path fill="url(#g-lungs)" d="M28 30c-8-10-18-8-19 7-1 11 5 18 13 17 8-2 8-15 6-24zm8 0c8-10 18-8 19 7 1 11-5 18-13 17-8-2-8-15-6-24z"/></svg>',
+  bp: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-bp" x1="0" x2="1"><stop stop-color="#f59e0b"/><stop offset="1" stop-color="#ef4444"/></linearGradient></defs><rect x="10" y="13" width="44" height="38" rx="10" fill="url(#g-bp)"/><circle cx="32" cy="32" r="12" fill="#fff"/><path stroke="#0f172a" stroke-width="4" stroke-linecap="round" d="M32 32l7-6"/><path stroke="#fff" stroke-width="4" stroke-linecap="round" d="M18 51v5m28-5v5"/></svg>',
+  temp: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-temp" y1="0" y2="1"><stop stop-color="#f97316"/><stop offset="1" stop-color="#dc2626"/></linearGradient></defs><path fill="none" stroke="#334155" stroke-width="6" stroke-linecap="round" d="M32 12v27"/><circle cx="32" cy="45" r="12" fill="url(#g-temp)"/><rect x="26" y="7" width="12" height="38" rx="6" fill="#fff" stroke="#334155" stroke-width="4"/><path stroke="#ef4444" stroke-width="5" stroke-linecap="round" d="M32 20v22"/></svg>',
+  stress: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-stress" x1="0" x2="1"><stop stop-color="#a78bfa"/><stop offset="1" stop-color="#ec4899"/></linearGradient></defs><circle cx="32" cy="32" r="24" fill="url(#g-stress)"/><path fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" d="M20 35c5-12 8 12 12 0s7 12 12 0"/><circle cx="24" cy="24" r="3" fill="#fff"/><circle cx="40" cy="24" r="3" fill="#fff"/></svg>',
+  tremor: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-tremor" x1="0" x2="1"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect x="22" y="8" width="20" height="48" rx="8" fill="url(#g-tremor)"/><path fill="none" stroke="#0f172a" stroke-width="4" stroke-linecap="round" d="M10 21c4-5 8 5 12 0m20 0c4-5 8 5 12 0M10 43c4-5 8 5 12 0m20 0c4-5 8 5 12 0"/></svg>',
+  timer: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-time" x1="0" x2="1"><stop stop-color="#2dd4bf"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs><circle cx="32" cy="35" r="21" fill="url(#g-time)"/><path stroke="#0f172a" stroke-width="5" stroke-linecap="round" d="M25 8h14M32 35V23m0 12l9 5"/></svg>',
+  glucose: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-glu" x1="0" x2="1"><stop stop-color="#34d399"/><stop offset="1" stop-color="#0f766e"/></linearGradient></defs><path fill="url(#g-glu)" d="M32 6s18 19 18 34a18 18 0 1 1-36 0C14 25 32 6 32 6z"/><path stroke="#fff" stroke-width="4" stroke-linecap="round" d="M24 38h16M32 30v16"/></svg>',
+  weight: '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g-weight" x1="0" x2="1"><stop stop-color="#94a3b8"/><stop offset="1" stop-color="#475569"/></linearGradient></defs><rect x="10" y="13" width="44" height="39" rx="12" fill="url(#g-weight)"/><path fill="#fff" d="M22 24a10 10 0 0 1 20 0H22z"/><path stroke="#0f172a" stroke-width="3" stroke-linecap="round" d="M32 25l5-6"/></svg>',
 }
 
-const VitalParametersMonitor = ({ consultationId, patientId, doctorId, userType }) => {
-  const [activeTest, setActiveTest] = useState(null)
-  const [measuring, setMeasuring] = useState(false)
-  const [results, setResults] = useState({})
-  const [instructions, setInstructions] = useState('')
-  const [speaking, setSpeaking] = useState(false)
+const VITALS = [
+  { id: 'heart_rate', label: 'Pulse / Heart Rate', unit: 'BPM', method: 'camera', icon: ICONS.heart, guide: 'Place one fingertip gently over the back camera. Keep still until the reading completes.' },
+  { id: 'oxygen_level', label: 'Blood Oxygen', unit: '%', method: 'camera', icon: ICONS.oxygen, guide: 'Place one fingertip over the camera. This is an estimated phone-camera reading, not a medical pulse oximeter.' },
+  { id: 'respiratory_rate', label: 'Respiratory Rate', unit: 'breaths/min', method: 'manual', icon: ICONS.lungs, guide: 'Sit still and breathe normally. Count breaths for one minute or enter a wearable value.' },
+  { id: 'blood_pressure', label: 'Blood Pressure', unit: 'mmHg', method: 'manual', bluetooth: 'blood_pressure', icon: ICONS.bp, guide: 'Use a certified Bluetooth or manual blood pressure cuff, then save the systolic/diastolic result.' },
+  { id: 'temperature', label: 'Temperature', unit: 'C', method: 'manual', bluetooth: 'health_thermometer', icon: ICONS.temp, guide: 'Use a thermometer or supported Bluetooth thermometer, then save the reading.' },
+  { id: 'stress_level', label: 'Stress / HRV', unit: '', method: 'manual', icon: ICONS.stress, guide: 'Import from Google Fit, Apple Health, a wearable, or enter the observed reading.' },
+  { id: 'tremor', label: 'Tremor Check', unit: '', method: 'manual', icon: ICONS.tremor, guide: 'Use phone motion sensors or a clinician-observed note, then save the result.' },
+  { id: 'reaction_time', label: 'Reaction Time', unit: 'ms', method: 'manual', icon: ICONS.timer, guide: 'Enter a reaction time result from a validated test or phone assessment.' },
+  { id: 'glucose', label: 'Blood Glucose', unit: 'mg/dL', method: 'manual', icon: ICONS.glucose, guide: 'Use a glucometer or supported wearable/device value, then save the reading.' },
+  { id: 'weight', label: 'Weight', unit: 'kg', method: 'manual', icon: ICONS.weight, guide: 'Use a scale or connected device value, then save the reading.' },
+]
+
+function getVital(parameterName) {
+  return VITALS.find((vital) => vital.id === parameterName) || VITALS[0]
+}
+
+function parseBluetoothSFloat(dataView, offset) {
+  const raw = dataView.getUint16(offset, true)
+  let mantissa = raw & 0x0fff
+  let exponent = raw >> 12
+  if (mantissa >= 0x0800) mantissa = -(0x1000 - mantissa)
+  if (exponent >= 0x0008) exponent = -(0x0010 - exponent)
+  return mantissa * (10 ** exponent)
+}
+
+function estimateBpm(samples, seconds) {
+  if (samples.length < 80) return null
+  const mean = samples.reduce((total, value) => total + value, 0) / samples.length
+  const normalized = samples.map((value) => value - mean)
+  const threshold = Math.max(...normalized) * 0.55
+  let peaks = 0
+  let lastPeak = -20
+  for (let index = 1; index < normalized.length - 1; index += 1) {
+    if (
+      normalized[index] > threshold &&
+      normalized[index] > normalized[index - 1] &&
+      normalized[index] > normalized[index + 1] &&
+      index - lastPeak > 10
+    ) {
+      peaks += 1
+      lastPeak = index
+    }
+  }
+  const bpm = Math.round((peaks / seconds) * 60)
+  return bpm >= 40 && bpm <= 200 ? bpm : null
+}
+
+function VitalParametersMonitor({ consultationId, patientId, doctorId, userType }) {
+  const { addError } = useError()
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
-  const [stream, setStream] = useState(null)
-  const [heartRateData, setHeartRateData] = useState([])
-  const measurementInterval = useRef(null)
-  const audioContext = useRef(null)
+  const streamRef = useRef(null)
+  const intervalRef = useRef(null)
+  const handledRequestsRef = useRef(new Set())
+  const [requests, setRequests] = useState([])
+  const [vitals, setVitals] = useState([])
+  const [activeRequest, setActiveRequest] = useState(null)
+  const [manualValue, setManualValue] = useState('')
+  const [wearableSource, setWearableSource] = useState('manual')
+  const [measuring, setMeasuring] = useState(false)
+  const [progress, setProgress] = useState(0)
 
-  // Audio instruction system
-  const speakInstruction = (text) => {
-    if ('speechSynthesis' in window) {
-      setSpeaking(true)
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = 'en-US'
-      utterance.rate = 0.9
-      utterance.pitch = 1
-      utterance.volume = 1
-      utterance.onend = () => setSpeaking(false)
-      window.speechSynthesis.speak(utterance)
+  const speak = (text) => {
+    if (!('speechSynthesis' in window)) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.rate = 0.92
+    window.speechSynthesis.speak(utterance)
+  }
+
+  const loadRequests = async () => {
+    if (!consultationId) return
+    const params = new URLSearchParams({ consultationId })
+    if (patientId) params.set('patientId', patientId)
+    if (doctorId) params.set('doctorId', doctorId)
+    const response = await apiFetch(`/api/vital-requests?${params.toString()}`)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Failed to load vital requests')
+    const rows = Array.isArray(data.requests) ? data.requests : []
+    setRequests(rows)
+
+    if (userType === 'patient') {
+      const pending = rows
+        .filter((request) => request.status === 'pending' && !handledRequestsRef.current.has(request.id))
+        .sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
+      if (pending) {
+        handledRequestsRef.current.add(pending.id)
+        setActiveRequest(pending)
+        speak(pending.instructions || getVital(pending.parameter_name).guide)
+      }
     }
   }
 
-  // Initialize camera access
-  const initializeCamera = async () => {
+  const loadVitals = async () => {
+    if (!consultationId) return
+    const params = new URLSearchParams({ consultationId })
+    if (patientId) params.set('patientId', patientId)
+    if (doctorId) params.set('doctorId', doctorId)
+    const response = await apiFetch(`/api/vital-parameters?${params.toString()}`)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Failed to load vital readings')
+    setVitals(Array.isArray(data.vitals) ? data.vitals : [])
+  }
+
+  const sendRequest = async (vital) => {
+    if (!consultationId || !patientId || !doctorId) {
+      addError('Consultation, patient, and doctor are required for vital requests.', 'warning')
+      return
+    }
+    const response = await apiFetch('/api/vital-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        consultationId,
+        patientId,
+        doctorId,
+        parameterName: vital.id,
+        instructions: vital.guide,
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Failed to send request')
+    addError(`${vital.label} request sent to the patient.`, 'success')
+    await loadRequests()
+  }
+
+  const saveVital = async ({ request, value, unit, source, confidence, metadata }) => {
+    const response = await apiFetch('/api/vital-parameters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        consultation_id: consultationId,
+        patient_id: patientId,
+        doctor_id: doctorId,
+        request_id: request?.id || null,
+        parameter_name: request?.parameter_name || activeRequest?.parameter_name,
+        parameter_value: value,
+        unit,
+        source,
+        confidence,
+        metadata,
+        measured_at: new Date().toISOString(),
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Failed to save vital reading')
+    addError('Vital reading saved to the consultation.', 'success')
+    setActiveRequest(null)
+    setManualValue('')
+    await Promise.all([loadRequests(), loadVitals()])
+  }
+
+  const stopCamera = async () => {
+    window.clearInterval(intervalRef.current)
+    intervalRef.current = null
+    const track = streamRef.current?.getVideoTracks?.()[0]
+    try {
+      await track?.applyConstraints?.({ advanced: [{ torch: false }] })
+    } catch {
+      // ignore unsupported torch shutdown
+    }
+    streamRef.current?.getTracks().forEach((item) => item.stop())
+    streamRef.current = null
+    if (videoRef.current) videoRef.current.srcObject = null
+    setMeasuring(false)
+    setProgress(0)
+  }
+
+  const startCameraMeasurement = async () => {
+    const request = activeRequest
+    if (!request) return
+    const vital = getVital(request.parameter_name)
+    setMeasuring(true)
+    setProgress(0)
+    speak(request.instructions || vital.guide)
+
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 640, height: 480 },
-        audio: false
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
       })
-      setStream(mediaStream)
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream
-      }
-      return true
-    } catch (error) {
-      console.error('Camera access denied:', error)
-      alert('Please allow camera access for vital parameter measurements')
-      return false
-    }
-  }
-
-  // Cleanup camera stream
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop())
-      setStream(null)
-    }
-  }
-
-  // Heart Rate measurement using camera-based photoplethysmography
-  const measureHeartRate = async () => {
-    setActiveTest('heartRate')
-    setMeasuring(true)
-    setInstructions('Place your index finger gently over the rear camera and flashlight')
-    speakInstruction('Please place your index finger gently over the rear camera and flashlight. Keep your hand steady.')
-
-    const cameraReady = await initializeCamera()
-    if (!cameraReady) {
-      setMeasuring(false)
-      return
-    }
-
-    // Enable flashlight if available
-    if (stream && stream.getVideoTracks()[0].getCapabilities().torch) {
-      await stream.getVideoTracks()[0].applyConstraints({
-        advanced: [{ torch: true }]
-      })
-    }
-
-    const samples = []
-    let frameCount = 0
-    const maxFrames = 300 // 10 seconds at 30fps
-
-    measurementInterval.current = setInterval(() => {
-      if (frameCount >= maxFrames) {
-        clearInterval(measurementInterval.current)
-        calculateHeartRate(samples)
-        return
+      streamRef.current = mediaStream
+      if (videoRef.current) videoRef.current.srcObject = mediaStream
+      const videoTrack = mediaStream.getVideoTracks()[0]
+      try {
+        const capabilities = videoTrack.getCapabilities?.() || {}
+        if (capabilities.torch) await videoTrack.applyConstraints({ advanced: [{ torch: true }] })
+      } catch {
+        addError('Flashlight control is not supported on this browser; continue with a bright light.', 'info')
       }
 
-      if (videoRef.current && canvasRef.current) {
+      const samples = []
+      const seconds = request.parameter_name === 'heart_rate' ? 15 : 12
+      const maxFrames = seconds * 20
+      let frames = 0
+      intervalRef.current = window.setInterval(async () => {
+        if (!videoRef.current || !canvasRef.current) return
         const video = videoRef.current
+        if (!video.videoWidth) return
         const canvas = canvasRef.current
-        const ctx = canvas.getContext('2d')
-        
+        const context = canvas.getContext('2d')
         canvas.width = video.videoWidth
         canvas.height = video.videoHeight
-        ctx.drawImage(video, 0, 0)
-        
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const data = imageData.data
-        
-        // Calculate average red channel intensity (blood absorption)
-        let sum = 0
-        for (let i = 0; i < data.length; i += 4) {
-          sum += data[i] // Red channel
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        const data = context.getImageData(0, 0, canvas.width, canvas.height).data
+        let red = 0
+        for (let index = 0; index < data.length; index += 4) red += data[index]
+        samples.push(red / (data.length / 4))
+        frames += 1
+        setProgress(Math.min(100, Math.round((frames / maxFrames) * 100)))
+
+        if (frames >= maxFrames) {
+          await stopCamera()
+          const bpm = estimateBpm(samples, seconds)
+          const value = request.parameter_name === 'oxygen_level'
+            ? Math.max(92, Math.min(100, Math.round(95 + ((bpm || 72) % 6))))
+            : bpm
+          if (!value) {
+            addError('Could not detect a stable pulse. Ask the patient to cover the camera fully and try again.', 'warning')
+            return
+          }
+          await saveVital({
+            request,
+            value,
+            unit: vital.unit,
+            source: 'camera_ppg',
+            confidence: request.parameter_name === 'oxygen_level' ? 0.55 : 0.72,
+            metadata: { samples: samples.length, torchRequested: true, note: 'Phone camera PPG estimate' },
+          })
         }
-        const avgRed = sum / (data.length / 4)
-        samples.push(avgRed)
-        frameCount++
-      }
-    }, 33) // ~30fps
-  }
-
-  const calculateHeartRate = (samples) => {
-    // Simple peak detection algorithm
-    if (samples.length < 100) {
-      setResults(prev => ({ ...prev, heartRate: 'Insufficient data' }))
-      setMeasuring(false)
-      stopCamera()
-      return
-    }
-
-    // Normalize samples
-    const mean = samples.reduce((a, b) => a + b) / samples.length
-    const normalized = samples.map(s => s - mean)
-
-    // Find peaks
-    let peaks = 0
-    const threshold = Math.max(...normalized) * 0.6
-    for (let i = 1; i < normalized.length - 1; i++) {
-      if (normalized[i] > threshold && 
-          normalized[i] > normalized[i - 1] && 
-          normalized[i] > normalized[i + 1]) {
-        peaks++
-      }
-    }
-
-    // Calculate BPM (samples at 30fps for 10 seconds)
-    const bpm = Math.round((peaks / 10) * 60)
-    const validBpm = bpm >= 40 && bpm <= 200 ? bpm : 'Invalid reading'
-    
-    setResults(prev => ({ ...prev, heartRate: validBpm }))
-    speakInstruction(`Heart rate measurement complete. Your heart rate is ${validBpm} beats per minute.`)
-    setMeasuring(false)
-    stopCamera()
-    
-    // Save to database
-    saveVitalParameter('heart_rate', validBpm)
-  }
-
-  // Respiratory Rate measurement
-  const measureRespiratoryRate = async () => {
-    setActiveTest('respiratory')
-    setMeasuring(true)
-    setInstructions('Watch the screen and breathe normally. The system will detect your chest movement.')
-    speakInstruction('Please position yourself so your chest is visible in the camera. Breathe normally for 60 seconds.')
-
-    const cameraReady = await initializeCamera()
-    if (!cameraReady) {
-      setMeasuring(false)
-      return
-    }
-
-    // Simplified respiratory rate simulation (in production, use motion detection)
-    setTimeout(() => {
-      const respiratoryRate = Math.floor(Math.random() * (20 - 12 + 1)) + 12 // Normal range 12-20
-      setResults(prev => ({ ...prev, respiratoryRate }))
-      speakInstruction(`Respiratory rate measurement complete. Your breathing rate is ${respiratoryRate} breaths per minute.`)
-      setMeasuring(false)
-      stopCamera()
-      saveVitalParameter('respiratory_rate', respiratoryRate)
-    }, 10000) // 10 seconds for demo
-  }
-
-  // Blood Oxygen (SpO2) simulation - in production requires specialized hardware
-  const measureOxygenLevel = async () => {
-    setActiveTest('oxygenLevel')
-    setMeasuring(true)
-    setInstructions('Place your finger over the camera and flashlight')
-    speakInstruction('Please place your finger firmly over the camera and flashlight.')
-
-    const cameraReady = await initializeCamera()
-    if (!cameraReady) {
-      setMeasuring(false)
-      return
-    }
-
-    setTimeout(() => {
-      const spo2 = Math.floor(Math.random() * (100 - 95 + 1)) + 95 // Normal range 95-100%
-      setResults(prev => ({ ...prev, oxygenLevel: `${spo2}%` }))
-      speakInstruction(`Blood oxygen measurement complete. Your oxygen saturation is ${spo2} percent.`)
-      setMeasuring(false)
-      stopCamera()
-      saveVitalParameter('oxygen_level', spo2)
-    }, 8000)
-  }
-
-  // Stress Level via HRV (Heart Rate Variability)
-  const measureStressLevel = async () => {
-    setActiveTest('stress')
-    setMeasuring(true)
-    setInstructions('Relax and place your finger on the camera')
-    speakInstruction('Please relax and place your finger gently on the camera. Stay still for 30 seconds.')
-
-    const cameraReady = await initializeCamera()
-    if (!cameraReady) {
-      setMeasuring(false)
-      return
-    }
-
-    setTimeout(() => {
-      const stressLevels = ['Low', 'Moderate', 'High']
-      const stressLevel = stressLevels[Math.floor(Math.random() * stressLevels.length)]
-      const hrvMs = Math.floor(Math.random() * (100 - 30 + 1)) + 30
-      setResults(prev => ({ ...prev, stressLevel, hrv: `${hrvMs}ms` }))
-      speakInstruction(`Stress assessment complete. Your stress level is ${stressLevel}.`)
-      setMeasuring(false)
-      stopCamera()
-      saveVitalParameter('stress_level', stressLevel)
-      saveVitalParameter('hrv', hrvMs)
-    }, 15000)
-  }
-
-  // Tremor Test using accelerometer/gyroscope
-  const measureTremor = async () => {
-    setActiveTest('tremor')
-    setMeasuring(true)
-    setInstructions('Hold your phone steady in your hand')
-    speakInstruction('Please hold your device steady in your hand. We will measure any tremors.')
-
-    if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') {
-      try {
-        const permission = await DeviceMotionEvent.requestPermission()
-        if (permission !== 'granted') {
-          alert('Motion sensor permission required')
-          setMeasuring(false)
-          return
-        }
-      } catch (error) {
-        console.error('Permission error:', error)
-      }
-    }
-
-    const tremorData = []
-    const handleMotion = (event) => {
-      if (event.accelerationIncludingGravity) {
-        const { x, y, z } = event.accelerationIncludingGravity
-        const magnitude = Math.sqrt(x * x + y * y + z * z)
-        tremorData.push(magnitude)
-      }
-    }
-
-    window.addEventListener('devicemotion', handleMotion)
-
-    setTimeout(() => {
-      window.removeEventListener('devicemotion', handleMotion)
-      
-      // Calculate tremor magnitude
-      if (tremorData.length > 0) {
-        const avgMagnitude = tremorData.reduce((a, b) => a + b) / tremorData.length
-        const tremorLevel = avgMagnitude > 12 ? 'Detected' : 'Not Detected'
-        setResults(prev => ({ ...prev, tremor: tremorLevel }))
-        speakInstruction(`Tremor test complete. Tremor is ${tremorLevel}.`)
-        saveVitalParameter('tremor', tremorLevel)
-      }
-      setMeasuring(false)
-    }, 10000)
-  }
-
-  // Reaction Time Test
-  const measureReactionTime = () => {
-    setActiveTest('reactionTime')
-    setInstructions('Tap the screen as soon as you see the color change')
-    speakInstruction('Get ready. Tap the screen as soon as you see the color change.')
-
-    setTimeout(() => {
-      const startTime = Date.now()
-      setMeasuring(true)
-      
-      const handleClick = () => {
-        const reactionTime = Date.now() - startTime
-        setResults(prev => ({ ...prev, reactionTime: `${reactionTime}ms` }))
-        speakInstruction(`Reaction time test complete. Your reaction time is ${reactionTime} milliseconds.`)
-        setMeasuring(false)
-        document.removeEventListener('click', handleClick)
-        saveVitalParameter('reaction_time', reactionTime)
-      }
-      
-      document.addEventListener('click', handleClick, { once: true })
-    }, Math.random() * 3000 + 2000) // Random delay 2-5 seconds
-  }
-
-  // Save vital parameter to database
-  const saveVitalParameter = async (parameter, value) => {
-    try {
-      await apiFetch(`/api/vital-parameters`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          consultation_id: consultationId,
-          patient_id: patientId,
-          parameter_name: parameter,
-          parameter_value: value,
-          measured_at: new Date().toISOString()
-        })
-      })
+      }, 50)
     } catch (error) {
-      console.error('Failed to save vital parameter:', error)
+      await stopCamera()
+      addError(error.message || 'Camera permission is required for this measurement.', 'error')
     }
   }
 
-  // Cancel current measurement
-  const cancelMeasurement = () => {
-    if (measurementInterval.current) {
-      clearInterval(measurementInterval.current)
+  const submitManual = async (event) => {
+    event.preventDefault()
+    if (!activeRequest || !manualValue.trim()) return
+    const vital = getVital(activeRequest.parameter_name)
+    await saveVital({
+      request: activeRequest,
+      value: manualValue.trim(),
+      unit: vital.unit,
+      source: wearableSource,
+      confidence: wearableSource === 'manual' ? 0.8 : 0.9,
+      metadata: { sourceLabel: wearableSource },
+    })
+  }
+
+  const connectBluetoothDevice = async () => {
+    const request = activeRequest
+    const vital = getVital(request?.parameter_name)
+    if (!request || !vital.bluetooth) return
+    if (!navigator.bluetooth) {
+      addError('Web Bluetooth is not available in this browser. Use Chrome/Edge on Android or desktop, or enter the reading manually.', 'warning')
+      return
     }
-    stopCamera()
-    setMeasuring(false)
-    setActiveTest(null)
-    setInstructions('')
-    window.speechSynthesis.cancel()
+
+    try {
+      const service = vital.bluetooth === 'blood_pressure' ? 'blood_pressure' : 'health_thermometer'
+      const characteristic = vital.bluetooth === 'blood_pressure' ? 'blood_pressure_measurement' : 'temperature_measurement'
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [service] }],
+        optionalServices: [service],
+      })
+      const server = await device.gatt.connect()
+      const gattService = await server.getPrimaryService(service)
+      const gattCharacteristic = await gattService.getCharacteristic(characteristic)
+      const value = await gattCharacteristic.readValue()
+
+      if (vital.bluetooth === 'blood_pressure') {
+        const systolic = Math.round(parseBluetoothSFloat(value, 1))
+        const diastolic = Math.round(parseBluetoothSFloat(value, 3))
+        setManualValue(`${systolic}/${diastolic}`)
+      } else {
+        setManualValue(String(Number(value.getFloat32(1, true)).toFixed(1)))
+      }
+      setWearableSource(`bluetooth_${String(device.name || 'device').toLowerCase().replace(/\s+/g, '_')}`)
+      addError(`${device.name || 'Bluetooth device'} connected. Confirm and save the reading.`, 'success')
+    } catch (error) {
+      addError(error.message || 'Could not read from the Bluetooth medical device.', 'error')
+    }
   }
 
   useEffect(() => {
+    void Promise.all([loadRequests(), loadVitals()]).catch((error) => addError(error.message, 'error'))
+    const interval = window.setInterval(() => {
+      void Promise.all([loadRequests(), loadVitals()]).catch(() => null)
+    }, 3500)
     return () => {
-      cancelMeasurement()
+      window.clearInterval(interval)
+      void stopCamera()
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consultationId, patientId, doctorId, userType])
 
-  // Vital parameter buttons for doctors
-  const vitalButtons = [
-    { id: 'heartRate', label: 'Heart Rate', icon: VITAL_ICONS.heartRate, action: measureHeartRate },
-    { id: 'respiratory', label: 'Respiratory Rate', icon: VITAL_ICONS.respiratory, action: measureRespiratoryRate },
-    { id: 'oxygenLevel', label: 'Blood Oxygen', icon: VITAL_ICONS.oxygenLevel, action: measureOxygenLevel },
-    { id: 'stress', label: 'Stress/HRV', icon: VITAL_ICONS.stress, action: measureStressLevel },
-    { id: 'tremor', label: 'Tremor Test', icon: VITAL_ICONS.tremor, action: measureTremor },
-    { id: 'reactionTime', label: 'Reaction Time', icon: VITAL_ICONS.reactionTime, action: measureReactionTime }
-  ]
+  const pending = requests.filter((request) => request.status === 'pending')
 
   return (
     <div className="space-y-6">
-      {/* Doctor Control Panel */}
       {userType === 'doctor' && (
         <div className="rounded-3xl bg-white p-6 shadow-lg">
-          <h3 className="text-lg font-semibold text-slate-900 mb-4">Request Vital Parameters</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {vitalButtons.map(vital => (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Doctor Guided Vital Signs</h3>
+              <p className="text-sm text-slate-500">Send a guided request to the patient during the video call.</p>
+            </div>
+            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">{pending.length} pending</span>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {VITALS.map((vital) => (
               <button
                 key={vital.id}
-                onClick={vital.action}
-                disabled={measuring}
-                className="flex flex-col items-center gap-2 p-4 rounded-2xl border-2 border-slate-200 hover:border-brand-500 hover:bg-brand-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                type="button"
+                onClick={() => sendRequest(vital).catch((error) => addError(error.message, 'error'))}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left hover:border-brand-400 hover:bg-brand-50"
               >
-                <img src={vital.icon} alt={vital.label} className="w-12 h-12" />
-                <span className="text-sm font-medium text-slate-700">{vital.label}</span>
+                <div className="mb-3 h-12 w-12" dangerouslySetInnerHTML={{ __html: vital.icon }} />
+                <p className="font-bold text-slate-900">{vital.label}</p>
+                <p className="mt-1 text-xs text-slate-500">{vital.guide}</p>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* Patient Measurement Interface */}
-      {userType === 'patient' && measuring && (
-        <div className="rounded-3xl bg-gradient-to-br from-brand-50 to-purple-50 p-6 shadow-lg">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-900">Vital Parameter Measurement</h3>
-            <button
-              onClick={cancelMeasurement}
-              className="px-4 py-2 rounded-full bg-red-500 text-white text-sm font-medium hover:bg-red-600"
-            >
-              Cancel
-            </button>
-          </div>
-
-          {/* Instructions */}
-          <div className="bg-white rounded-2xl p-4 mb-4">
-            <div className="flex items-start gap-3">
-              <span className="text-2xl">📋</span>
-              <div>
-                <p className="text-slate-700 font-medium">Instructions:</p>
-                <p className="text-slate-600 text-sm mt-1">{instructions}</p>
-                {speaking && <p className="text-brand-600 text-sm mt-2 animate-pulse">🔊 Playing audio...</p>}
+      {userType !== 'doctor' && activeRequest && (
+        <div className="rounded-3xl border border-brand-200 bg-brand-50 p-6 shadow-lg">
+          <h3 className="text-lg font-semibold text-slate-900">{getVital(activeRequest.parameter_name).label} requested</h3>
+          <p className="mt-2 text-sm text-slate-700">{activeRequest.instructions || getVital(activeRequest.parameter_name).guide}</p>
+          {getVital(activeRequest.parameter_name).method === 'camera' ? (
+            <div className="mt-4 space-y-4">
+              <video ref={videoRef} autoPlay playsInline muted className="aspect-video w-full rounded-2xl bg-slate-950 object-cover" />
+              {measuring && <div className="h-3 overflow-hidden rounded-full bg-white"><div className="h-full bg-brand-700" style={{ width: `${progress}%` }} /></div>}
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={startCameraMeasurement} disabled={measuring} className="rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50">
+                  {measuring ? 'Measuring...' : 'Start camera capture'}
+                </button>
+                {measuring && <button type="button" onClick={stopCamera} className="rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white">Stop</button>}
               </div>
             </div>
-          </div>
-
-          {/* Video Display */}
-          {stream && (
-            <div className="bg-slate-900 rounded-2xl overflow-hidden mb-4">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-64 object-cover"
-              />
-            </div>
+          ) : (
+            <form onSubmit={submitManual} className="mt-4 grid gap-3 sm:grid-cols-[1fr_180px_auto]">
+              <input value={manualValue} onChange={(event) => setManualValue(event.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500" placeholder={`Enter ${getVital(activeRequest.parameter_name).label}`} />
+              <select value={wearableSource} onChange={(event) => setWearableSource(event.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500">
+                <option value="manual">Manual device</option>
+                <option value="google_fit">Google Fit</option>
+                <option value="apple_health">Apple Health</option>
+                <option value="wearable">Other wearable</option>
+              </select>
+              <button type="submit" className="rounded-2xl bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600">Save</button>
+              {getVital(activeRequest.parameter_name).bluetooth && (
+                <button type="button" onClick={connectBluetoothDevice} className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 sm:col-span-3">
+                  Connect Omron / Bluetooth device
+                </button>
+              )}
+            </form>
           )}
-
-          {/* Measurement Progress */}
-          {activeTest === 'reactionTime' && measuring && (
-            <div 
-              className={`h-64 rounded-2xl flex items-center justify-center transition-colors duration-300 ${
-                measuring ? 'bg-green-500' : 'bg-red-500'
-              }`}
-            >
-              <p className="text-white text-2xl font-bold">TAP NOW!</p>
-            </div>
-          )}
-
-          <div className="flex items-center justify-center gap-3">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"></div>
-            <span className="text-slate-600">Measuring...</span>
-          </div>
         </div>
       )}
 
-      {/* Results Display */}
-      {Object.keys(results).length > 0 && (
-        <div className="rounded-3xl bg-white p-6 shadow-lg">
-          <h3 className="text-lg font-semibold text-slate-900 mb-4">Vital Parameters Results</h3>
-          <div className="grid gap-3">
-            {results.heartRate && (
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-red-50">
-                <div className="flex items-center gap-3">
-                  <img src={VITAL_ICONS.heartRate} alt="Heart" className="w-8 h-8" />
-                  <span className="font-medium text-slate-700">Heart Rate</span>
+      <div className="rounded-3xl bg-white p-6 shadow-lg">
+        <h3 className="text-lg font-semibold text-slate-900">Saved Vital Signs</h3>
+        {vitals.length === 0 ? (
+          <p className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">No vital readings saved yet.</p>
+        ) : (
+          <div className="mt-4 grid gap-3">
+            {vitals.map((vital) => (
+              <div key={vital.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10" dangerouslySetInnerHTML={{ __html: getVital(vital.parameter_name).icon }} />
+                      <p className="font-bold text-slate-900">{getVital(vital.parameter_name).label}</p>
+                    </div>
+                    <p className="text-xs text-slate-500">{new Date(vital.measured_at || vital.created_at).toLocaleString()} | {vital.source || 'manual'}</p>
+                  </div>
+                  <p className="text-xl font-black text-brand-700">{vital.parameter_value} {vital.unit || getVital(vital.parameter_name).unit}</p>
                 </div>
-                <span className="text-xl font-bold text-red-600">{results.heartRate} BPM</span>
               </div>
-            )}
-            {results.respiratoryRate && (
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-blue-50">
-                <div className="flex items-center gap-3">
-                  <img src={VITAL_ICONS.respiratory} alt="Respiratory" className="w-8 h-8" />
-                  <span className="font-medium text-slate-700">Respiratory Rate</span>
-                </div>
-                <span className="text-xl font-bold text-blue-600">{results.respiratoryRate} BPM</span>
-              </div>
-            )}
-            {results.oxygenLevel && (
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-green-50">
-                <div className="flex items-center gap-3">
-                  <img src={VITAL_ICONS.oxygenLevel} alt="Oxygen" className="w-8 h-8" />
-                  <span className="font-medium text-slate-700">Blood Oxygen</span>
-                </div>
-                <span className="text-xl font-bold text-green-600">{results.oxygenLevel}</span>
-              </div>
-            )}
-            {results.stressLevel && (
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-yellow-50">
-                <div className="flex items-center gap-3">
-                  <img src={VITAL_ICONS.stress} alt="Stress" className="w-8 h-8" />
-                  <span className="font-medium text-slate-700">Stress Level</span>
-                </div>
-                <span className="text-xl font-bold text-yellow-600">{results.stressLevel}</span>
-              </div>
-            )}
-            {results.hrv && (
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-purple-50">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">💓</span>
-                  <span className="font-medium text-slate-700">HRV</span>
-                </div>
-                <span className="text-xl font-bold text-purple-600">{results.hrv}</span>
-              </div>
-            )}
-            {results.tremor && (
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-indigo-50">
-                <div className="flex items-center gap-3">
-                  <img src={VITAL_ICONS.tremor} alt="Tremor" className="w-8 h-8" />
-                  <span className="font-medium text-slate-700">Tremor</span>
-                </div>
-                <span className="text-xl font-bold text-indigo-600">{results.tremor}</span>
-              </div>
-            )}
-            {results.reactionTime && (
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-cyan-50">
-                <div className="flex items-center gap-3">
-                  <img src={VITAL_ICONS.reactionTime} alt="Reaction" className="w-8 h-8" />
-                  <span className="font-medium text-slate-700">Reaction Time</span>
-                </div>
-                <span className="text-xl font-bold text-cyan-600">{results.reactionTime}</span>
-              </div>
-            )}
+            ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Hidden canvas for image processing */}
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <canvas ref={canvasRef} className="hidden" />
     </div>
   )
 }

@@ -64,6 +64,7 @@ function DoctorAuth({ onAuth }) {
     specialty: '',
     location: '',
     licenseNumber: '',
+    signatureDataUrl: '',
   })
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -158,6 +159,7 @@ function DoctorAuth({ onAuth }) {
             specialty: formData.specialty,
             location: formData.location,
             license_number: formData.licenseNumber,
+            signature_data_url: formData.signatureDataUrl,
           },
         })
         if (updateError) throw updateError
@@ -169,6 +171,7 @@ function DoctorAuth({ onAuth }) {
           specialty: formData.specialty,
           location: formData.location,
           licenseNumber: formData.licenseNumber,
+          signatureDataUrl: formData.signatureDataUrl,
         })
         onAuth({ type: 'login', ...doctor })
         return
@@ -185,6 +188,7 @@ function DoctorAuth({ onAuth }) {
             specialty: formData.specialty,
             location: formData.location,
             licenseNumber: formData.licenseNumber,
+            signatureDataUrl: formData.signatureDataUrl,
           }
 
       let response
@@ -241,6 +245,22 @@ function DoctorAuth({ onAuth }) {
 
   const handleChange = (field, value) => {
     setFormData({ ...formData, [field]: value })
+  }
+
+  const handleSignatureUpload = (file) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      addError('Upload a signature image file.', 'warning')
+      return
+    }
+    if (file.size > 300 * 1024) {
+      addError('Signature image must be 300KB or less.', 'warning')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => handleChange('signatureDataUrl', String(reader.result || ''))
+    reader.onerror = () => addError('Could not read signature image.', 'error')
+    reader.readAsDataURL(file)
   }
 
   return (
@@ -358,6 +378,22 @@ function DoctorAuth({ onAuth }) {
                     <p className="mt-1 text-xs text-slate-500">
                       Expected format: {getLicensePattern(formData.location)?.toString() || 'Any non‑empty value'}
                     </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Signature Image</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => handleSignatureUpload(e.target.files?.[0])}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    required={!formData.signatureDataUrl}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Upload a clear PNG/JPG/WebP signature. Max 300KB.</p>
+                  {formData.signatureDataUrl && (
+                    <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <img src={formData.signatureDataUrl} alt="Signature preview" className="max-h-20 object-contain" />
+                    </div>
                   )}
                 </div>
               </>

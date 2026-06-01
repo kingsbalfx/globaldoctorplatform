@@ -38,6 +38,30 @@ function PatientRecordReview() {
 
   const patient = record?.patient || null
 
+  const downloadFile = async (file) => {
+    const response = await apiFetch(`/api/patients/files/${encodeURIComponent(file.id)}/download?patientId=${encodeURIComponent(patient.id)}`)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Download failed')
+    const blob = new Blob([Uint8Array.from(atob(data.contentBase64), (c) => c.charCodeAt(0))], { type: data.mimeType })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = data.name || file.name
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const printPatientReviewPdf = () => {
+    const html = `<!doctype html><html><head><title>Patient Review - ${patient?.name || patient?.id}</title><style>body{font-family:Arial,sans-serif;color:#0f172a;padding:30px}h1{color:#0f766e}.box{border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin:10px 0}.label{font-size:11px;color:#64748b;text-transform:uppercase}.value{font-weight:700;margin-top:5px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border:1px solid #e2e8f0;padding:8px;text-align:left}</style></head><body><h1>GlobalDoc Patient Review</h1><div class="box"><p class="label">Patient</p><p class="value">${patient?.name || ''} (${patient?.id || ''})</p></div><h2>Vitals</h2><table><tr><th>Vital</th><th>Value</th><th>Source</th><th>Date</th></tr>${(record?.vitals || []).map((v) => `<tr><td>${v.parameter_name}</td><td>${v.parameter_value} ${v.unit || ''}</td><td>${v.source || ''}</td><td>${new Date(v.measured_at || v.created_at).toLocaleString()}</td></tr>`).join('')}</table><h2>Referrals</h2>${(record?.referrals?.facility || []).map((r) => `<div class="box"><p class="value">${r.code} - ${r.status}</p><p>${r.reason || ''}</p><p>${r.notes || ''}</p></div>`).join('')}<h2>Reviews</h2>${(record?.reviews || []).map((r) => `<div class="box"><p class="value">${r.rating}/5</p><p>${r.comment || ''}</p></div>`).join('')}<h2>Files</h2>${(record?.files || []).map((f) => `<div class="box">${f.name}</div>`).join('')}</body></html>`
+    const win = window.open('', '_blank')
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
+  }
+
   return (
     <div className="space-y-8">
       <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
@@ -64,6 +88,11 @@ function PatientRecordReview() {
         </div>
 
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+        {patient && (
+          <button type="button" onClick={printPatientReviewPdf} className="mt-4 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+            Download patient review as PDF
+          </button>
+        )}
       </div>
 
       {patient && (
@@ -108,6 +137,9 @@ function PatientRecordReview() {
                   <div key={f.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <p className="text-sm font-semibold text-slate-900">{f.name}</p>
                     <p className="mt-1 text-xs text-slate-500">{new Date(f.createdAt || f.created_at).toLocaleString()}</p>
+                    <button type="button" onClick={() => downloadFile(f).catch((err) => setError(err.message))} className="mt-3 rounded-full bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600">
+                      Download file
+                    </button>
                   </div>
                 ))}
               </div>
@@ -143,6 +175,9 @@ function PatientRecordReview() {
             <StatCard label="Consultations (NG)" value={record.consultations_ng?.length ?? 0} />
             <StatCard label="Lab orders" value={record.labs?.orders?.length ?? 0} />
             <StatCard label="Lab payments" value={record.labs?.payments?.length ?? 0} />
+            <StatCard label="Vitals" value={record.vitals?.length ?? 0} />
+            <StatCard label="Reviews" value={record.reviews?.length ?? 0} />
+            <StatCard label="Prescriptions" value={record.prescriptions?.length ?? 0} />
           </div>
         </div>
       )}
@@ -151,4 +186,3 @@ function PatientRecordReview() {
 }
 
 export default PatientRecordReview
-

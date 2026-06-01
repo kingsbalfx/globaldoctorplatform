@@ -67,6 +67,14 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 
 // ---------- ID generator ----------
 const generateId = (prefix) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
+const videoSignalRooms = new Map()
+let videoSignalSeq = 0
+
+function getVideoSignalRoom(roomId) {
+  const key = String(roomId || '').trim()
+  if (!videoSignalRooms.has(key)) videoSignalRooms.set(key, [])
+  return videoSignalRooms.get(key)
+}
 
 // ---------- Utility helpers ----------
 function safeNumber(value) {
@@ -343,6 +351,7 @@ function normalizeDoctorPayload(body = {}) {
     licenseNumber: String(body.licenseNumber || body.license_number || '').trim(),
     licenseIssuer: String(body.licenseIssuer || body.license_issuer || '').trim(),
     licenseExpiry: body.licenseExpiry || body.license_expiry || null,
+    signatureDataUrl: String(body.signatureDataUrl || body.signature_data_url || '').trim(),
     bankCode: String(body.bankCode || body.bank_code || '').trim(),
     bankAccount: String(body.bankAccount || body.bank_account || '').trim(),
     currency: String(body.currency || '').trim(),
@@ -619,7 +628,7 @@ app.post('/api/doctors/login', async (req, res) => {
 
 // ---------- DOCTOR REGISTRATION ----------
 app.post('/api/doctors/register', async (req, res) => {
-  const { email, password, name, specialty, location, licenseNumber } = req.body
+  const { email, password, name, specialty, location, licenseNumber, signatureDataUrl } = req.body
   if (!email || !name || !specialty || !location || !licenseNumber) {
     return res.status(400).json({ error: 'All fields are required' })
   }
@@ -630,6 +639,7 @@ app.post('/api/doctors/register', async (req, res) => {
   const newDoctor = {
     email, password, name, specialty, location,
     license_number: licenseNumber,
+    signature_data_url: signatureDataUrl || null,
     verified: false, created_at: new Date().toISOString()
   }
   const { data: authRow, error: authInsertError } = await supabase
@@ -647,9 +657,10 @@ app.post('/api/doctors/register', async (req, res) => {
     availability: 'Available upon request', verified: false, is_online: false,
     fee: 50, price: { basic: 50, premium: 100 },
     license_verified: false, license_number: licenseNumber,
+    signature_data_url: signatureDataUrl || null,
     created_at: new Date().toISOString()
   }
-  const { error: profileInsertError } = await supabase.from('doctors').insert(profile)
+  const { error: profileInsertError } = await insertAdaptive('doctors', profile)
   if (profileInsertError) return res.status(500).json({ error: profileInsertError.message })
 
   res.status(201).json({
@@ -739,6 +750,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       specialty: specialty || 'General Practitioner',
       location: location || country || 'Nigeria',
       license_number: licenseNumber || 'PENDING',
+      signature_data_url: req.body.signatureDataUrl || req.body.signature_data_url || null,
     }
     let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', doctorEmail).maybeSingle()
     if (doctorLookupError) return res.status(500).json({ error: 'Failed to load doctor: ' + doctorLookupError.message })
@@ -765,6 +777,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         price: { basic: 50, premium: 100 },
         license_verified: false,
         license_number: insertedDoctor.license_number,
+        signature_data_url: insertedDoctor.signature_data_url || null,
         created_at: new Date().toISOString()
       })
       if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
@@ -791,6 +804,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           location: doctorProfile.location,
           is_online: true,
           license_number: doctorProfile.license_number,
+          signature_data_url: doctorProfile.signature_data_url,
         }).eq('id', profileId)
       } else {
         await supabase.from('doctors').insert({
@@ -806,6 +820,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           price: { basic: 50, premium: 100 },
           license_verified: false,
           license_number: doctorProfile.license_number,
+          signature_data_url: doctorProfile.signature_data_url,
           created_at: new Date().toISOString(),
         })
       }
@@ -1407,6 +1422,121 @@ app.get('/api/chat/messages', async (req, res) => {
   res.json({ messages: data || [] })
 })
 
+app.post('/api/video-signal', (req, res) => {
+  const { roomId, senderId, senderType, type, payload } = req.body || {}
+  if (!roomId || !senderId || !type || !payload) {
+    return res.status(400).json({ error: 'roomId, senderId, type, and payload are required' })
+  }
+
+  const room = getVideoSignalRoom(roomId)
+  const message = {
+    id: generateId('sig'),
+    seq: ++videoSignalSeq,
+    room_id: String(roomId),
+    sender_id: String(senderId),
+    sender_type: senderType || 'user',
+    type: String(type),
+    payload,
+    created_at: new Date().toISOString(),
+  }
+  room.push(message)
+  if (room.length > 300) room.splice(0, room.length - 300)
+  res.status(201).json({ signal: message, message: 'Signal sent' })
+})
+
+app.get('/api/video-signal', (req, res) => {
+  const roomId = String(req.query.roomId || '').trim()
+  const senderId = String(req.query.senderId || '').trim()
+  const since = Number(req.query.since || 0)
+  if (!roomId || !senderId) return res.status(400).json({ error: 'roomId and senderId are required' })
+
+  const room = getVideoSignalRoom(roomId)
+  const signals = room
+    .filter((message) => message.seq > since && message.sender_id !== senderId)
+    .slice(-100)
+  res.json({ signals })
+})
+
+app.get('/api/prescriptions', async (req, res) => {
+  const { patientId, doctorId, facilityId, consultationId } = req.query
+  let query = supabase.from('prescriptions').select('*').order('issued_at', { ascending: false })
+  if (patientId) query = query.eq('patient_id', patientId)
+  if (doctorId) query = query.eq('doctor_id', doctorId)
+  if (facilityId) query = query.eq('facility_id', facilityId)
+  if (consultationId) query = query.eq('consultation_id', consultationId)
+  const { data, error } = await query.limit(100)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ prescriptions: data || [] })
+})
+
+app.post('/api/prescriptions', async (req, res) => {
+  const {
+    consultationId,
+    patientId,
+    patientName,
+    doctorId,
+    doctorName,
+    doctorLicenseNumber,
+    doctorSignatureDataUrl,
+    facilityId,
+    medications,
+    notes,
+  } = req.body || {}
+
+  if (!consultationId || !patientId || !doctorId || !medications) {
+    return res.status(400).json({ error: 'consultationId, patientId, doctorId, and medications are required' })
+  }
+
+  let signatureDataUrl = doctorSignatureDataUrl || null
+  if (!signatureDataUrl) {
+    const { data: doctorRow } = await supabase
+      .from('doctors')
+      .select('signature_data_url')
+      .eq('id', doctorId)
+      .maybeSingle()
+    signatureDataUrl = doctorRow?.signature_data_url || null
+  }
+
+  const row = {
+    id: generateId('rx'),
+    consultation_id: consultationId,
+    patient_id: patientId,
+    patient_name: patientName || 'Patient',
+    doctor_id: doctorId,
+    doctor_name: doctorName || 'Doctor',
+    doctor_license_number: doctorLicenseNumber || null,
+    doctor_signature_data_url: signatureDataUrl,
+    facility_id: facilityId || null,
+    company_name: 'GlobalDoc',
+    logo_text: 'GD',
+    medications,
+    prescription_text: medications,
+    notes: notes || null,
+    status: 'sent',
+    issued_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  }
+
+  const insert = await insertAdaptive('prescriptions', row)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
+
+  await insertAdaptive('notifications', {
+    id: generateId('notif'),
+    user_id: patientId,
+    user_type: 'patient',
+    notification_type: 'prescription',
+    type: 'prescription',
+    title: 'New prescription available',
+    message: `Dr. ${doctorName || 'your doctor'} sent a prescription you can download.`,
+    related_resource_type: 'prescription',
+    related_resource_id: row.id,
+    is_read: false,
+    created_at: new Date().toISOString(),
+  })
+
+  res.status(201).json({ prescription: row, message: 'Prescription sent' })
+})
+
 // ---------- PATIENT FILES ----------
 app.post('/api/patients/files/upload', async (req, res) => {
   const { patientId, name, mimeType, size, contentBase64 } = req.body
@@ -1571,6 +1701,7 @@ app.post('/api/admin/doctors', async (req, res) => {
     specialty: payload.specialty,
     location: payload.location,
     license_number: payload.licenseNumber,
+    signature_data_url: payload.signatureDataUrl || null,
     verified: true,
     created_at: new Date().toISOString(),
   }
@@ -1589,6 +1720,7 @@ app.post('/api/admin/doctors', async (req, res) => {
     license_expiry: payload.licenseExpiry || null, bank_code: payload.bankCode || null, bank_account: payload.bankAccount || null,
     currency: payload.currency || null, payout_method: payload.payoutMethod,
     mobile_money_operator: payload.mobileMoneyOperator || null, mobile_money_number: payload.mobileMoneyNumber || null,
+    signature_data_url: payload.signatureDataUrl || null,
     license_verified: true,
     created_at: new Date().toISOString()
   }
@@ -1791,23 +1923,32 @@ app.get('/api/patients/:patientId/record', async (req, res) => {
   const { data: patient } = await supabase.from('patients').select('*').eq('id', patientId).maybeSingle()
   if (!patient) return res.status(404).json({ error: 'Patient not found' })
 
-  const [tokens, files, appointments, consultations, labOrders, labPayments] = await Promise.all([
+  const [tokens, files, appointments, consultations, labOrders, labPayments, facilityReferrals, vitals, vitalRequests, reviews, prescriptions] = await Promise.all([
     supabase.from('patient_tokens').select('balance').eq('patient_id', patientId).maybeSingle(),
     supabase.from('patient_files').select('*').eq('patient_id', patientId),
     supabase.from('appointments').select('*').eq('patient_id', patientId),
     supabase.from('consultations_ng').select('*').eq('patient_id', patientId),
     supabase.from('lab_orders').select('*').eq('patient_id', patientId),
-    supabase.from('lab_payments').select('*').in('order_id', (await supabase.from('lab_orders').select('id').eq('patient_id', patientId)).data?.map(o => o.id) || [])
+    supabase.from('lab_payments').select('*').in('order_id', (await supabase.from('lab_orders').select('id').eq('patient_id', patientId)).data?.map(o => o.id) || []),
+    supabase.from('facility_referrals').select('*').eq('patient_id', patientId),
+    supabase.from('vital_parameters').select('*').eq('patient_id', patientId).order('measured_at', { ascending: false }),
+    supabase.from('vital_parameter_requests').select('*').eq('patient_id', patientId).order('requested_at', { ascending: false }),
+    supabase.from('reviews').select('*').eq('patient_id', patientId).order('created_at', { ascending: false }),
+    supabase.from('prescriptions').select('*').eq('patient_id', patientId).order('issued_at', { ascending: false })
   ])
 
   res.json({
     patient: sanitizePatientForResponse(patient),
     tokens: { balance: tokens.data?.balance || 0, transactions: [] },
     files: files.data || [],
-    referrals: { specialty: [], facility: [] },
+    referrals: { specialty: [], facility: facilityReferrals.data || [] },
     appointments: appointments.data || [],
     consultations_ng: consultations.data || [],
-    labs: { orders: labOrders.data || [], payments: labPayments.data || [] }
+    labs: { orders: labOrders.data || [], payments: labPayments.data || [] },
+    vitals: vitals.data || [],
+    vital_requests: vitalRequests.data || [],
+    reviews: reviews.data || [],
+    prescriptions: prescriptions.data || []
   })
 })
 
@@ -2203,20 +2344,40 @@ app.post('/api/referrals/facility/redeem', async (req, res) => {
 
 // ---------- LAB ORDERS & PAYMENTS ----------
 app.post('/api/labs/order', async (req, res) => {
-  const { consultationId, patientId, doctorId, facilityId, tests, total_price_ngn } = req.body
+  const { consultationId, patientId, patientName, doctorId, doctorName, doctorSignatureDataUrl, facilityId, tests, total_price_ngn } = req.body
   if (!patientId || !doctorId || !facilityId || !tests?.length || !total_price_ngn) return res.status(400).json({ error: 'Missing fields' })
 
   const facility = await getFacilityById(facilityId)
   if (!facility || facility.type !== 'lab') return res.status(400).json({ error: 'facilityId must be a lab' })
 
+  let signatureDataUrl = doctorSignatureDataUrl || null
+  if (!signatureDataUrl) {
+    const { data: doctorRow } = await supabase.from('doctors').select('signature_data_url').eq('id', doctorId).maybeSingle()
+    signatureDataUrl = doctorRow?.signature_data_url || null
+  }
+
   const order = {
     id: generateId('labord'),
     consultation_id: consultationId || null, patient_id: patientId, doctor_id: doctorId,
+    patient_name: patientName || null, doctor_name: doctorName || null, doctor_signature_data_url: signatureDataUrl,
+    company_name: 'GlobalDoc', logo_text: 'GD',
     facility_id: facilityId, tests, total_price_ngn: Math.round(total_price_ngn),
     status: 'ordered', created_at: new Date().toISOString()
   }
   await supabase.from('lab_orders').insert(order)
   res.status(201).json({ order, message: 'Lab order created' })
+})
+
+app.get('/api/labs/orders', async (req, res) => {
+  const { patientId, doctorId, facilityId, consultationId } = req.query
+  let query = supabase.from('lab_orders').select('*').order('created_at', { ascending: false })
+  if (patientId) query = query.eq('patient_id', patientId)
+  if (doctorId) query = query.eq('doctor_id', doctorId)
+  if (facilityId) query = query.eq('facility_id', facilityId)
+  if (consultationId) query = query.eq('consultation_id', consultationId)
+  const { data, error } = await query.limit(100)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ orders: data || [] })
 })
 
 app.post('/api/labs/pay', async (req, res) => {
@@ -2446,9 +2607,111 @@ app.get('/api/video/token', (req, res) => {
   res.json({ token, appId: AGORA_APP_ID })
 })
 
-// ---------- VITAL PARAMETERS (placeholder) ----------
+// ---------- VITAL PARAMETERS ----------
+app.post('/api/vital-requests', async (req, res) => {
+  const { consultationId, patientId, doctorId, parameterName, instructions } = req.body || {}
+  if (!consultationId || !patientId || !doctorId || !parameterName) {
+    return res.status(400).json({ error: 'consultationId, patientId, doctorId, and parameterName are required' })
+  }
+
+  const request = {
+    id: generateId('vreq'),
+    consultation_id: consultationId,
+    patient_id: patientId,
+    doctor_id: doctorId,
+    parameter_name: parameterName,
+    instructions: instructions || null,
+    status: 'pending',
+    requested_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  }
+  const insert = await insertAdaptive('vital_parameter_requests', request)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
+  res.status(201).json({ request, message: 'Vital request sent' })
+})
+
+app.get('/api/vital-requests', async (req, res) => {
+  const { consultationId, patientId, doctorId, status } = req.query
+  let query = supabase.from('vital_parameter_requests').select('*').order('requested_at', { ascending: false })
+  if (consultationId) query = query.eq('consultation_id', consultationId)
+  if (patientId) query = query.eq('patient_id', patientId)
+  if (doctorId) query = query.eq('doctor_id', doctorId)
+  if (status) query = query.eq('status', status)
+  const { data, error } = await query.limit(50)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ requests: data || [] })
+})
+
+app.patch('/api/vital-requests/:requestId', async (req, res) => {
+  const updates = {
+    status: req.body?.status,
+    completed_at: req.body?.status === 'completed' ? new Date().toISOString() : undefined,
+  }
+  Object.keys(updates).forEach((key) => updates[key] === undefined && delete updates[key])
+  const { data, error } = await supabase
+    .from('vital_parameter_requests')
+    .update(updates)
+    .eq('id', req.params.requestId)
+    .select('*')
+    .maybeSingle()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ request: data, message: 'Vital request updated' })
+})
+
+app.get('/api/vital-parameters', async (req, res) => {
+  const { consultationId, patientId, doctorId } = req.query
+  let query = supabase.from('vital_parameters').select('*').order('measured_at', { ascending: false })
+  if (consultationId) query = query.eq('consultation_id', consultationId)
+  if (patientId) query = query.eq('patient_id', patientId)
+  if (doctorId) query = query.eq('doctor_id', doctorId)
+  const { data, error } = await query.limit(100)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ vitals: data || [] })
+})
+
 app.post('/api/vital-parameters', async (req, res) => {
-  res.status(200).json({ message: 'Vital parameter recorded (mock)' })
+  const {
+    consultation_id,
+    patient_id,
+    doctor_id,
+    request_id,
+    parameter_name,
+    parameter_value,
+    unit,
+    source,
+    confidence,
+    measured_at,
+    metadata,
+  } = req.body || {}
+  if (!consultation_id || !patient_id || !parameter_name || parameter_value === undefined || parameter_value === null) {
+    return res.status(400).json({ error: 'consultation_id, patient_id, parameter_name, and parameter_value are required' })
+  }
+
+  const vital = {
+    id: generateId('vital'),
+    consultation_id,
+    patient_id,
+    doctor_id: doctor_id || null,
+    request_id: request_id || null,
+    parameter_name,
+    parameter_value: String(parameter_value),
+    unit: unit || null,
+    source: source || 'manual',
+    confidence: confidence ?? null,
+    metadata: metadata || null,
+    measured_at: measured_at || new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  }
+
+  const insert = await insertAdaptive('vital_parameters', vital)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
+  if (request_id) {
+    await supabase.from('vital_parameter_requests').update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    }).eq('id', request_id)
+  }
+  res.status(201).json({ vital, message: 'Vital parameter recorded' })
 })
 
 // ---------- FORGOT / RESET PASSWORD ----------

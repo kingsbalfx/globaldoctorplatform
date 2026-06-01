@@ -7,6 +7,8 @@ import ManualDownload from '../components/ManualDownload'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import VideoChatPanel from '../components/VideoChatPanel'
 import ChatPanel from '../components/ChatPanel'
+import PrescriptionManager from '../components/PrescriptionManager'
+import LabRequestManager from '../components/LabRequestManager'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
@@ -563,6 +565,7 @@ function AdminDashboard({ doctor, onLogout }) {
               <VideoChatPanel
                 key={selectedConsultation.id}
                 consultationId={selectedConsultation.id}
+                userId={doctor.id}
                 userType="doctor"
                 patientId={selectedConsultationPatient.id}
                 doctorId={doctor.id}
@@ -576,6 +579,27 @@ function AdminDashboard({ doctor, onLogout }) {
                   userType="doctor"
                   recipientId={selectedConsultationPatient.id}
                   recipientType="patient"
+                />
+              </div>
+
+              <div className="mt-8">
+                <PrescriptionManager
+                  mode="doctor"
+                  consultationId={selectedConsultation.id}
+                  patientId={selectedConsultationPatient.id}
+                  patientName={selectedConsultationPatient.name}
+                  doctor={doctor}
+                  facilityId={selectedConsultation.facility_id}
+                />
+              </div>
+
+              <div className="mt-8">
+                <LabRequestManager
+                  mode="doctor"
+                  consultationId={selectedConsultation.id}
+                  patientId={selectedConsultationPatient.id}
+                  patientName={selectedConsultationPatient.name}
+                  doctor={doctor}
                 />
               </div>
             </div>

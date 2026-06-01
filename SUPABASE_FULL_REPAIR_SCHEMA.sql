@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS public.doctors_auth (
   specialty text DEFAULT 'General Practitioner',
   location text DEFAULT 'Nigeria',
   license_number text,
+  signature_data_url text,
   verified boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   verified boolean DEFAULT false,
   license_verified boolean DEFAULT false,
   license_number text,
+  signature_data_url text,
   license_issuer text,
   license_expiry date,
   fee numeric(12,2) DEFAULT 35,
@@ -354,8 +356,13 @@ CREATE TABLE IF NOT EXISTS public.lab_orders (
   id text PRIMARY KEY,
   consultation_id text,
   patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
+  patient_name text,
   doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  doctor_name text,
+  doctor_signature_data_url text,
   facility_id text REFERENCES public.facilities(id) ON DELETE SET NULL,
+  company_name text DEFAULT 'GlobalDoc',
+  logo_text text DEFAULT 'GD',
   tests jsonb DEFAULT '[]'::jsonb,
   total_price_ngn integer DEFAULT 0,
   status text DEFAULT 'ordered',
@@ -428,6 +435,58 @@ CREATE TABLE IF NOT EXISTS public.payments (
   updated_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.prescriptions (
+  id text PRIMARY KEY,
+  consultation_id text,
+  patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
+  patient_name text,
+  doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  doctor_name text,
+  doctor_license_number text,
+  doctor_signature_data_url text,
+  facility_id text REFERENCES public.facilities(id) ON DELETE SET NULL,
+  company_name text DEFAULT 'GlobalDoc',
+  logo_text text DEFAULT 'GD',
+  medications text NOT NULL,
+  prescription_text text,
+  notes text,
+  status text DEFAULT 'sent',
+  issued_at timestamptz DEFAULT now(),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.vital_parameter_requests (
+  id text PRIMARY KEY,
+  consultation_id text,
+  patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
+  doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  parameter_name text NOT NULL,
+  instructions text,
+  status text DEFAULT 'pending',
+  requested_at timestamptz DEFAULT now(),
+  completed_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.vital_parameters (
+  id text PRIMARY KEY,
+  consultation_id text,
+  patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
+  doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  request_id text REFERENCES public.vital_parameter_requests(id) ON DELETE SET NULL,
+  parameter_name text NOT NULL,
+  parameter_value text NOT NULL,
+  unit text,
+  source text DEFAULT 'manual',
+  confidence numeric(4,2),
+  metadata jsonb,
+  measured_at timestamptz DEFAULT now(),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
   id text PRIMARY KEY,
   user_email text NOT NULL,
@@ -456,6 +515,7 @@ ALTER TABLE public.patients ALTER COLUMN date_of_birth DROP NOT NULL;
 
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS email text;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS signature_data_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS availability text DEFAULT 'Available upon request';
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS consultation_fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS price jsonb DEFAULT '{"basic":50,"premium":100}'::jsonb;
@@ -498,6 +558,7 @@ ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS password text DEFAULT '
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS specialty text DEFAULT 'General Practitioner';
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS location text DEFAULT 'Nigeria';
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS license_number text;
+ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS signature_data_url text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS verified boolean DEFAULT false;
 
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS type text;
@@ -564,6 +625,12 @@ ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS related_resource_type 
 ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS related_resource_id text;
 ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS notification_channels text[] DEFAULT ARRAY['in_app']::text[];
 
+ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS patient_name text;
+ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS doctor_name text;
+ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS doctor_signature_data_url text;
+ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS company_name text DEFAULT 'GlobalDoc';
+ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS logo_text text DEFAULT 'GD';
+
 ALTER TABLE public.patient_files ADD COLUMN IF NOT EXISTS file_name text;
 ALTER TABLE public.patient_files ADD COLUMN IF NOT EXISTS file_type text;
 ALTER TABLE public.patient_files ADD COLUMN IF NOT EXISTS mime_type text;
@@ -599,6 +666,46 @@ ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS provider_transaction_id tex
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS description text;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS customer jsonb;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS consultation_id text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS patient_id text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS patient_name text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS doctor_id text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS doctor_name text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS doctor_license_number text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS doctor_signature_data_url text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS facility_id text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS company_name text DEFAULT 'GlobalDoc';
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS logo_text text DEFAULT 'GD';
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS medications text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS prescription_text text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS status text DEFAULT 'sent';
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS issued_at timestamptz DEFAULT now();
+ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS consultation_id text;
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS patient_id text;
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS doctor_id text;
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS parameter_name text;
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS instructions text;
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending';
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS requested_at timestamptz DEFAULT now();
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS consultation_id text;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS patient_id text;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS doctor_id text;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS request_id text;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS parameter_name text;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS parameter_value text;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS unit text;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS source text DEFAULT 'manual';
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS confidence numeric(4,2);
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS metadata jsonb;
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS measured_at timestamptz DEFAULT now();
+ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
 DO $$
 DECLARE r record;
@@ -645,6 +752,15 @@ CREATE INDEX IF NOT EXISTS idx_facilities_type ON public.facilities(type);
 CREATE INDEX IF NOT EXISTS idx_facility_wallet_tx_facility ON public.facility_wallet_tx(facility_id);
 CREATE INDEX IF NOT EXISTS idx_payments_reference ON public.payments(reference);
 CREATE INDEX IF NOT EXISTS idx_payments_patient ON public.payments(patient_id);
+CREATE INDEX IF NOT EXISTS idx_prescriptions_patient ON public.prescriptions(patient_id);
+CREATE INDEX IF NOT EXISTS idx_prescriptions_doctor ON public.prescriptions(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_prescriptions_facility ON public.prescriptions(facility_id);
+CREATE INDEX IF NOT EXISTS idx_prescriptions_consultation ON public.prescriptions(consultation_id);
+CREATE INDEX IF NOT EXISTS idx_vital_requests_consultation ON public.vital_parameter_requests(consultation_id);
+CREATE INDEX IF NOT EXISTS idx_vital_requests_patient_status ON public.vital_parameter_requests(patient_id, status);
+CREATE INDEX IF NOT EXISTS idx_vitals_consultation ON public.vital_parameters(consultation_id);
+CREATE INDEX IF NOT EXISTS idx_vitals_patient ON public.vital_parameters(patient_id);
+CREATE INDEX IF NOT EXISTS idx_vitals_doctor ON public.vital_parameters(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_community_messages_created_at ON public.community_messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_announcements_audience ON public.announcements(audience, is_active);
@@ -662,5 +778,11 @@ DROP TRIGGER IF EXISTS trg_facilities_updated_at ON public.facilities;
 CREATE TRIGGER trg_facilities_updated_at BEFORE UPDATE ON public.facilities FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_payments_updated_at ON public.payments;
 CREATE TRIGGER trg_payments_updated_at BEFORE UPDATE ON public.payments FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+DROP TRIGGER IF EXISTS trg_prescriptions_updated_at ON public.prescriptions;
+CREATE TRIGGER trg_prescriptions_updated_at BEFORE UPDATE ON public.prescriptions FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+DROP TRIGGER IF EXISTS trg_vital_requests_updated_at ON public.vital_parameter_requests;
+CREATE TRIGGER trg_vital_requests_updated_at BEFORE UPDATE ON public.vital_parameter_requests FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+DROP TRIGGER IF EXISTS trg_vital_parameters_updated_at ON public.vital_parameters;
+CREATE TRIGGER trg_vital_parameters_updated_at BEFORE UPDATE ON public.vital_parameters FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 NOTIFY pgrst, 'reload schema';

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 import VideoChatPanel from '../components/VideoChatPanel'
+import PrescriptionManager from '../components/PrescriptionManager'
+import LabRequestManager from '../components/LabRequestManager'
 import { useError } from '../components/ErrorHandler'
 
 const FACILITY_TYPES = [
@@ -557,7 +559,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-4">
           <button
             type="button"
             onClick={() => setActiveTab('consult')}
@@ -584,6 +586,15 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
             }`}
           >
             Wallet Activity
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('prescriptions')}
+            className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+              activeTab === 'prescriptions' ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Prescriptions
           </button>
         </div>
 
@@ -699,8 +710,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                         <p className="font-semibold text-slate-900">{patientRecord.patient.name}</p>
                         <p className="mt-1 text-xs text-slate-500">{patientRecord.patient.id}</p>
                         <p className="mt-2 text-xs text-slate-500">
-                          Files: {patientRecord.files?.length || 0} • Referrals:{' '}
-                          {patientRecord.referrals?.facility?.length || 0}
+                          Files: {patientRecord.files?.length || 0} | Referrals: {patientRecord.referrals?.facility?.length || 0} | Vitals: {patientRecord.vitals?.length || 0} | Labs: {patientRecord.labs?.orders?.length || 0}
                         </p>
                       </div>
                     )}
@@ -974,6 +984,21 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'prescriptions' && (
+          <div className="mt-8 space-y-6">
+            <PrescriptionManager
+              patientId={selectedPatientId.trim()}
+              facilityId={facility?.id}
+              consultationId={consultation?.id}
+            />
+            <LabRequestManager
+              patientId={selectedPatientId.trim()}
+              facilityId={facility?.id}
+              consultationId={consultation?.id}
+            />
           </div>
         )}
       </div>

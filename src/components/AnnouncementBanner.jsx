@@ -71,21 +71,26 @@ function AnnouncementBanner({ audience }) {
   }
 
   return (
-    <div className={`relative mb-6 overflow-hidden rounded-[2rem] border px-5 py-4 shadow-2xl ${style.wrapper}`}>
+    <div className={`relative mb-6 overflow-hidden rounded-[2rem] border px-5 py-5 shadow-2xl ${style.wrapper}`}>
       <div className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-white/40 blur-2xl" />
-      <div className="flex items-center gap-4">
+      <div className="flex items-start gap-4">
         <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.18em] shadow-lg ${style.badge}`}>
           {style.label}
         </span>
 
-        <div className="relative flex-1 overflow-hidden whitespace-nowrap">
-          <div className="inline-block animate-marquee">
-            <span className="text-base font-black uppercase tracking-wide sm:text-lg">{top.title}</span>
-            <span className="mx-5 opacity-50">|</span>
-            <span className="text-sm font-bold opacity-95 sm:text-base">{top.message}</span>
-            <span className="mx-5 opacity-50">|</span>
-            <span className="text-base font-black uppercase tracking-wide sm:text-lg">{top.title}</span>
-          </div>
+        <div className="relative flex-1">
+          <p className="text-base font-black uppercase tracking-wide sm:text-lg">{top.title}</p>
+          <p className="mt-2 whitespace-pre-line text-sm font-bold leading-6 opacity-95 sm:text-base">{top.message}</p>
+          {visible.length > 1 && (
+            <div className="mt-4 space-y-3 border-t border-white/50 pt-4">
+              {visible.slice(1, 4).map((item) => (
+                <div key={item.id}>
+                  <p className="text-sm font-black uppercase tracking-wide">{item.title}</p>
+                  <p className="mt-1 whitespace-pre-line text-sm font-semibold leading-6 opacity-90">{item.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <button
