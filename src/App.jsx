@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import LandingPage from './pages/LandingPage'
+import LandingPageEnhanced from './pages/LandingPageEnhanced'
 import AdminDashboard from './pages/AdminDashboard'
 import PatientDashboard from './pages/PatientDashboard'
 import PlatformAdminDashboard from './pages/PlatformAdminDashboard'
@@ -12,6 +12,7 @@ import TermsOfService from './pages/TermsOfService'
 import PrivacyPolicy from './pages/PrivacyPolicy'
 import Contact from './pages/Contact'
 import Footer from './components/Footer'
+import HumanoidAssistant from './components/ai/HumanoidAssistant'
 import { ErrorProvider } from './components/ErrorHandler'
 import { apiFetch } from './lib/apiFetch'
 import './lib/i18n' // Initialize i18n
@@ -66,6 +67,14 @@ function pathFromView(view) {
 function portalFromView(view) {
   if (view === 'patient' || view === 'payment-success') return 'patient'
   if (view === 'doctor-auth' || view === 'admin') return 'doctor'
+  if (view === 'facility') return 'facility'
+  if (view === 'platform-admin') return 'platform-admin'
+  return ''
+}
+
+function assistantPortalFromView(view) {
+  if (view === 'patient') return 'patient'
+  if (view === 'admin') return 'doctor'
   if (view === 'facility') return 'facility'
   if (view === 'platform-admin') return 'platform-admin'
   return ''
@@ -214,6 +223,8 @@ function App() {
     }
   }
 
+  const assistantPortal = assistantPortalFromView(currentView)
+
   return (
     <ErrorProvider>
       <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -274,7 +285,7 @@ function App() {
         </div>
       </nav>
 
-      {currentView === 'landing' && <LandingPage />}
+      {currentView === 'landing' && <LandingPageEnhanced />}
       {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
       {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
       {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
@@ -286,6 +297,8 @@ function App() {
       {currentView === 'terms' && <TermsOfService onNavigate={navigate} />}
       {currentView === 'privacy' && <PrivacyPolicy onNavigate={navigate} />}
       {currentView === 'contact' && <Contact onNavigate={navigate} />}
+
+      {assistantPortal && <HumanoidAssistant portal={assistantPortal} />}
 
       {/* Footer - only show on landing page */}
       {currentView === 'landing' && <Footer onNavigate={setCurrentView} />}
