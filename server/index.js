@@ -247,6 +247,57 @@ async function creditTokenPurchasePayment(payment, source = 'kora') {
   return { credited: true, tokens, reason: 'Tokens credited' }
 }
 
+async function creditSubscriptionPayment(payment, source = 'kora') {
+  if (!payment) return { credited: false, tokens: null, reason: 'Payment not found' }
+  if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
+    const patientId = payment.patient_id || parsePaymentMetadata(payment).patientId
+    const tokens = patientId ? await getPatientTokenBalance(patientId) : null
+    return { credited: false, tokens, reason: 'Subscription payment already credited' }
+  }
+
+  const metadata = parsePaymentMetadata(payment)
+  const patientId = payment.patient_id || metadata.patientId
+  const plan = String(metadata.plan || 'monthly')
+  const tokensIncluded = Math.round(Number(metadata.tokensIncluded || 0))
+  const amountUSD = Number(metadata.amountUSD || metadata.price || 0)
+  if (!patientId || tokensIncluded <= 0 || !amountUSD) {
+    return { credited: false, tokens: null, reason: 'Subscription metadata is incomplete' }
+  }
+
+  const { data: existing } = await supabase
+    .from('subscriptions')
+    .select('id')
+    .eq('patient_id', patientId)
+    .eq('status', 'active')
+    .maybeSingle()
+  if (!existing) {
+    const now = new Date()
+    const expiresAt = plan === 'monthly'
+      ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      : plan === 'yearly'
+        ? new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString()
+        : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    const subscription = {
+      id: generateId('sub'),
+      patient_id: patientId,
+      plan,
+      amount_usd: amountUSD,
+      price: amountUSD,
+      tokens_included: tokensIncluded,
+      status: 'active',
+      started_at: now.toISOString(),
+      created_at: now.toISOString(),
+      expires_at: expiresAt,
+    }
+    const insert = await insertAdaptive('subscriptions', subscription)
+    if (insert.error) return { credited: false, tokens: null, reason: insert.error.message }
+  }
+
+  const tokens = await creditPatientTokens(patientId, tokensIncluded, `Subscription payment via ${source}: ${plan} - ${tokensIncluded} tokens`)
+  await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+  return { credited: true, tokens, reason: 'Subscription activated and tokens credited' }
+}
+
 async function insertPaymentRecord(row) {
   const normalizedRow = {
     ...row,
@@ -1280,7 +1331,7 @@ app.get('/api/patients/:patientId/subscription', async (req, res) => {
 })
 
 app.post('/api/subscriptions', async (req, res) => {
-  const { plan, patientId, price, tokensIncluded } = req.body
+  const { plan, patientId, price, tokensIncluded, email, name } = req.body
   if (!plan || !patientId || !price || !tokensIncluded) return res.status(400).json({ error: 'Missing subscription details' })
 
   const settings = await getServerSettings()
@@ -1288,6 +1339,95 @@ app.post('/api/subscriptions', async (req, res) => {
 
   const { data: existing } = await supabase.from('subscriptions').select('id').eq('patient_id', patientId).eq('status', 'active').maybeSingle()
   if (existing) return res.status(409).json({ error: 'Active subscription already exists' })
+
+  const { data: patientProfile } = await supabase
+    .from('patients')
+    .select('id, email, name')
+    .eq('id', patientId)
+    .maybeSingle()
+  if (!patientProfile?.id) return res.status(404).json({ error: 'Patient profile not found' })
+
+  const amountUSD = Math.round(Number(price))
+  const normalizedTokens = Math.round(Number(tokensIncluded))
+  const koraCharge = buildKoraTokenCharge(amountUSD)
+  const reference = `kora-sub-${plan}-${normalizedTokens}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  const origin = getApiOrigin(req) || 'https://globaldoctorplatform.vercel.app'
+  const patientEmail = buildKoraCustomerEmail(patientProfile.email || email, patientProfile.id)
+  const patientName = buildKoraCustomerName(patientProfile.name || name)
+
+  const { error: paymentInsertError } = await insertPaymentRecord({
+    id: reference,
+    patient_id: patientProfile.id,
+    doctor_id: 'system',
+    amount: koraCharge.amount,
+    currency: koraCharge.currency,
+    type: 'subscription',
+    payment_type: 'subscription',
+    status: 'pending',
+    provider: 'kora',
+    payment_provider: 'kora',
+    reference,
+    description: `GlobalDoc ${plan} subscription`,
+    metadata: {
+      purpose: 'subscription',
+      patientId: patientProfile.id,
+      plan,
+      tokensIncluded: normalizedTokens,
+      amountUSD,
+      price: amountUSD,
+      koraAmount: koraCharge.amount,
+      koraCurrency: koraCharge.currency,
+      exchangeRate: koraCharge.exchangeRate,
+    },
+    created_at: new Date().toISOString(),
+  })
+  if (paymentInsertError) return res.status(500).json({ error: `Could not create subscription payment: ${paymentInsertError.message}` })
+
+  if (!KORA_SECRET_KEY) {
+    return res.status(201).json({
+      reference,
+      tokensExpected: normalizedTokens,
+      tokensIncluded: normalizedTokens,
+      checkout_url: `https://kora-pay.com/pay/${reference}`,
+      message: 'Subscription payment initialized (mock - no KORA key)',
+    })
+  }
+
+  try {
+    const koraPayload = {
+      amount: Number(koraCharge.amount),
+      currency: String(koraCharge.currency || 'NGN').toUpperCase(),
+      reference,
+      redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
+      notification_url: `${origin}/api/webhooks/kora`,
+      narration: `GlobalDoc ${plan} subscription ${normalizedTokens} tokens`,
+      customer: { email: patientEmail, name: patientName },
+      merchant_bears_cost: true,
+    }
+    const { data: response } = await axios.post(
+      `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
+      koraPayload,
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+    )
+    const checkoutUrl = extractKoraCheckoutUrl(response)
+    if (!checkoutUrl) return res.status(500).json({ error: 'Kora did not return a checkout URL', details: response })
+    return res.status(201).json({
+      reference,
+      tokensExpected: normalizedTokens,
+      tokensIncluded: normalizedTokens,
+      checkout_url: checkoutUrl,
+      message: response?.message || 'Subscription payment initialized',
+    })
+  } catch (error) {
+    const koraError = error.response?.data || error.message
+    console.error('Kora subscription initialization error:', koraError)
+    return res.status(500).json({
+      error: 'Failed to initialize Kora subscription payment',
+      details: getKoraErrorMessage(error),
+      provider: koraError,
+      kora: { amount: koraCharge.amount, currency: koraCharge.currency, customerEmail: patientEmail, origin },
+    })
+  }
 
   const id = generateId('sub')
   const subscription = {
@@ -2815,6 +2955,17 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
     })
   }
 
+  if ((payment.type || payment.payment_type) === 'subscription') {
+    const result = await creditSubscriptionPayment(payment, 'Kora')
+    return res.json({
+      status: 'success',
+      credited: result.credited,
+      tokens: result.tokens,
+      payment,
+      message: result.reason,
+    })
+  }
+
   await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
   res.json({ status: 'success', credited: false, payment, message: 'Payment verified.' })
 })
@@ -2837,6 +2988,11 @@ app.post('/api/webhooks/kora', async (req, res) => {
 
   if ((payment.type || payment.payment_type) === 'token_purchase') {
     const result = await creditTokenPurchasePayment(payment, 'Kora webhook')
+    return res.json({ received: true, credited: result.credited, tokens: result.tokens })
+  }
+
+  if ((payment.type || payment.payment_type) === 'subscription') {
+    const result = await creditSubscriptionPayment(payment, 'Kora webhook')
     return res.json({ received: true, credited: result.credited, tokens: result.tokens })
   }
 

@@ -147,13 +147,26 @@ function TokenManager({ patient, onTokensUpdated }) {
       })
 
       if (!response.ok) {
-        throw new Error('Subscription failed')
+        const error = await response.json().catch(() => ({}))
+        const details = typeof error.details === 'string'
+          ? error.details
+          : error.details?.message || error.details?.error || error.details?.data?.message || ''
+        throw new Error([error.error || 'Subscription payment failed', details].filter(Boolean).join(': '))
       }
 
       const result = await response.json()
-      addError(`Subscription activated! ${subscriptionData.tokensIncluded} tokens added to your account.`, 'success')
-      await fetchTokenBalance()
-      await fetchSubscription()
+      const checkoutUrl = String(result.checkout_url || '')
+      const checkoutHost = checkoutUrl ? new URL(checkoutUrl, window.location.origin).host : ''
+      const isApiUrl = checkoutUrl.includes('/api/')
+
+      setPendingPurchase({
+        reference: result.reference,
+        tokensExpected: result.tokensExpected || result.tokensIncluded || subscriptionData.tokensIncluded,
+        checkoutUrl: isApiUrl ? '' : checkoutUrl,
+      })
+      setShowPurchase(true)
+      addError(`Kora checkout opened for ${plan}. Tokens will be credited after payment verification.`, 'success')
+      if (checkoutUrl && !isApiUrl && checkoutHost) window.location.assign(checkoutUrl)
     } catch (error) {
       addError('Subscription failed: ' + error.message, 'error')
     } finally {
