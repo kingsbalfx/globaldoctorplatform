@@ -1897,6 +1897,56 @@ app.get('/api/doctors/:doctorId/facility-patients', async (req, res) => {
   })
 })
 
+app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
+  const { doctorId } = req.params
+  const search = String(req.query.search || '').trim().toLowerCase()
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)))
+  const offset = Math.max(0, Number(req.query.offset || 0))
+
+  const { data: consultations, error: consultError } = await supabase
+    .from('consultations_ng')
+    .select('*')
+    .eq('doctor_id', String(doctorId))
+    .order('created_at', { ascending: false })
+    .limit(300)
+  if (consultError) return res.status(500).json({ error: consultError.message })
+
+  const patientIds = [...new Set((consultations || []).map((item) => item.patient_id).filter(Boolean))]
+  if (patientIds.length === 0) return res.json({ patients: [], total: 0, limit, offset })
+
+  const { data: patients, error: patientError } = await supabase.from('patients').select('*').in('id', patientIds)
+  if (patientError) return res.status(500).json({ error: patientError.message })
+
+  const patientById = new Map((patients || []).map((patient) => [patient.id, patient]))
+  let rows = (consultations || []).map((consultation) => {
+    const patient = patientById.get(consultation.patient_id) || { id: consultation.patient_id, name: 'Patient' }
+    return {
+      ...sanitizePatientForResponse(patient),
+      latest_consultation: consultation,
+      assigned_at: consultation.created_at,
+      facility_id: consultation.facility_id || patient.facility_id || null,
+      source: consultation.channel === 'direct_home' ? 'direct_patient' : 'facility',
+    }
+  })
+
+  if (search) {
+    rows = rows.filter((patient) => {
+      const haystack = [patient.id, patient.name, patient.phone, patient.email, patient.facility_id, patient.latest_consultation?.channel]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(search)
+    })
+  }
+
+  res.json({
+    patients: rows.slice(offset, offset + limit),
+    total: rows.length,
+    limit,
+    offset,
+  })
+})
+
 // ---------- FACILITIES ----------
 app.post('/api/facilities', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
@@ -1994,6 +2044,21 @@ app.post('/api/consultations/start', async (req, res) => {
     created_at: new Date().toISOString()
   }
   await supabase.from('consultations_ng').insert(consultation)
+  const { data: patient } = await supabase.from('patients').select('name, email, phone').eq('id', patientId).maybeSingle()
+  await insertAdaptive('notifications', {
+    id: generateId('notif'),
+    user_id: doctorId,
+    user_type: 'doctor',
+    notification_type: 'consultation_started',
+    type: 'consultation',
+    title: channel === 'direct_home' ? 'Patient started a live consultation' : 'Facility consultation started',
+    message: `${patient?.name || 'A patient'} is waiting in consultation ${id}.`,
+    related_resource_type: 'consultation',
+    related_resource_id: id,
+    is_read: false,
+    notification_channels: ['in_app'],
+    created_at: new Date().toISOString(),
+  })
 
   res.status(201).json({ consultation, split })
 })
