@@ -357,6 +357,29 @@ async function insertAdaptive(table, rowOrRows) {
   return { error: lastError }
 }
 
+function isIntegerSyntaxError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase()
+  return text.includes('22p02') || text.includes('invalid input syntax for type integer')
+}
+
+async function insertVitalParameterAdaptive(vital) {
+  const attempts = [
+    vital,
+    Object.fromEntries(Object.entries(vital).filter(([key]) => key !== 'id')),
+    Object.fromEntries(Object.entries(vital).filter(([key]) => key !== 'id' && key !== 'request_id')),
+  ]
+  let lastError = null
+
+  for (const attempt of attempts) {
+    const insert = await insertAdaptive('vital_parameters', attempt)
+    if (!insert.error) return { error: null, row: attempt }
+    lastError = insert.error
+    if (!isIntegerSyntaxError(insert.error)) break
+  }
+
+  return { error: lastError, row: null }
+}
+
 async function resolvePaymentDoctorId(value) {
   const requested = String(value || '').trim()
   if (requested && requested !== 'system') return requested
@@ -3122,7 +3145,7 @@ app.post('/api/vital-parameters', async (req, res) => {
     created_at: new Date().toISOString(),
   }
 
-  const insert = await insertAdaptive('vital_parameters', vital)
+  const insert = await insertVitalParameterAdaptive(vital)
   if (insert.error) return res.status(500).json({ error: insert.error.message })
   if (request_id) {
     await supabase.from('vital_parameter_requests').update({
@@ -3140,7 +3163,7 @@ app.post('/api/vital-parameters', async (req, res) => {
       title: 'Vital sign saved',
       message: `${parameter_name} was captured and saved for this consultation.`,
       related_resource_type: 'vital_parameter',
-      related_resource_id: vital.id,
+      related_resource_id: insert.row?.id || vital.id,
       is_read: false,
       notification_channels: ['in_app'],
       created_at: new Date().toISOString(),

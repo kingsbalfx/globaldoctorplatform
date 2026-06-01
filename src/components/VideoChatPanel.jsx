@@ -6,12 +6,11 @@ import { useError } from './ErrorHandler'
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 const CALLER_TYPES = new Set(['patient', 'facility', 'admin'])
 const CLEAN_AUDIO_CONSTRAINTS = {
-  echoCancellation: { ideal: true },
-  noiseSuppression: { ideal: true },
-  autoGainControl: { ideal: true },
-  channelCount: { ideal: 1 },
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: false,
+  channelCount: { ideal: 1, max: 1 },
   sampleRate: { ideal: 48000 },
-  sampleSize: { ideal: 16 },
 }
 
 function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId, autoStart = false }) {
@@ -148,6 +147,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       const [remoteStream] = event.streams
       if (remoteVideoRef.current && remoteStream) {
         remoteVideoRef.current.srcObject = remoteStream
+        remoteVideoRef.current.volume = 0.85
         setStatus('Connected')
       }
     }

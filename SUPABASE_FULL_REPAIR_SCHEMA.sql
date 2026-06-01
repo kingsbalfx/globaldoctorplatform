@@ -525,6 +525,70 @@ CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
   created_at timestamptz DEFAULT now()
 );
 
+-- Repair older vital tables that were created with integer ids.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT c.conname
+    FROM pg_constraint c
+    WHERE c.conrelid = 'public.vital_parameters'::regclass
+      AND c.contype = 'f'
+      AND (
+        c.confrelid = 'public.vital_parameter_requests'::regclass
+        OR c.conkey @> ARRAY[
+          (
+            SELECT a.attnum
+            FROM pg_attribute a
+            WHERE a.attrelid = 'public.vital_parameters'::regclass
+              AND a.attname = 'request_id'
+          )
+        ]::smallint[]
+      )
+  LOOP
+    EXECUTE format('ALTER TABLE public.vital_parameters DROP CONSTRAINT IF EXISTS %I', r.conname);
+  END LOOP;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'vital_parameter_requests'
+      AND column_name = 'id' AND data_type IN ('integer', 'bigint')
+  ) THEN
+    ALTER TABLE public.vital_parameter_requests ALTER COLUMN id DROP DEFAULT;
+    ALTER TABLE public.vital_parameter_requests ALTER COLUMN id TYPE text USING id::text;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'vital_parameters'
+      AND column_name = 'id' AND data_type IN ('integer', 'bigint')
+  ) THEN
+    ALTER TABLE public.vital_parameters ALTER COLUMN id DROP DEFAULT;
+    ALTER TABLE public.vital_parameters ALTER COLUMN id TYPE text USING id::text;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'vital_parameters'
+      AND column_name = 'request_id' AND data_type IN ('integer', 'bigint')
+  ) THEN
+    ALTER TABLE public.vital_parameters ALTER COLUMN request_id DROP DEFAULT;
+    ALTER TABLE public.vital_parameters ALTER COLUMN request_id TYPE text USING request_id::text;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.vital_parameters'::regclass
+      AND conname = 'vital_parameters_request_id_fkey'
+  ) THEN
+    ALTER TABLE public.vital_parameters
+      ADD CONSTRAINT vital_parameters_request_id_fkey
+      FOREIGN KEY (request_id) REFERENCES public.vital_parameter_requests(id)
+      ON DELETE SET NULL NOT VALID;
+  END IF;
+END $$;
+
 -- Patch older tables in place. These fix the exact schema-cache errors reported.
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS password text DEFAULT '';
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS email text;
