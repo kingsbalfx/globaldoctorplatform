@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Bot, CalendarDays, FileText, Languages, MessageCircle, Mic, MicOff, Send, ShieldCheck, Sparkles, Stethoscope, Video } from 'lucide-react'
+import { Bot, CalendarDays, FileText, Languages, MessageCircle, Mic, MicOff, Send, ShieldCheck, Sparkles, Stethoscope, Video, X, Minus } from 'lucide-react'
 
 const portalProfiles = {
   landing: {
@@ -96,7 +96,7 @@ function speak(text) {
 
 function HumanoidAssistant({ portal = 'landing', docked = true }) {
   const profile = getPortalProfile(portal)
-  const [open, setOpen] = useState(false)
+  const [panelState, setPanelState] = useState(docked ? 'minimized' : 'expanded')
   const [input, setInput] = useState('')
   const [mode, setMode] = useState('idle')
   const [voiceEnabled, setVoiceEnabled] = useState(false)
@@ -133,6 +133,18 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
     recognition.start()
   }
 
+  const minimizeAssistant = () => {
+    recognitionRef.current?.stop?.()
+    setMode('idle')
+    setPanelState('minimized')
+  }
+
+  const closeAssistant = () => {
+    recognitionRef.current?.stop?.()
+    setMode('idle')
+    setPanelState('closed')
+  }
+
   const cards = [
     { icon: Stethoscope, label: 'Health intake', body: 'Prepare the right details before handoff.' },
     { icon: CalendarDays, label: 'Booking guide', body: 'Guide search, payment, tokens, and scheduling.' },
@@ -140,18 +152,25 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
     { icon: ShieldCheck, label: 'Guardrails', body: 'Guide users without replacing professionals.' },
   ]
 
+  if (!docked && panelState === 'closed') return null
+
   return (
     <div className={docked ? 'fixed bottom-5 right-5 z-40 w-[calc(100vw-2.5rem)] max-w-md' : 'w-full'}>
-      {!open && docked && (
-        <button type="button" onClick={() => setOpen(true)} className="ml-auto flex items-center gap-3 rounded-full bg-slate-950 px-5 py-4 text-sm font-semibold text-white shadow-2xl shadow-slate-900/30 transition hover:-translate-y-0.5 hover:bg-brand-700" aria-label="Open GlobalDoc AI guide">
+      {panelState !== 'expanded' && docked && (
+        <button
+          type="button"
+          onClick={() => setPanelState('expanded')}
+          className={`ml-auto flex items-center gap-3 rounded-full px-5 py-4 text-sm font-semibold text-white shadow-2xl shadow-slate-900/30 transition hover:-translate-y-0.5 ${panelState === 'closed' ? 'bg-brand-700 hover:bg-brand-600' : 'bg-slate-950 hover:bg-brand-700'}`}
+          aria-label="Open GlobalDoc AI guide"
+        >
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15"><Bot className="h-5 w-5" /></span>
-          Ask AI Guide
+          {panelState === 'closed' ? 'Open AI Assistant' : 'Need help?'}
           <Sparkles className="h-4 w-4" />
         </button>
       )}
 
-      {(open || !docked) && (
-        <section className="overflow-hidden rounded-[2rem] border border-white/70 bg-white shadow-2xl shadow-slate-900/20">
+      {panelState === 'expanded' && (
+        <section className="overflow-hidden rounded-[2rem] border border-white/70 bg-white shadow-2xl shadow-slate-900/20 transition-all duration-200 ease-out">
           <div className="bg-gradient-to-br from-slate-950 via-brand-800 to-brand-600 p-5 text-white">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -159,7 +178,26 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
                 <h2 className="mt-3 text-xl font-bold">{profile.title}</h2>
                 <p className="mt-2 text-sm leading-6 text-brand-50/90">Safe guidance for telehealth workflows. Professionals make care decisions.</p>
               </div>
-              {docked && <button type="button" onClick={() => setOpen(false)} className="rounded-full bg-white/10 px-3 py-1 text-sm font-bold hover:bg-white/20">×</button>}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={minimizeAssistant}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+                  aria-label="Minimize AI assistant"
+                  title="Minimize"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={closeAssistant}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-red-500/70"
+                  aria-label="Close AI assistant"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div className="relative mx-auto mt-3 flex h-28 w-28 items-center justify-center">
               <div className={`absolute inset-0 rounded-full bg-brand-300/30 ${mode !== 'idle' ? 'animate-ping' : ''}`} />
