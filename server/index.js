@@ -2903,9 +2903,12 @@ app.get('/api/vital-requests', async (req, res) => {
 })
 
 app.patch('/api/vital-requests/:requestId', async (req, res) => {
+  const status = ['pending', 'measuring', 'completed', 'cancelled'].includes(String(req.body?.status || ''))
+    ? String(req.body.status)
+    : undefined
   const updates = {
-    status: req.body?.status,
-    completed_at: req.body?.status === 'completed' ? new Date().toISOString() : undefined,
+    status,
+    completed_at: status === 'completed' ? new Date().toISOString() : undefined,
   }
   Object.keys(updates).forEach((key) => updates[key] === undefined && delete updates[key])
   const { data, error } = await supabase

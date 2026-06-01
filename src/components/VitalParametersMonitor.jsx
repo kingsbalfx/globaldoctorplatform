@@ -100,7 +100,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
 
     if (userType !== 'doctor') {
       const pendingRows = rows
-        .filter((request) => request.status === 'pending')
+        .filter((request) => request.status === 'pending' || request.status === 'measuring')
         .sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
       if (pendingRows) {
         setActiveRequest((current) => current?.id ? current : pendingRows)
@@ -146,10 +146,22 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     await loadRequests()
   }
 
+  const markRequestStatus = async (request, status) => {
+    if (!request?.id) return
+    const response = await apiFetch(`/api/vital-requests/${encodeURIComponent(request.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || `Failed to mark vital request as ${status}`)
+    setRequests((current) => current.map((item) => (item.id === request.id ? { ...item, status } : item)))
+  }
+
   const saveVital = async ({ request, value, unit, source, confidence, metadata }) => {
-    const resolvedConsultationId = consultationId || request?.consultation_id || activeRequest?.consultation_id
-    const resolvedPatientId = patientId || request?.patient_id || activeRequest?.patient_id
-    const resolvedDoctorId = doctorId || request?.doctor_id || activeRequest?.doctor_id
+    const resolvedConsultationId = request?.consultation_id || activeRequest?.consultation_id || consultationId
+    const resolvedPatientId = request?.patient_id || activeRequest?.patient_id || patientId
+    const resolvedDoctorId = request?.doctor_id || activeRequest?.doctor_id || doctorId
     const resolvedParameterName = request?.parameter_name || activeRequest?.parameter_name
     if (!resolvedConsultationId || !resolvedPatientId || !resolvedParameterName) {
       addError('The vital request is missing consultation or patient details. Refresh the room and try again.', 'warning')
@@ -194,6 +206,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     if (videoRef.current) videoRef.current.srcObject = null
     setMeasuring(false)
     setProgress(0)
+    window.dispatchEvent(new CustomEvent('globaldoc:vital-camera-finished'))
   }
 
   const startCameraMeasurement = async () => {
@@ -205,6 +218,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     speak(request.instructions || vital.guide)
 
     try {
+      await markRequestStatus(request, 'measuring')
+      window.dispatchEvent(new CustomEvent('globaldoc:vital-camera-started'))
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
@@ -245,18 +260,24 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
           const value = request.parameter_name === 'oxygen_level'
             ? Math.max(92, Math.min(100, Math.round(95 + ((bpm || 72) % 6))))
             : bpm
-      if (!value) {
+          if (!value) {
             addError('Could not detect a stable pulse. Ask the patient to cover the camera fully and try again.', 'warning')
+            await markRequestStatus(request, 'pending').catch(() => null)
             return
           }
-          await saveVital({
-            request,
-            value,
-            unit: vital.unit,
-            source: 'camera_ppg',
-            confidence: request.parameter_name === 'oxygen_level' ? 0.55 : 0.72,
-            metadata: { samples: samples.length, torchRequested: true, note: 'Phone camera PPG estimate' },
-          })
+          try {
+            await saveVital({
+              request,
+              value,
+              unit: vital.unit,
+              source: 'camera_ppg',
+              confidence: request.parameter_name === 'oxygen_level' ? 0.55 : 0.72,
+              metadata: { samples: samples.length, torchRequested: true, note: 'Phone camera PPG estimate' },
+            })
+          } catch (error) {
+            await markRequestStatus(request, 'pending').catch(() => null)
+            addError(error.message || 'Could not save the vital reading.', 'error')
+          }
         }
       }, 50)
     } catch (error) {
@@ -269,14 +290,20 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     event.preventDefault()
     if (!activeRequest || !manualValue.trim()) return
     const vital = getVital(activeRequest.parameter_name)
-    await saveVital({
-      request: activeRequest,
-      value: manualValue.trim(),
-      unit: vital.unit,
-      source: wearableSource,
-      confidence: wearableSource === 'manual' ? 0.8 : 0.9,
-      metadata: { sourceLabel: wearableSource },
-    })
+    try {
+      await markRequestStatus(activeRequest, 'measuring')
+      await saveVital({
+        request: activeRequest,
+        value: manualValue.trim(),
+        unit: vital.unit,
+        source: wearableSource,
+        confidence: wearableSource === 'manual' ? 0.8 : 0.9,
+        metadata: { sourceLabel: wearableSource },
+      })
+    } catch (error) {
+      await markRequestStatus(activeRequest, 'pending').catch(() => null)
+      addError(error.message || 'Could not save the vital reading.', 'error')
+    }
   }
 
   const connectBluetoothDevice = async () => {
@@ -326,7 +353,9 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [consultationId, patientId, doctorId, userType])
 
+  const actionableRequests = requests.filter((request) => request.status === 'pending' || request.status === 'measuring')
   const pending = requests.filter((request) => request.status === 'pending')
+  const measuringRequests = requests.filter((request) => request.status === 'measuring')
 
   return (
     <div className="space-y-6">
@@ -337,8 +366,16 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
               <h3 className="text-lg font-semibold text-slate-900">Doctor Guided Vital Signs</h3>
               <p className="text-sm text-slate-500">Send a guided request to the patient during the video call.</p>
             </div>
-            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">{pending.length} pending</span>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">{pending.length} pending</span>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{measuringRequests.length} measuring</span>
+            </div>
           </div>
+          {measuringRequests.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+              Patient is measuring: {measuringRequests.map((request) => getVital(request.parameter_name).label).join(', ')}
+            </div>
+          )}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {VITALS.map((vital) => (
               <button
@@ -356,12 +393,12 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         </div>
       )}
 
-      {userType !== 'doctor' && pending.length > 0 && (
+      {userType !== 'doctor' && actionableRequests.length > 0 && (
         <div className="rounded-3xl bg-white p-6 shadow-lg">
           <h3 className="text-lg font-semibold text-slate-900">Doctor Vital Requests</h3>
           <p className="mt-1 text-sm text-slate-500">Tap a request to hear the guide and capture the reading.</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {pending.map((request) => {
+            {actionableRequests.map((request) => {
               const vital = getVital(request.parameter_name)
               return (
                 <button
@@ -375,6 +412,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
                 >
                   <div className="mb-2 h-10 w-10" dangerouslySetInnerHTML={{ __html: vital.icon }} />
                   <p className="font-bold text-slate-900">{vital.label}</p>
+                  {request.status === 'measuring' && <p className="mt-1 text-xs font-black text-emerald-700">Measuring now</p>}
                   <p className="mt-1 text-xs text-slate-600">{request.instructions || vital.guide}</p>
                 </button>
               )

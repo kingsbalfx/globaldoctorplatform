@@ -80,6 +80,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (streamRef.current) return streamRef.current
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
+        facingMode: { ideal: 'user' },
         width: { ideal: 1280 },
         height: { ideal: 720 },
         frameRate: { ideal: 24, max: 30 },
@@ -95,6 +96,38 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     streamRef.current = stream
     if (localVideoRef.current) localVideoRef.current.srcObject = stream
     return stream
+  }
+
+  const refreshFrontCamera = async () => {
+    if (!callStarted) return
+    try {
+      const nextStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'user' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24, max: 30 },
+        },
+        audio: false,
+      })
+      const [nextVideoTrack] = nextStream.getVideoTracks()
+      if (!nextVideoTrack) return
+
+      const oldVideoTracks = streamRef.current?.getVideoTracks?.() || []
+      const peer = peerRef.current
+      const sender = peer?.getSenders?.().find((item) => item.track?.kind === 'video')
+      if (sender) await sender.replaceTrack(nextVideoTrack)
+
+      const audioTracks = streamRef.current?.getAudioTracks?.() || []
+      const combinedStream = new MediaStream([...audioTracks, nextVideoTrack])
+      oldVideoTracks.forEach((track) => track.stop())
+      streamRef.current = combinedStream
+      if (localVideoRef.current) localVideoRef.current.srcObject = combinedStream
+      setVideoMuted(false)
+      setStatus((current) => (current === 'Closed' ? 'Ready' : current))
+    } catch (error) {
+      addError(error.message || 'Could not switch back to the front camera.', 'warning')
+    }
   }
 
   const createPeer = async () => {
@@ -130,6 +163,9 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const createOffer = async () => {
     const peer = await createPeer()
     if (isClosedPeer(peer)) return
+    if (peer.signalingState !== 'stable') {
+      await peer.setLocalDescription({ type: 'rollback' }).catch(() => null)
+    }
     const offer = await peer.createOffer()
     await peer.setLocalDescription(offer)
     await sendSignal('offer', offer)
@@ -139,6 +175,16 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const handleSignal = async (signal) => {
     if (!signal?.id || processedSignalsRef.current.has(signal.id)) return
     processedSignalsRef.current.add(signal.id)
+
+    if ((signal.type === 'join_accept' || signal.type === 'ready') && shouldCreateOffer && callStarted) {
+      resetPeerOnly()
+      await createOffer()
+      setStatus('Doctor joined. Reconnecting remote video')
+      return
+    }
+
+    if (signal.type === 'join_request' || signal.type === 'join_accept' || signal.type === 'ready') return
+
     const peer = await createPeer()
     if (isClosedPeer(peer)) return
 
@@ -214,6 +260,12 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       if (shouldCreateOffer) {
         await announceJoin()
         await createOffer()
+      } else {
+        await sendSignal('ready', {
+          readyAt: new Date().toISOString(),
+          doctorId,
+          patientId,
+        })
       }
       addError('Secure video room opened. Allow camera and microphone access when prompted.', 'success')
     } catch (error) {
@@ -292,6 +344,15 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   }, [callStarted, shouldCreateOffer, roomId, participantId])
 
   useEffect(() => () => endCall(), [])
+
+  useEffect(() => {
+    const handleVitalCameraFinished = () => {
+      void refreshFrontCamera()
+    }
+    window.addEventListener('globaldoc:vital-camera-finished', handleVitalCameraFinished)
+    return () => window.removeEventListener('globaldoc:vital-camera-finished', handleVitalCameraFinished)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callStarted])
 
   return (
     <div className="space-y-6">
