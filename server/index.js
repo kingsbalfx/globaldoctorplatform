@@ -494,25 +494,58 @@ function normalizeDoctorPayload(body = {}) {
   }
 }
 
-async function sendDoctorApprovalEmail(doctor) {
-  const smtpUser = process.env.SMTP_USER
-  const smtpPass = process.env.SMTP_PASS
-  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com'
-  const smtpPort = Number(process.env.SMTP_PORT || 587)
-  if (!smtpUser || !smtpPass || !doctor?.email) {
-    return { sent: false, reason: 'SMTP credentials or doctor email missing' }
+function getSmtpSettings() {
+  const user = process.env.SMTP_USER || process.env.EMAIL_USER || process.env.MAIL_USER || process.env.GMAIL_USER || ''
+  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.MAIL_PASS || process.env.GMAIL_APP_PASSWORD || ''
+  const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || 'smtp.gmail.com'
+  const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 587)
+  const secure = process.env.SMTP_SECURE !== undefined
+    ? String(process.env.SMTP_SECURE).toLowerCase() === 'true'
+    : port === 465
+  const from = process.env.SMTP_FROM || process.env.EMAIL_FROM || user
+  const fromName = process.env.SMTP_FROM_NAME || 'GlobalDoc Connect'
+  return { user, pass, host, port, secure, from, fromName }
+}
+
+async function sendSmtpEmail({ to, subject, text, html }) {
+  const settings = getSmtpSettings()
+  if (!settings.user || !settings.pass || !to) {
+    return {
+      sent: false,
+      reason: 'SMTP credentials or recipient email missing',
+      configured: Boolean(settings.user && settings.pass),
+      host: settings.host,
+      port: settings.port,
+      secure: settings.secure,
+    }
   }
 
   const transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpPort === 465,
-    auth: { user: smtpUser, pass: smtpPass },
+    host: settings.host,
+    port: settings.port,
+    secure: settings.secure,
+    auth: { user: settings.user, pass: settings.pass },
   })
 
-  const appUrl = normalizeAppBaseUrl(process.env.APP_BASE_URL || process.env.VITE_PUBLIC_APP_URL || process.env.VITE_API_BASE) || 'https://globaldoctorplatform.vercel.app'
+  await transporter.verify()
   const info = await transporter.sendMail({
-    from: `"GlobalDoc Connect" <${smtpUser}>`,
+    from: `"${settings.fromName}" <${settings.from}>`,
+    to,
+    subject,
+    text,
+    html,
+  })
+  const rejected = Array.isArray(info.rejected) ? info.rejected : []
+  if (rejected.length > 0) {
+    return { sent: false, reason: `SMTP rejected: ${rejected.join(', ')}`, messageId: info.messageId || null, accepted: info.accepted || [] }
+  }
+  return { sent: true, messageId: info.messageId || null, accepted: info.accepted || [], response: info.response || null }
+}
+
+async function sendDoctorApprovalEmail(doctor) {
+  if (!doctor?.email) return { sent: false, reason: 'Doctor email missing' }
+  const appUrl = normalizeAppBaseUrl(process.env.APP_BASE_URL || process.env.VITE_PUBLIC_APP_URL || process.env.VITE_API_BASE) || 'https://globaldoctorplatform.vercel.app'
+  return sendSmtpEmail({
     to: doctor.email,
     subject: 'Your GlobalDoc Connect doctor account has been approved',
     text: [
@@ -524,9 +557,6 @@ async function sendDoctorApprovalEmail(doctor) {
       'GlobalDoc Connect',
     ].join('\n'),
   })
-  const rejected = Array.isArray(info.rejected) ? info.rejected : []
-  if (rejected.length > 0) return { sent: false, reason: `SMTP rejected: ${rejected.join(', ')}`, messageId: info.messageId || null }
-  return { sent: true, messageId: info.messageId || null, accepted: info.accepted || [] }
 }
 
 async function isPlatformAdminRequest(req) {
@@ -1724,6 +1754,31 @@ app.patch('/api/admin/settings', async (req, res) => {
   if (typeof minimumSubscriptionUSD !== 'number' || minimumSubscriptionUSD < 1) return res.status(400).json({ error: 'Invalid value' })
   await supabase.from('server_settings').upsert({ key: 'minimumSubscriptionUSD', value: minimumSubscriptionUSD }, { onConflict: 'key' })
   res.json({ settings: await getServerSettings(), message: 'Updated' })
+})
+
+app.post('/api/admin/smtp/test', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+  const to = String(req.body?.to || req.headers['x-admin-email'] || '').trim()
+  if (!to) return res.status(400).json({ error: 'Recipient email is required' })
+  const settings = getSmtpSettings()
+  const smtp = {
+    configured: Boolean(settings.user && settings.pass),
+    host: settings.host,
+    port: settings.port,
+    secure: settings.secure,
+    from: settings.from,
+    user: settings.user ? `${settings.user.slice(0, 3)}***${settings.user.slice(-8)}` : '',
+  }
+  try {
+    const email = await sendSmtpEmail({
+      to,
+      subject: 'GlobalDoc SMTP test',
+      text: `This is a GlobalDoc SMTP test sent at ${new Date().toISOString()}.`,
+    })
+    res.json({ email, smtp })
+  } catch (error) {
+    res.status(500).json({ error: error.message, smtp })
+  }
 })
 
 // ---------- ONLINE STATUS ----------
@@ -3583,21 +3638,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   const origin = 'https://globaldoctorplatform.vercel.app'
   const resetUrl = `${origin}/reset-password?token=${encodeURIComponent(token)}&userType=${encodeURIComponent(userType)}`
 
-  const smtpUser = process.env.SMTP_USER
-  const smtpPass = process.env.SMTP_PASS
-  if (smtpUser && smtpPass) {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: Number(process.env.SMTP_PORT || 587) === 465,
-      auth: { user: smtpUser, pass: smtpPass },
-    })
-    await transporter.sendMail({
-      from: `"GlobalDoc Connect" <${smtpUser}>`,
-      to: normalizedEmail,
-      subject: 'Reset your password',
-      text: `Click the link to reset your password: ${resetUrl}\nThis link expires in 1 hour.`,
-    }).catch(console.error)
+  const emailResult = await sendSmtpEmail({
+    to: normalizedEmail,
+    subject: 'Reset your password',
+    text: `Click the link to reset your password: ${resetUrl}\nThis link expires in 1 hour.`,
+  }).catch((error) => ({ sent: false, reason: error.message }))
+  if (!emailResult.sent) {
+    console.error('Password reset email failed:', emailResult.reason || 'SMTP not configured')
   }
 
   res.json({ message: 'If that email is registered, a reset link has been sent.' })
