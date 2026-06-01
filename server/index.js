@@ -490,6 +490,25 @@ async function updatePlatformBalance(platformDelta, dataDelta) {
   }, { onConflict: 'id' })
 }
 
+async function recordAuditLog(req, entry = {}) {
+  try {
+    await supabase.from('audit_logs').insert({
+      id: generateId('audit'),
+      user_id: entry.userId || req.headers['x-admin-email'] || entry.senderId || 'system',
+      user_type: entry.userType || (req.headers['x-admin-email'] ? 'admin' : 'system'),
+      action: entry.action || 'unknown',
+      resource_type: entry.resourceType || 'system',
+      resource_id: entry.resourceId || null,
+      ip_address: req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.ip || null,
+      user_agent: req.headers['user-agent'] || null,
+      changes: entry.changes || null,
+      created_at: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.warn('Audit log write failed:', error.message)
+  }
+}
+
 // ---------- HEALTH ----------
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
 
@@ -644,6 +663,14 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         const { error: insertErr } = await supabase.from('patients').insert(newPatient)
         if (insertErr) return res.status(500).json({ error: 'Failed to create patient: ' + insertErr.message })
         await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+        await recordAuditLog(req, {
+          userId: id,
+          userType: 'patient',
+          action: 'patient.oauth.create',
+          resourceType: 'patient',
+          resourceId: id,
+          changes: { email: patientEmail },
+        })
         return res.json({ patient: sanitizePatientForResponse(newPatient), message: 'Patient session ready' })
       }
       const { data: updatedPatient, error: updateErr } = await supabase
@@ -654,6 +681,14 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         .maybeSingle()
       if (updateErr) return res.status(500).json({ error: 'Failed to update patient: ' + updateErr.message })
       await supabase.from('patient_tokens').upsert({ patient_id: patient.id, balance: 0 }, { onConflict: 'patient_id', ignoreDuplicates: true })
+      await recordAuditLog(req, {
+        userId: patient.id,
+        userType: 'patient',
+        action: 'patient.oauth.login',
+        resourceType: 'patient',
+        resourceId: patient.id,
+        changes: { email: patientEmail },
+      })
       return res.json({ patient: sanitizePatientForResponse(updatedPatient || patient), message: 'Patient session ready' })
     }
 
@@ -801,6 +836,14 @@ app.post('/api/patients/register', async (req, res) => {
     if (!existingTokenRow) {
       await supabase.from('patient_tokens').insert({ patient_id: existing.id, balance: Number(existing.tokens || 0) })
     }
+    await recordAuditLog(req, {
+      userId: existing.id,
+      userType: 'patient',
+      action: 'patient.profile.update',
+      resourceType: 'patient',
+      resourceId: existing.id,
+      changes: { email, source: 'email' },
+    })
     return res.status(200).json({
       patient: sanitizePatientForResponse(savedPatient || updatedPatient),
       message: 'Patient profile updated and signed in',
@@ -815,6 +858,14 @@ app.post('/api/patients/register', async (req, res) => {
   }
   await supabase.from('patients').insert(newPatient)
   await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+  await recordAuditLog(req, {
+    userId: id,
+    userType: 'patient',
+    action: 'patient.register',
+    resourceType: 'patient',
+    resourceId: id,
+    changes: { email, source: 'email' },
+  })
 
   res.status(201).json({ patient: sanitizePatientForResponse(newPatient), message: 'Registration successful' })
 })
@@ -829,6 +880,13 @@ app.post('/api/patients/login', async (req, res) => {
   if (!patient) return res.status(401).json({ error: 'Invalid credentials' })
 
   await supabase.from('patients').update({ is_online: true }).eq('id', patient.id)
+  await recordAuditLog(req, {
+    userId: patient.id,
+    userType: 'patient',
+    action: 'patient.login',
+    resourceType: 'patient',
+    resourceId: patient.id,
+  })
   res.json({ patient: sanitizePatientForResponse(patient), message: 'Login successful' })
 })
 
@@ -859,6 +917,14 @@ app.post('/api/patients/facility/register', async (req, res) => {
   }
   await supabase.from('patients').insert(newPatient)
   await supabase.from('patient_tokens').insert({ patient_id: id, balance: 0 })
+  await recordAuditLog(req, {
+    userId: facilityId,
+    userType: 'facility',
+    action: 'facility.patient.register',
+    resourceType: 'patient',
+    resourceId: id,
+    changes: { facilityId, patientName: fullName },
+  })
 
   res.status(201).json({
     patient: sanitizePatientForResponse(newPatient),
@@ -926,20 +992,32 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   // *** FORCE production origin for Kora URLs – NEVER rely on request headers on Vercel ***
   const origin = getApiOrigin(req) || 'https://globaldoctorplatform.vercel.app'
 
-  // *** Fetch patient email as fallback ***
-  let patientEmail = req.body.email || ''
-  if (!patientEmail) {
-    const { data: patientProfile } = await supabase
+  const requestedEmail = String(req.body.email || '').trim().toLowerCase()
+  let { data: patientProfile } = await supabase
+    .from('patients')
+    .select('id, email, name')
+    .eq('id', patientId)
+    .maybeSingle()
+  if (!patientProfile && requestedEmail) {
+    const lookup = await supabase
       .from('patients')
-      .select('email, name')
-      .eq('id', patientId)
+      .select('id, email, name')
+      .eq('email', requestedEmail)
       .maybeSingle()
-    patientEmail = patientProfile?.email || 'patient@globaldoc.com'
+    patientProfile = lookup.data || null
   }
+  if (!patientProfile?.id) {
+    return res.status(404).json({
+      error: 'Patient profile was not saved on the medical server. Complete patient signup again after running the database repair SQL.',
+    })
+  }
+  const savedPatientId = patientProfile.id
+  const patientEmail = patientProfile.email || requestedEmail || 'patient@globaldoc.com'
+  const patientName = patientProfile.name || req.body.name || 'Patient'
 
   const { error: paymentInsertError } = await insertPaymentRecord({
     id: reference,
-    patient_id: patientId,
+    patient_id: savedPatientId,
     doctor_id: 'system',
     amount: koraCharge.amount,
     currency: koraCharge.currency,
@@ -949,7 +1027,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     reference,
     metadata: {
       purpose: 'token_purchase',
-      patientId,
+      patientId: savedPatientId,
       tokensExpected,
       rate,
       amountUSD,
@@ -981,7 +1059,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
         narration: `GlobalDoc token purchase (${tokensExpected} tokens)`,
         customer: {
           email: patientEmail,
-          name: req.body.name || 'Patient'
+          name: patientName
         },
         metadata: {
           purpose: 'tokens',
@@ -1341,6 +1419,14 @@ app.post('/api/doctors/community/messages', async (req, res) => {
     id, sender_id: senderId, sender_name: senderName, sender_type: senderType || 'doctor',
     phone: phone || null, message, created_at: new Date().toISOString()
   })
+  await recordAuditLog(req, {
+    userId: senderId,
+    userType: senderType || 'doctor',
+    action: 'community.message.create',
+    resourceType: 'community_message',
+    resourceId: id,
+    changes: { senderName, senderType: senderType || 'doctor' },
+  })
   res.status(201).json({ message: 'Community message sent' })
 })
 
@@ -1476,6 +1562,12 @@ app.post('/api/admin/doctors', async (req, res) => {
   }
   if (profileInsertError) return res.status(500).json({ error: profileInsertError.message })
   const emailResult = await sendDoctorApprovalEmail(insertedAuthRow).catch((error) => ({ sent: false, reason: error.message }))
+  await recordAuditLog(req, {
+    action: 'doctor.admin.create',
+    resourceType: 'doctor',
+    resourceId: profileId,
+    changes: { email: payload.email, specialty: payload.specialty },
+  })
   res.status(201).json({ doctor: sanitizeDoctorForResponse({ ...doctor, ...insertedAuthRow, id: profileId }), email: emailResult, message: 'Doctor added and approved' })
 })
 
@@ -1483,6 +1575,11 @@ app.delete('/api/admin/doctors/:doctorId', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
   await supabase.from('doctors').delete().eq('id', String(req.params.doctorId))
   await supabase.from('doctors_auth').delete().eq('id', req.params.doctorId)
+  await recordAuditLog(req, {
+    action: 'doctor.delete',
+    resourceType: 'doctor',
+    resourceId: req.params.doctorId,
+  })
   res.json({ message: 'Doctor deleted' })
 })
 
@@ -1530,6 +1627,12 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
     profileError = retry.error
   }
   if (profileError) return res.status(500).json({ error: profileError.message })
+  await recordAuditLog(req, {
+    action: 'doctor.update',
+    resourceType: 'doctor',
+    resourceId: req.params.doctorId,
+    changes: { email: payload.email, specialty: payload.specialty },
+  })
   res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...authRow, id: String(req.params.doctorId) }), message: 'Doctor updated' })
 })
 
@@ -1553,6 +1656,11 @@ app.patch('/api/admin/doctors/:doctorId/verify', async (req, res) => {
   if (!authRow && !profile) return res.status(404).json({ error: 'Doctor not found' })
   const doctor = sanitizeDoctorForResponse({ ...profile, ...authRow, id: String(req.params.doctorId), approved_at: approvedAt })
   const emailResult = await sendDoctorApprovalEmail(doctor).catch((error) => ({ sent: false, reason: error.message }))
+  await recordAuditLog(req, {
+    action: 'doctor.approve',
+    resourceType: 'doctor',
+    resourceId: req.params.doctorId,
+  })
   res.json({ doctor, email: emailResult, message: 'Doctor approved and access granted' })
 })
 
@@ -1764,6 +1872,12 @@ app.post('/api/facilities', async (req, res) => {
     pin: facilityPin, referral_payout_ngn: referral_payout_ngn || 0, is_active: true
   })
   await supabase.from('facility_wallets').insert({ facility_id: id, balance_ngn: 0 })
+  await recordAuditLog(req, {
+    action: 'facility.create',
+    resourceType: 'facility',
+    resourceId: id,
+    changes: { type, name, state, lga },
+  })
   res.status(201).json({ facility: { id, type, name, state, lga, address, phone, email, referral_payout_ngn: referral_payout_ngn || 0, pin: facilityPin }, message: 'Facility created' })
 })
 
@@ -1778,7 +1892,15 @@ app.get('/api/facilities', async (req, res) => {
     const fallbackResult = await fallback
     data = fallbackResult.data || []
   }
-  const result = (data || []).map(f => ({ ...f, wallet_balance_ngn: f.facility_wallets?.[0]?.balance_ngn || 0 }))
+  const facilityIds = (data || []).map((facility) => facility.id).filter(Boolean)
+  const { data: wallets } = facilityIds.length
+    ? await supabase.from('facility_wallets').select('facility_id, balance_ngn').in('facility_id', facilityIds)
+    : { data: [] }
+  const walletByFacility = new Map((wallets || []).map((wallet) => [wallet.facility_id, wallet]))
+  const result = (data || []).map(f => ({
+    ...f,
+    wallet_balance_ngn: walletByFacility.get(f.id)?.balance_ngn ?? f.facility_wallets?.[0]?.balance_ngn ?? 0,
+  }))
   res.json({ facilities: result })
 })
 
@@ -1798,6 +1920,12 @@ app.post('/api/admin/facilities/:facilityId/fund', async (req, res) => {
   if (amountNgn <= 0) return res.status(400).json({ error: 'amount_ngn must be > 0' })
   await creditFacilityWallet(facilityId, amountNgn, { reason: 'Admin funding', ref_type: 'admin_fund', ref_id: req.headers['x-admin-email'] })
   const wallet = await getOrCreateFacilityWallet(facilityId)
+  await recordAuditLog(req, {
+    action: 'facility.wallet.fund',
+    resourceType: 'facility_wallet',
+    resourceId: facilityId,
+    changes: { amount_ngn: amountNgn, balance_ngn: wallet.balance_ngn },
+  })
   res.json({ facilityId, balance_ngn: wallet.balance_ngn, message: 'Wallet funded' })
 })
 
@@ -2042,12 +2170,23 @@ app.post('/api/admin/announcements', async (req, res) => {
     id, audience, severity: severity || 'info', title, message,
     is_active: true, created_at: new Date().toISOString(), expires_at: expires_at || null
   })
+  await recordAuditLog(req, {
+    action: 'announcement.create',
+    resourceType: 'announcement',
+    resourceId: id,
+    changes: { audience, severity: severity || 'info', title },
+  })
   res.status(201).json({ announcement: { id, audience, severity, title, message }, message: 'Announcement published' })
 })
 
 app.delete('/api/admin/announcements/:announcementId', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
   await supabase.from('announcements').delete().eq('id', req.params.announcementId)
+  await recordAuditLog(req, {
+    action: 'announcement.delete',
+    resourceType: 'announcement',
+    resourceId: req.params.announcementId,
+  })
   res.json({ message: 'Announcement deleted' })
 })
 

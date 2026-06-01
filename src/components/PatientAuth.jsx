@@ -74,18 +74,6 @@ function PatientAuth({ onAuth }) {
     if (error) addError(error.message || t('auth.authFailed'), 'error')
   }
 
-  const buildSupabasePatientSession = (user) => ({
-    id: `supabase-patient-${user.id}`,
-    email: user.email,
-    name: user.user_metadata?.full_name || user.user_metadata?.name || formData.name || user.email?.split('@')[0] || 'Patient',
-    dateOfBirth: user.user_metadata?.date_of_birth || formData.dateOfBirth || '',
-    phone: user.user_metadata?.phone || formData.phone || '',
-    country: user.user_metadata?.country || formData.country || 'NG',
-    language: user.user_metadata?.preferred_language || formData.language || 'English',
-    tokens: 0,
-    isOnline: true,
-  })
-
   const createBackendPatientSession = async (profile) => {
     let response
     try {
@@ -231,12 +219,14 @@ function PatientAuth({ onAuth }) {
             },
           })
           if (signUpError) {
-            throw signUpError
-          }
-          if (!signUpData?.user) {
+            const alreadyRegistered = String(signUpError.message || '').toLowerCase().includes('already')
+              || String(signUpError.message || '').toLowerCase().includes('registered')
+            if (!alreadyRegistered) throw signUpError
+          } else if (!signUpData?.user) {
             throw new Error('Could not create patient account. Please try again.')
+          } else {
+            supabaseUser = signUpData.user
           }
-          supabaseUser = signUpData.user
         }
       }
 
@@ -248,19 +238,11 @@ function PatientAuth({ onAuth }) {
           body: JSON.stringify(formData),
         })
       } catch {
-        if (supabaseUser) {
-          onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', patient: buildSupabasePatientSession(supabaseUser) })
-          return
-        }
-        throw new Error('Could not reach the app server. Please check the API URL and internet connection.')
+        throw new Error('Your account was accepted by Google/Supabase, but the medical profile server did not save your patient record. Please run the database repair SQL, then try again.')
       }
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
-        if (supabaseUser && [401, 409].includes(response.status)) {
-          onAuth({ type: completingExistingUser ? 'login' : isLogin ? 'login' : 'register', patient: buildSupabasePatientSession(supabaseUser) })
-          return
-        }
         throw new Error(error.error || 'Authentication failed')
       }
 
