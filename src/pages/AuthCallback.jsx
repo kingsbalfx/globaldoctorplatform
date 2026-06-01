@@ -95,6 +95,65 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         }
 
         const role = params.role === 'doctor' ? 'doctor' : 'patient'
+        const metadata = user.user_metadata || {}
+
+        if (role === 'doctor') {
+          setStatus('Checking doctor profile...')
+          let response
+          try {
+            response = await apiFetch('/api/auth/oauth/bridge', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                role,
+                email: user.email,
+                name: metadata.full_name || metadata.name || user.email.split('@')[0],
+                specialty: metadata.specialty || '',
+                location: metadata.location || '',
+                licenseNumber: metadata.license_number || '',
+                licenseIssuer: metadata.license_issuer || '',
+                licenseExpiry: metadata.license_expiry || '',
+                signatureDataUrl: metadata.signature_data_url || '',
+                passportDataUrl: metadata.passport_data_url || '',
+              }),
+            })
+          } catch {
+            throw new Error(
+              'Sign-in succeeded, but the medical server could not be reached to load your doctor account.'
+            )
+          }
+
+          const data = await response.json().catch(() => ({}))
+          if (response.status === 428 && data?.profileRequired) {
+            window.localStorage.setItem(
+              'gd_pending_doctor_profile',
+              JSON.stringify({
+                email: user.email,
+                name: metadata.full_name || metadata.name || user.email.split('@')[0],
+              })
+            )
+            setStatus(data.message || 'Complete your doctor profile before admin approval.')
+            window.setTimeout(() => onNavigate?.('doctor-auth'), 900)
+            return
+          }
+          if (response.status === 403 && data?.pendingApproval) {
+            setStatus(data.message || data.error || 'Your doctor account is pending platform admin approval.')
+            setError('')
+            return
+          }
+          if (!response.ok) throw new Error(data.error || data.message || 'Failed to initialize doctor session.')
+          const doctor = data.doctor
+          if (!doctor?.id) throw new Error('Doctor session not returned.')
+          try {
+            window.localStorage.setItem('gd_doctor_session', JSON.stringify(doctor))
+          } catch {
+            // ignore
+          }
+          if (cancelled) return
+          onDoctorAuth?.({ type: 'login', ...doctor })
+          onNavigate?.('admin')
+          return
+        }
 
         if (!hasRequiredProfile(user, role)) {
           const key = role === 'doctor' ? 'gd_pending_doctor_profile' : 'gd_pending_patient_profile'
@@ -116,7 +175,6 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
         setStatus('Preparing dashboard...')
         let response
         try {
-          const metadata = user.user_metadata || {}
           response = await apiFetch('/api/auth/oauth/bridge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

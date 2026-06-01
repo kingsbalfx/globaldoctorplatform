@@ -133,7 +133,7 @@ function DoctorAuth({ onAuth }) {
 
     const result = await response.json().catch(() => ({}))
     if (response.status === 403 && result?.pendingApproval) {
-      throw new Error(result.message || 'Your doctor account is pending platform admin approval.')
+      return { pendingApproval: true, message: result.message || 'Your doctor account is pending platform admin approval.' }
     }
     if (!response.ok || !result?.doctor?.id) {
       throw new Error(result.error || 'Could not prepare your doctor dashboard.')
@@ -148,7 +148,7 @@ function DoctorAuth({ onAuth }) {
 
     try {
       // 1. Validate license number when registering
-      if (!isLogin && !completingExistingUser) {
+      if (!isLogin) {
         const licenseError = validateLicense(formData.licenseNumber, formData.location)
         if (licenseError) {
           addError(licenseError, 'error')
@@ -198,6 +198,12 @@ function DoctorAuth({ onAuth }) {
           signatureDataUrl: formData.signatureDataUrl,
           passportDataUrl: formData.passportDataUrl,
         })
+        if (doctor?.pendingApproval) {
+          addError(doctor.message || 'Profile submitted. A platform admin must approve your account before you can sign in.', 'success', 10000)
+          setCompletingExistingUser(false)
+          setIsLogin(true)
+          return
+        }
         onAuth({ type: 'login', ...doctor })
         return
       }

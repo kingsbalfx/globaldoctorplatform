@@ -1033,6 +1033,9 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
 
     // Doctor
     const doctorEmail = email.toLowerCase()
+    const signatureDataUrl = req.body.signatureDataUrl || req.body.signature_data_url || ''
+    const passportDataUrl = req.body.passportDataUrl || req.body.passport_data_url || ''
+    const hasDoctorProfileDetails = Boolean(specialty && location && licenseNumber && signatureDataUrl && passportDataUrl)
     const doctorProfile = {
       email: doctorEmail,
       password: '',
@@ -1042,12 +1045,18 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       license_number: licenseNumber || 'PENDING',
       license_issuer: req.body.licenseIssuer || req.body.license_issuer || null,
       license_expiry: req.body.licenseExpiry || req.body.license_expiry || null,
-      signature_data_url: req.body.signatureDataUrl || req.body.signature_data_url || null,
-      passport_data_url: req.body.passportDataUrl || req.body.passport_data_url || null,
+      signature_data_url: signatureDataUrl || null,
+      passport_data_url: passportDataUrl || null,
     }
     let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', doctorEmail).maybeSingle()
     if (doctorLookupError) return res.status(500).json({ error: 'Failed to load doctor: ' + doctorLookupError.message })
     if (!doctor) {
+      if (!hasDoctorProfileDetails) {
+        return res.status(428).json({
+          profileRequired: true,
+          message: 'Complete your doctor profile before submitting for admin approval.',
+        })
+      }
       const newDoc = { ...doctorProfile, verified: false, created_at: new Date().toISOString() }
       const { data: insertedDoctor, error: insertDocErr } = await supabase
         .from('doctors_auth')
@@ -1084,14 +1093,31 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         message: 'Doctor profile submitted. A platform admin must approve your account before dashboard access is enabled.'
       })
     } else {
+      const profileId = String(doctor.id)
+      const { data: profile } = await supabase.from('doctors').select('*').eq('id', profileId).maybeSingle()
+      if (!hasDoctorProfileDetails) {
+        if (!doctor.verified) {
+          return res.status(403).json({
+            doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: profileId }),
+            pendingApproval: true,
+            message: 'Your doctor account is waiting for platform admin approval.',
+          })
+        }
+        if (profile) await supabase.from('doctors').update({ is_online: true }).eq('id', profileId)
+        return res.json({
+          doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: profileId, verified: true, license_verified: true, is_online: true }),
+          message: 'Doctor session ready',
+        })
+      }
+      const doctorAuthUpdates = { ...doctorProfile }
+      delete doctorAuthUpdates.password
       const { data: updatedDoctor, error: updateDocErr } = await supabase
         .from('doctors_auth')
-        .update(doctorProfile)
+        .update(doctorAuthUpdates)
         .eq('id', doctor.id)
         .select('*')
         .maybeSingle()
       if (updateDocErr) return res.status(500).json({ error: 'Failed to update doctor auth: ' + updateDocErr.message })
-      const profileId = String(doctor.id)
       const { data: existingDoctorProfile } = await supabase.from('doctors').select('id').eq('id', profileId).maybeSingle()
       if (existingDoctorProfile) {
         await supabase.from('doctors').update({
