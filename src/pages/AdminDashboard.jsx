@@ -517,12 +517,19 @@ function AdminDashboard({ doctor, onLogout }) {
                           <p className="mt-1 font-bold text-emerald-700">{patient.latest_consultation?.status || 'in_progress'}</p>
                           <p>{patient.assigned_at ? new Date(patient.assigned_at).toLocaleString() : ''}</p>
                           <p className="mt-1 text-xs text-slate-500">Facility: {patient.facility_id || 'N/A'}</p>
+                          {patient.video_waiting && (
+                            <p className="mt-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                              Patient waiting to join
+                            </p>
+                          )}
                           <button
                             type="button"
                             onClick={() => setSelectedConsultationPatient(patient)}
-                            className="mt-3 rounded-full bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600"
+                            className={`mt-3 rounded-full px-4 py-2 text-xs font-semibold text-white ${
+                              patient.video_waiting ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-brand-700 hover:bg-brand-600'
+                            }`}
                           >
-                            {isSelected ? 'Workspace open' : 'Open workspace'}
+                            {isSelected ? 'Workspace open' : patient.video_waiting ? 'Open and accept room' : 'Open workspace'}
                           </button>
                         </div>
                       </div>
@@ -569,7 +576,6 @@ function AdminDashboard({ doctor, onLogout }) {
                 userType="doctor"
                 patientId={selectedConsultationPatient.id}
                 doctorId={doctor.id}
-                autoStart
               />
 
               <div className="mt-8">

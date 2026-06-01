@@ -20,6 +20,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const [audioMuted, setAudioMuted] = useState(false)
   const [videoMuted, setVideoMuted] = useState(false)
   const [status, setStatus] = useState('Ready')
+  const [joinRequests, setJoinRequests] = useState([])
 
   const roomId = String(consultationId || '').trim()
   const participantId = String(userId || doctorId || patientId || userType || '').trim()
@@ -55,6 +56,24 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId, senderId: participantId, senderType: userType, type, payload }),
     })
+  }
+
+  const announceJoin = async () => {
+    await sendSignal('join_request', {
+      requestedAt: new Date().toISOString(),
+      userType,
+      patientId,
+      doctorId,
+    })
+  }
+
+  const acceptJoin = async () => {
+    await sendSignal('join_accept', {
+      acceptedAt: new Date().toISOString(),
+      doctorId,
+      patientId,
+    })
+    await startCall()
   }
 
   const attachLocalStream = async () => {
@@ -143,6 +162,16 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     }
   }
 
+  const pollJoinRequests = async () => {
+    if (!roomId || !participantId || callStarted || shouldCreateOffer) return
+    const response = await apiFetch(`/api/video-signal?roomId=${encodeURIComponent(roomId)}&senderId=${encodeURIComponent(participantId)}&since=0&type=join_request`)
+    const data = await response.json().catch(() => ({}))
+    const signals = Array.isArray(data.signals) ? data.signals : []
+    const latestBySender = new Map()
+    signals.forEach((signal) => latestBySender.set(signal.sender_id, signal))
+    setJoinRequests([...latestBySender.values()].sort((a, b) => Number(b.seq || 0) - Number(a.seq || 0)))
+  }
+
   const pollSignals = async () => {
     if (!roomId || !participantId || !callStarted) return
     const response = await apiFetch(`/api/video-signal?roomId=${encodeURIComponent(roomId)}&senderId=${encodeURIComponent(participantId)}&since=${lastSignalSeqRef.current}`)
@@ -169,7 +198,10 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       await createPeer()
       setCallStarted(true)
       setStatus(shouldCreateOffer ? 'Creating room' : 'Waiting for patient or facility')
-      if (shouldCreateOffer) await createOffer()
+      if (shouldCreateOffer) {
+        await announceJoin()
+        await createOffer()
+      }
       addError('Secure video room opened. Allow camera and microphone access when prompted.', 'success')
     } catch (error) {
       addError(error.message || 'Unable to start the video call.', 'error')
@@ -236,6 +268,16 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callStarted, roomId, participantId])
 
+  useEffect(() => {
+    if (callStarted || shouldCreateOffer || !roomId || !participantId) return undefined
+    const interval = window.setInterval(() => {
+      void pollJoinRequests().catch(() => null)
+    }, 3000)
+    void pollJoinRequests().catch(() => null)
+    return () => window.clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callStarted, shouldCreateOffer, roomId, participantId])
+
   useEffect(() => () => endCall(), [])
 
   return (
@@ -248,6 +290,16 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
             <p className="mt-2 text-xs font-semibold text-slate-500">Room: {roomId || 'No consultation selected'} | Status: {status}</p>
           </div>
           <div className="flex flex-wrap gap-3">
+            {!shouldCreateOffer && !callStarted && joinRequests.length > 0 && (
+              <button
+                type="button"
+                onClick={() => acceptJoin().catch((error) => addError(error.message, 'error'))}
+                disabled={connecting}
+                className="rounded-full bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Accept patient in room
+              </button>
+            )}
             <button
               type="button"
               onClick={startCall}
@@ -271,6 +323,11 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
             )}
           </div>
         </div>
+        {!shouldCreateOffer && !callStarted && joinRequests.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+            A patient or facility is waiting in this room. Press <span className="font-bold">Accept patient in room</span> to join.
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -284,14 +341,12 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
         </div>
       </div>
 
-      {callStarted && (
-        <VitalParametersMonitor
-          consultationId={consultationId}
-          patientId={patientId}
-          doctorId={doctorId}
-          userType={userType}
-        />
-      )}
+      <VitalParametersMonitor
+        consultationId={consultationId}
+        patientId={patientId}
+        doctorId={doctorId}
+        userType={userType}
+      />
     </div>
   )
 }

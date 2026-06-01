@@ -347,6 +347,7 @@ CREATE TABLE IF NOT EXISTS public.facility_referrals (
   facility_type text,
   reason text,
   notes text,
+  vitals_snapshot jsonb DEFAULT '[]'::jsonb,
   payout_ngn integer DEFAULT 0,
   status text DEFAULT 'pending',
   redeemed_at timestamptz,
@@ -503,6 +504,17 @@ CREATE TABLE IF NOT EXISTS public.vital_parameters (
   updated_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.video_signals (
+  id text PRIMARY KEY,
+  seq bigint,
+  room_id text NOT NULL,
+  sender_id text NOT NULL,
+  sender_type text,
+  type text NOT NULL,
+  payload jsonb,
+  created_at timestamptz DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
   id text PRIMARY KEY,
   user_email text NOT NULL,
@@ -589,6 +601,8 @@ ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS pin text;
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS referral_payout_ngn integer DEFAULT 0;
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+
+ALTER TABLE public.facility_referrals ADD COLUMN IF NOT EXISTS vitals_snapshot jsonb DEFAULT '[]'::jsonb;
 
 ALTER TABLE public.facility_wallets ADD COLUMN IF NOT EXISTS balance_ngn integer DEFAULT 0;
 ALTER TABLE public.facility_wallets ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
@@ -726,6 +740,14 @@ ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS metadata jsonb;
 ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS measured_at timestamptz DEFAULT now();
 ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
+ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS seq bigint;
+ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS room_id text;
+ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS sender_id text;
+ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS sender_type text;
+ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS type text;
+ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS payload jsonb;
+ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+
 ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS payment_id text;
 ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS patient_id text;
 ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS amount_ngn integer DEFAULT 0;
@@ -789,6 +811,7 @@ CREATE INDEX IF NOT EXISTS idx_vital_requests_patient_status ON public.vital_par
 CREATE INDEX IF NOT EXISTS idx_vitals_consultation ON public.vital_parameters(consultation_id);
 CREATE INDEX IF NOT EXISTS idx_vitals_patient ON public.vital_parameters(patient_id);
 CREATE INDEX IF NOT EXISTS idx_vitals_doctor ON public.vital_parameters(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_video_signals_room_seq ON public.video_signals(room_id, seq);
 CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_payment ON public.token_revenue_splits(payment_id);
 CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_patient ON public.token_revenue_splits(patient_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(created_at DESC);

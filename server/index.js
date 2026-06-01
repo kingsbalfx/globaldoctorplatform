@@ -1563,10 +1563,11 @@ app.post('/api/video-signal', (req, res) => {
 app.get('/api/video-signal', async (req, res) => {
   const roomId = String(req.query.roomId || '').trim()
   const senderId = String(req.query.senderId || '').trim()
+  const type = String(req.query.type || '').trim()
   const since = Number(req.query.since || 0)
   if (!roomId || !senderId) return res.status(400).json({ error: 'roomId and senderId are required' })
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('video_signals')
     .select('*')
     .eq('room_id', roomId)
@@ -1574,9 +1575,11 @@ app.get('/api/video-signal', async (req, res) => {
     .gt('seq', since)
     .order('seq', { ascending: true })
     .limit(100)
+  if (type) query = query.eq('type', type)
+  const { data, error } = await query
 
   const signals = error
-    ? getVideoSignalRoom(roomId).filter((message) => message.seq > since && message.sender_id !== senderId).slice(-100)
+    ? getVideoSignalRoom(roomId).filter((message) => message.seq > since && message.sender_id !== senderId && (!type || message.type === type)).slice(-100)
     : data || []
   res.json({ signals })
 })
@@ -2251,15 +2254,33 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
   const { data: patients, error: patientError } = await supabase.from('patients').select('*').in('id', patientIds)
   if (patientError) return res.status(500).json({ error: patientError.message })
 
+  const consultationIds = (consultations || []).map((item) => item.id).filter(Boolean)
+  const { data: videoJoinSignals } = consultationIds.length
+    ? await supabase
+      .from('video_signals')
+      .select('room_id, sender_id, sender_type, type, seq, created_at')
+      .in('room_id', consultationIds)
+      .in('type', ['join_request', 'join_accept'])
+      .order('seq', { ascending: false })
+      .limit(300)
+    : { data: [] }
+  const latestVideoSignalByRoom = new Map()
+  for (const signal of videoJoinSignals || []) {
+    if (!latestVideoSignalByRoom.has(signal.room_id)) latestVideoSignalByRoom.set(signal.room_id, signal)
+  }
+
   const patientById = new Map((patients || []).map((patient) => [patient.id, patient]))
   let rows = (consultations || []).map((consultation) => {
     const patient = patientById.get(consultation.patient_id) || { id: consultation.patient_id, name: 'Patient' }
+    const latestVideoSignal = latestVideoSignalByRoom.get(consultation.id)
     return {
       ...sanitizePatientForResponse(patient),
       latest_consultation: consultation,
       assigned_at: consultation.created_at,
       facility_id: consultation.facility_id || patient.facility_id || null,
       source: consultation.channel === 'direct_home' ? 'direct_patient' : 'facility',
+      video_waiting: latestVideoSignal?.type === 'join_request',
+      video_waiting_at: latestVideoSignal?.type === 'join_request' ? latestVideoSignal.created_at : null,
     }
   })
 
