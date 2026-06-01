@@ -90,6 +90,15 @@ function getVideoSignalRoom(roomId) {
   return videoSignalRooms.get(key)
 }
 
+function withTimeout(promise, ms, fallbackValue) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      setTimeout(() => resolve(fallbackValue), ms)
+    }),
+  ])
+}
+
 // ---------- Utility helpers ----------
 function safeNumber(value) {
   const parsed = typeof value === 'string' ? Number(value) : value
@@ -1545,19 +1554,17 @@ app.post('/api/video-signal', (req, res) => {
     payload,
     created_at: new Date().toISOString(),
   }
+  const room = getVideoSignalRoom(roomId)
+  room.push(message)
+  if (room.length > 300) room.splice(0, room.length - 300)
+
   supabase.from('video_signals').insert(message).then(({ error }) => {
-    if (error) {
-      const room = getVideoSignalRoom(roomId)
-      room.push(message)
-      if (room.length > 300) room.splice(0, room.length - 300)
-    }
-    res.status(201).json({ signal: message, message: 'Signal sent' })
-  }).catch(() => {
-    const room = getVideoSignalRoom(roomId)
-    room.push(message)
-    if (room.length > 300) room.splice(0, room.length - 300)
-    res.status(201).json({ signal: message, message: 'Signal sent' })
+    if (error) console.warn('Video signal stored in memory only:', error.message)
+  }).catch((error) => {
+    console.warn('Video signal Supabase write timed out or failed:', error.message)
   })
+
+  res.status(201).json({ signal: message, message: 'Signal sent' })
 })
 
 app.get('/api/video-signal', async (req, res) => {
@@ -1576,7 +1583,7 @@ app.get('/api/video-signal', async (req, res) => {
     .order('seq', { ascending: true })
     .limit(100)
   if (type) query = query.eq('type', type)
-  const { data, error } = await query
+  const { data, error } = await withTimeout(query, 2500, { data: null, error: new Error('video signal query timeout') })
 
   const signals = error
     ? getVideoSignalRoom(roomId).filter((message) => message.seq > since && message.sender_id !== senderId && (!type || message.type === type)).slice(-100)

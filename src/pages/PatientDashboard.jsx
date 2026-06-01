@@ -17,6 +17,7 @@ import LanguageSelector from '../components/LanguageSelector'
 import PrescriptionManager from '../components/PrescriptionManager'
 import LabRequestManager from '../components/LabRequestManager'
 import PatientClinicalSummaryDownload from '../components/PatientClinicalSummaryDownload'
+import VitalParametersMonitor from '../components/VitalParametersMonitor'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
@@ -403,7 +404,15 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       </div>
 
       {activeTab === 'overview' && (
-        <div className="grid gap-8 lg:grid-cols-2">
+        <div className="space-y-8">
+          <VitalParametersMonitor
+            consultationId={selectedConsultationId || activeConsultation?.id || activeConsultation?.consultation_id}
+            patientId={patient.id}
+            doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+            userType="patient"
+          />
+
+          <div className="grid gap-8 lg:grid-cols-2">
           <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
             <h2 className="text-xl font-semibold text-slate-900 mb-4">Quick Actions</h2>
             <div className="space-y-4">
@@ -452,6 +461,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
             )}
           </div>
         </div>
+        </div>
       )}
 
       {activeTab === 'appointments' && (
@@ -489,7 +499,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
               )}
             </div>
           </div>
-        </div>
+          </div>
       )}
 
       {activeTab === 'files' && <PatientFileManager patientId={patient.id} />}

@@ -87,10 +87,11 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   }
 
   const loadRequests = async () => {
-    if (!consultationId) return
-    const params = new URLSearchParams({ consultationId })
+    if (!consultationId && !patientId && !doctorId) return
+    const params = new URLSearchParams()
+    if (consultationId && userType === 'doctor') params.set('consultationId', consultationId)
     if (patientId) params.set('patientId', patientId)
-    if (doctorId) params.set('doctorId', doctorId)
+    if (doctorId && userType === 'doctor') params.set('doctorId', doctorId)
     const response = await apiFetch(`/api/vital-requests?${params.toString()}`)
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || 'Failed to load vital requests')
@@ -112,10 +113,11 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   }
 
   const loadVitals = async () => {
-    if (!consultationId) return
-    const params = new URLSearchParams({ consultationId })
+    if (!consultationId && !patientId && !doctorId) return
+    const params = new URLSearchParams()
+    if (consultationId && userType === 'doctor') params.set('consultationId', consultationId)
     if (patientId) params.set('patientId', patientId)
-    if (doctorId) params.set('doctorId', doctorId)
+    if (doctorId && userType === 'doctor') params.set('doctorId', doctorId)
     const response = await apiFetch(`/api/vital-parameters?${params.toString()}`)
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || 'Failed to load vital readings')
@@ -145,15 +147,23 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   }
 
   const saveVital = async ({ request, value, unit, source, confidence, metadata }) => {
+    const resolvedConsultationId = consultationId || request?.consultation_id || activeRequest?.consultation_id
+    const resolvedPatientId = patientId || request?.patient_id || activeRequest?.patient_id
+    const resolvedDoctorId = doctorId || request?.doctor_id || activeRequest?.doctor_id
+    const resolvedParameterName = request?.parameter_name || activeRequest?.parameter_name
+    if (!resolvedConsultationId || !resolvedPatientId || !resolvedParameterName) {
+      addError('The vital request is missing consultation or patient details. Refresh the room and try again.', 'warning')
+      return
+    }
     const response = await apiFetch('/api/vital-parameters', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        consultation_id: consultationId,
-        patient_id: patientId,
-        doctor_id: doctorId,
+        consultation_id: resolvedConsultationId,
+        patient_id: resolvedPatientId,
+        doctor_id: resolvedDoctorId,
         request_id: request?.id || null,
-        parameter_name: request?.parameter_name || activeRequest?.parameter_name,
+        parameter_name: resolvedParameterName,
         parameter_value: value,
         unit,
         source,

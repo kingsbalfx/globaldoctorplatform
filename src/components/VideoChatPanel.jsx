@@ -78,7 +78,20 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
 
   const attachLocalStream = async () => {
     if (streamRef.current) return streamRef.current
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 24, max: 30 },
+      },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
+      },
+    })
     streamRef.current = stream
     if (localVideoRef.current) localVideoRef.current.srcObject = stream
     return stream
@@ -288,6 +301,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
             <h2 className="text-xl font-semibold text-slate-900">Embedded Video Consultation</h2>
             <p className="text-sm text-slate-500">Native browser video, audio, and voice call for this consultation room.</p>
             <p className="mt-2 text-xs font-semibold text-slate-500">Room: {roomId || 'No consultation selected'} | Status: {status}</p>
+            <p className="mt-1 text-xs text-slate-500">Audio uses echo cancellation and noise suppression. Use headphones if doctor and patient are in the same room.</p>
           </div>
           <div className="flex flex-wrap gap-3">
             {!shouldCreateOffer && !callStarted && joinRequests.length > 0 && (
