@@ -12,6 +12,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const remoteVideoRef = useRef(null)
   const peerRef = useRef(null)
   const streamRef = useRef(null)
+  const pendingIceRef = useRef([])
   const lastSignalSeqRef = useRef(0)
   const processedSignalsRef = useRef(new Set())
   const [callStarted, setCallStarted] = useState(false)
@@ -31,7 +32,20 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const resetPeerOnly = () => {
     peerRef.current?.close()
     peerRef.current = null
+    pendingIceRef.current = []
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+  }
+
+  const flushPendingIce = async (peer) => {
+    if (!peer?.remoteDescription) return
+    const candidates = pendingIceRef.current.splice(0)
+    for (const candidate of candidates) {
+      try {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate))
+      } catch {
+        // Ignore stale ICE candidates from previous browser attempts.
+      }
+    }
   }
 
   const sendSignal = async (type, payload) => {
@@ -97,23 +111,35 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (isClosedPeer(peer)) return
 
     if (signal.type === 'offer') {
-      if (peer.signalingState !== 'stable') return
+      if (peer.signalingState !== 'stable') {
+        await peer.setLocalDescription({ type: 'rollback' }).catch(() => null)
+      }
       await peer.setRemoteDescription(new RTCSessionDescription(signal.payload))
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
       await sendSignal('answer', answer)
+      await flushPendingIce(peer)
       setStatus('Answer sent')
       return
     }
 
     if (signal.type === 'answer' && peer.signalingState === 'have-local-offer') {
       await peer.setRemoteDescription(new RTCSessionDescription(signal.payload))
+      await flushPendingIce(peer)
       setStatus('Connected')
       return
     }
 
-    if (signal.type === 'ice' && peer.remoteDescription) {
-      await peer.addIceCandidate(new RTCIceCandidate(signal.payload))
+    if (signal.type === 'ice') {
+      if (!peer.remoteDescription) {
+        pendingIceRef.current.push(signal.payload)
+        return
+      }
+      try {
+        await peer.addIceCandidate(new RTCIceCandidate(signal.payload))
+      } catch {
+        // Candidate may belong to an already-closed negotiation attempt.
+      }
     }
   }
 

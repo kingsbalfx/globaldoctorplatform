@@ -13,7 +13,8 @@ dotenv.config()
 
 const app = express()
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '8mb' }))
+app.use(express.urlencoded({ extended: true, limit: '8mb' }))
 
 const AGORA_APP_ID = process.env.AGORA_APP_ID
 const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE
@@ -1534,10 +1535,9 @@ app.post('/api/video-signal', (req, res) => {
     return res.status(400).json({ error: 'roomId, senderId, type, and payload are required' })
   }
 
-  const room = getVideoSignalRoom(roomId)
   const message = {
     id: generateId('sig'),
-    seq: ++videoSignalSeq,
+    seq: Date.now() * 1000 + (++videoSignalSeq % 1000),
     room_id: String(roomId),
     sender_id: String(senderId),
     sender_type: senderType || 'user',
@@ -1545,21 +1545,39 @@ app.post('/api/video-signal', (req, res) => {
     payload,
     created_at: new Date().toISOString(),
   }
-  room.push(message)
-  if (room.length > 300) room.splice(0, room.length - 300)
-  res.status(201).json({ signal: message, message: 'Signal sent' })
+  supabase.from('video_signals').insert(message).then(({ error }) => {
+    if (error) {
+      const room = getVideoSignalRoom(roomId)
+      room.push(message)
+      if (room.length > 300) room.splice(0, room.length - 300)
+    }
+    res.status(201).json({ signal: message, message: 'Signal sent' })
+  }).catch(() => {
+    const room = getVideoSignalRoom(roomId)
+    room.push(message)
+    if (room.length > 300) room.splice(0, room.length - 300)
+    res.status(201).json({ signal: message, message: 'Signal sent' })
+  })
 })
 
-app.get('/api/video-signal', (req, res) => {
+app.get('/api/video-signal', async (req, res) => {
   const roomId = String(req.query.roomId || '').trim()
   const senderId = String(req.query.senderId || '').trim()
   const since = Number(req.query.since || 0)
   if (!roomId || !senderId) return res.status(400).json({ error: 'roomId and senderId are required' })
 
-  const room = getVideoSignalRoom(roomId)
-  const signals = room
-    .filter((message) => message.seq > since && message.sender_id !== senderId)
-    .slice(-100)
+  const { data, error } = await supabase
+    .from('video_signals')
+    .select('*')
+    .eq('room_id', roomId)
+    .neq('sender_id', senderId)
+    .gt('seq', since)
+    .order('seq', { ascending: true })
+    .limit(100)
+
+  const signals = error
+    ? getVideoSignalRoom(roomId).filter((message) => message.seq > since && message.sender_id !== senderId).slice(-100)
+    : data || []
   res.json({ signals })
 })
 
@@ -2476,14 +2494,22 @@ app.post('/api/referrals/facility/create', async (req, res) => {
   if (!facility) return res.status(404).json({ error: 'Facility not found' })
 
   const code = `GD-${facility.type.toUpperCase().slice(0, 3)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`
+  const { data: latestVitals } = await supabase
+    .from('vital_parameters')
+    .select('*')
+    .eq('patient_id', patientId)
+    .order('measured_at', { ascending: false })
+    .limit(20)
   const referral = {
     id: generateId('fref'), code, from_doctor_id: doctorId, patient_id: patientId,
     facility_id: facilityId, facility_type: facility.type, reason, notes: notes || null,
+    vitals_snapshot: latestVitals || [],
     payout_ngn: facility.referral_payout_ngn || 0, status: 'pending',
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
   }
-  await supabase.from('facility_referrals').insert(referral)
+  const insert = await insertAdaptive('facility_referrals', referral)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
 
   res.status(201).json({ referral, referralCode: code, message: 'Facility referral created' })
 })
@@ -2819,6 +2845,20 @@ app.post('/api/vital-requests', async (req, res) => {
   }
   const insert = await insertAdaptive('vital_parameter_requests', request)
   if (insert.error) return res.status(500).json({ error: insert.error.message })
+  await insertAdaptive('notifications', {
+    id: generateId('notif'),
+    user_id: patientId,
+    user_type: 'patient',
+    notification_type: 'vital_request',
+    type: 'vital_request',
+    title: 'Vital sign requested',
+    message: instructions || `Your doctor requested ${parameterName}. Open the video room to capture and save it.`,
+    related_resource_type: 'vital_parameter_request',
+    related_resource_id: request.id,
+    is_read: false,
+    notification_channels: ['in_app', 'voice_prompt'],
+    created_at: new Date().toISOString(),
+  }).catch(() => null)
   res.status(201).json({ request, message: 'Vital request sent' })
 })
 
@@ -2902,6 +2942,22 @@ app.post('/api/vital-parameters', async (req, res) => {
       status: 'completed',
       completed_at: new Date().toISOString(),
     }).eq('id', request_id)
+  }
+  if (doctor_id) {
+    await insertAdaptive('notifications', {
+      id: generateId('notif'),
+      user_id: doctor_id,
+      user_type: 'doctor',
+      notification_type: 'vital_recorded',
+      type: 'vital_recorded',
+      title: 'Vital sign saved',
+      message: `${parameter_name} was captured and saved for this consultation.`,
+      related_resource_type: 'vital_parameter',
+      related_resource_id: vital.id,
+      is_read: false,
+      notification_channels: ['in_app'],
+      created_at: new Date().toISOString(),
+    }).catch(() => null)
   }
   res.status(201).json({ vital, message: 'Vital parameter recorded' })
 })

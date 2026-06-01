@@ -97,14 +97,16 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     const rows = Array.isArray(data.requests) ? data.requests : []
     setRequests(rows)
 
-    if (userType === 'patient') {
-      const pending = rows
-        .filter((request) => request.status === 'pending' && !handledRequestsRef.current.has(request.id))
+    if (userType !== 'doctor') {
+      const pendingRows = rows
+        .filter((request) => request.status === 'pending')
         .sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
-      if (pending) {
-        handledRequestsRef.current.add(pending.id)
-        setActiveRequest(pending)
-        speak(pending.instructions || getVital(pending.parameter_name).guide)
+      if (pendingRows) {
+        setActiveRequest((current) => current?.id ? current : pendingRows)
+        if (!handledRequestsRef.current.has(pendingRows.id)) {
+          handledRequestsRef.current.add(pendingRows.id)
+          speak(`Your doctor requested ${getVital(pendingRows.parameter_name).label}. ${pendingRows.instructions || getVital(pendingRows.parameter_name).guide}`)
+        }
       }
     }
   }
@@ -233,7 +235,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
           const value = request.parameter_name === 'oxygen_level'
             ? Math.max(92, Math.min(100, Math.round(95 + ((bpm || 72) % 6))))
             : bpm
-          if (!value) {
+      if (!value) {
             addError('Could not detect a stable pulse. Ask the patient to cover the camera fully and try again.', 'warning')
             return
           }
@@ -344,10 +346,48 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         </div>
       )}
 
+      {userType !== 'doctor' && pending.length > 0 && (
+        <div className="rounded-3xl bg-white p-6 shadow-lg">
+          <h3 className="text-lg font-semibold text-slate-900">Doctor Vital Requests</h3>
+          <p className="mt-1 text-sm text-slate-500">Tap a request to hear the guide and capture the reading.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {pending.map((request) => {
+              const vital = getVital(request.parameter_name)
+              return (
+                <button
+                  key={request.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveRequest(request)
+                    speak(`Your doctor requested ${vital.label}. ${request.instructions || vital.guide}`)
+                  }}
+                  className={`rounded-2xl border p-4 text-left ${activeRequest?.id === request.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 bg-slate-50 hover:border-brand-300'}`}
+                >
+                  <div className="mb-2 h-10 w-10" dangerouslySetInnerHTML={{ __html: vital.icon }} />
+                  <p className="font-bold text-slate-900">{vital.label}</p>
+                  <p className="mt-1 text-xs text-slate-600">{request.instructions || vital.guide}</p>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {userType !== 'doctor' && activeRequest && (
         <div className="rounded-3xl border border-brand-200 bg-brand-50 p-6 shadow-lg">
-          <h3 className="text-lg font-semibold text-slate-900">{getVital(activeRequest.parameter_name).label} requested</h3>
-          <p className="mt-2 text-sm text-slate-700">{activeRequest.instructions || getVital(activeRequest.parameter_name).guide}</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">{getVital(activeRequest.parameter_name).label} requested</h3>
+              <p className="mt-2 text-sm text-slate-700">{activeRequest.instructions || getVital(activeRequest.parameter_name).guide}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => speak(`Your doctor requested ${getVital(activeRequest.parameter_name).label}. ${activeRequest.instructions || getVital(activeRequest.parameter_name).guide}`)}
+              className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"
+            >
+              Hear guide
+            </button>
+          </div>
           {getVital(activeRequest.parameter_name).method === 'camera' ? (
             <div className="mt-4 space-y-4">
               <video ref={videoRef} autoPlay playsInline muted className="aspect-video w-full rounded-2xl bg-slate-950 object-cover" />
