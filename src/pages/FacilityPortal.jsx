@@ -68,8 +68,10 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
   const [createdPatient, setCreatedPatient] = useState(null)
   const [facilityPatients, setFacilityPatients] = useState([])
   const [facilityPatientTotal, setFacilityPatientTotal] = useState(0)
+  const [facilityStats, setFacilityStats] = useState(null)
   const [patientSearch, setPatientSearch] = useState('')
   const [patientListLimit, setPatientListLimit] = useState(10)
+  const [editingPatient, setEditingPatient] = useState(null)
 
   const [selectedPatientId, setSelectedPatientId] = useState('')
   const [patientRecord, setPatientRecord] = useState(null)
@@ -141,6 +143,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
       setFacility(data.facility || null)
       setWallet(data.wallet || null)
       setTransactions(Array.isArray(data.transactions) ? data.transactions : [])
+      await loadFacilityStats()
       setStep('dashboard')
       setRedeemResult(null)
       setRedeemCode('')
@@ -220,12 +223,27 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
     }
   }
 
+  const loadFacilityStats = async () => {
+    if (!facility?.id || !pin.trim()) return
+    try {
+      const params = new URLSearchParams({ pin: pin.trim() })
+      const response = await apiFetch(`/api/facilities/${encodeURIComponent(facility.id)}/stats?${params.toString()}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to load facility stats')
+      setFacilityStats(data)
+    } catch (err) {
+      setFacilityStats(null)
+      setError(err.message)
+    }
+  }
+
   useEffect(() => {
     if (step !== 'dashboard') return
     if (facility?.type === 'phc' || facility?.type === 'private_clinic') {
       void loadOnlineDoctors()
     }
     void loadFacilityPatients(10, '')
+    void loadFacilityStats()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, facility?.id])
 
@@ -316,6 +334,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
       setPatientPin('')
       addError(`Patient registered. ID: ${data.patient?.id || 'created'}`, 'success', 9000)
       await loadFacilityPatients(patientListLimit, patientSearch)
+      await loadFacilityStats()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -335,6 +354,36 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
       addError('Patient record loaded.', 'success')
     } catch (err) {
       setPatientRecord(null)
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const savePatientEdit = async (event) => {
+    event.preventDefault()
+    if (!facility?.id || !editingPatient?.id) return
+    setLoading(true)
+    setError('')
+    try {
+      const response = await apiFetch(`/api/facilities/${encodeURIComponent(facility.id)}/patients/${encodeURIComponent(editingPatient.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin: pin.trim(),
+          name: editingPatient.name,
+          phone: editingPatient.phone,
+          patientPin: editingPatient.portalPin,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to update patient')
+      setEditingPatient(null)
+      setSelectedPatientId(data.patient?.id || selectedPatientId)
+      setPatientRecord((current) => current?.patient?.id === data.patient?.id ? { ...current, patient: data.patient } : current)
+      await loadFacilityPatients(patientListLimit, patientSearch)
+      addError('Patient record updated.', 'success')
+    } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
@@ -377,6 +426,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
       setConsultation(data.consultation || null)
       setConsultSplit(data.split || null)
       await refresh()
+      await loadFacilityStats()
       addError('Consultation started. Video room is ready below.', 'success')
     } catch (err) {
       setError(err.message)
@@ -404,6 +454,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
       setConsultation(data.consultation || consultation)
       setConsultSplit(data.split || consultSplit)
       await refresh()
+      await loadFacilityStats()
       addError('Consultation completed and wallet split recorded.', 'success')
     } catch (err) {
       setError(err.message)
@@ -428,6 +479,8 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
     setCreatedPatient(null)
     setFacilityPatients([])
     setFacilityPatientTotal(0)
+    setFacilityStats(null)
+    setEditingPatient(null)
     setPatientSearch('')
     setPatientListLimit(10)
     setSelectedPatientId('')
@@ -599,6 +652,22 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
         </div>
 
         {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          {[
+            ['Patients today', facilityStats?.patients?.today ?? 0],
+            ['Patients week', facilityStats?.patients?.this_week ?? 0],
+            ['Patients total', facilityStats?.patients?.total ?? facilityPatientTotal],
+            ['Consults today', facilityStats?.consultations?.today ?? 0],
+            ['Consults week', facilityStats?.consultations?.this_week ?? 0],
+            ['Consults total', facilityStats?.consultations?.total ?? 0],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+              <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+            </div>
+          ))}
+        </div>
 
         {activeTab === 'consult' && (
           <div className="mt-8">
@@ -841,19 +910,13 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                       </div>
                     ) : (
                       facilityPatients.map((item, index) => (
-                        <button
+                        <div
                           key={item.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedPatientId(item.id)
-                            setPatientRecord({ patient: item, files: [], referrals: { specialty: [], facility: [] }, appointments: [], consultations_ng: [], labs: { orders: [], payments: [] } })
-                            addError(`Selected ${item.name || item.id}.`, 'success')
-                          }}
                           className={`rounded-2xl border px-4 py-3 text-left transition ${
                             selectedPatientId === item.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 bg-slate-50 hover:border-brand-200'
                           }`}
                         >
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                               <p className="text-sm font-bold text-slate-900">
                                 {index + 1}. {item.name || 'Unnamed patient'}
@@ -864,11 +927,65 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                               <p>{item.phone || 'No phone'}</p>
                               <p>{item.created_at ? new Date(item.created_at).toLocaleString() : ''}</p>
                             </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPatientId(item.id)
+                                  setPatientRecord({ patient: item, files: [], referrals: { specialty: [], facility: [] }, appointments: [], consultations_ng: [], labs: { orders: [], payments: [] } })
+                                  addError(`Selected ${item.name || item.id}.`, 'success')
+                                }}
+                                className="rounded-full bg-brand-700 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600"
+                              >
+                                Select
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPatient({ id: item.id, name: item.name || '', phone: item.phone || '', portalPin: '' })}
+                                className="rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                              >
+                                Edit
+                              </button>
+                            </div>
                           </div>
-                        </button>
+                        </div>
                       ))
                     )}
                   </div>
+
+                  {editingPatient && (
+                    <form onSubmit={savePatientEdit} className="mt-5 rounded-2xl border border-brand-200 bg-brand-50 p-4">
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <input
+                          value={editingPatient.name}
+                          onChange={(e) => setEditingPatient((prev) => ({ ...prev, name: e.target.value }))}
+                          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500"
+                          placeholder="Patient name"
+                        />
+                        <input
+                          value={editingPatient.phone}
+                          onChange={(e) => setEditingPatient((prev) => ({ ...prev, phone: e.target.value }))}
+                          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500"
+                          placeholder="Phone"
+                        />
+                        <input
+                          inputMode="numeric"
+                          value={editingPatient.portalPin}
+                          onChange={(e) => setEditingPatient((prev) => ({ ...prev, portalPin: e.target.value }))}
+                          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500"
+                          placeholder="New 6-digit PIN (optional)"
+                        />
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="submit" disabled={loading} className="rounded-full bg-brand-700 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:opacity-50">
+                          Save patient
+                        </button>
+                        <button type="button" onClick={() => setEditingPatient(null)} className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100">
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
 
                   {facilityPatients.length < facilityPatientTotal && (
                     <button

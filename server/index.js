@@ -70,6 +70,19 @@ const generateId = (prefix) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).
 const videoSignalRooms = new Map()
 let videoSignalSeq = 0
 
+function generateReadablePatientId(kind = 'HRN') {
+  const code = String(kind || 'HRN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4) || 'HRN'
+  const stamp = Date.now().toString().slice(-6)
+  const random = crypto.randomBytes(2).toString('hex').toUpperCase()
+  return `PID-${code}-${stamp}${random}`
+}
+
+function getPatientIdPrefixForFacilityType(type) {
+  if (String(type || '').toLowerCase() === 'phc') return 'PHC'
+  if (String(type || '').toLowerCase() === 'private_clinic') return 'CLC'
+  return 'FAC'
+}
+
 function getVideoSignalRoom(roomId) {
   const key = String(roomId || '').trim()
   if (!videoSignalRooms.has(key)) videoSignalRooms.set(key, [])
@@ -220,6 +233,7 @@ async function creditTokenPurchasePayment(payment, source = 'kora') {
 
   const tokens = await creditPatientTokens(patientId, tokensExpected, `Token purchase via ${source}`)
   await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+  await recordTokenRevenueSplit(payment, metadata).catch((error) => console.warn('Token revenue split skipped:', error.message))
   return { credited: true, tokens, reason: 'Tokens credited' }
 }
 
@@ -337,6 +351,30 @@ function sanitizeDoctorForResponse(doctor) {
   }
 }
 
+async function findPatientByIdentifier(identifier) {
+  const raw = String(identifier || '').trim()
+  if (!raw) return null
+  const normalized = raw.toUpperCase()
+
+  const exact = await supabase.from('patients').select('*').eq('id', raw).maybeSingle()
+  if (exact.data) return exact.data
+
+  if (normalized !== raw) {
+    const upper = await supabase.from('patients').select('*').eq('id', normalized).maybeSingle()
+    if (upper.data) return upper.data
+  }
+
+  const fuzzy = await supabase.from('patients').select('*').ilike('id', raw).limit(1).maybeSingle()
+  if (fuzzy.data) return fuzzy.data
+
+  if (/^\d{6}$/.test(raw)) {
+    const byPin = await supabase.from('patients').select('*').eq('portal_pin', raw).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (byPin.data) return byPin.data
+  }
+
+  return null
+}
+
 function normalizeDoctorPayload(body = {}) {
   return {
     email: String(body.email || '').trim().toLowerCase(),
@@ -352,6 +390,7 @@ function normalizeDoctorPayload(body = {}) {
     licenseIssuer: String(body.licenseIssuer || body.license_issuer || '').trim(),
     licenseExpiry: body.licenseExpiry || body.license_expiry || null,
     signatureDataUrl: String(body.signatureDataUrl || body.signature_data_url || '').trim(),
+    passportDataUrl: String(body.passportDataUrl || body.passport_data_url || '').trim(),
     bankCode: String(body.bankCode || body.bank_code || '').trim(),
     bankAccount: String(body.bankAccount || body.bank_account || '').trim(),
     currency: String(body.currency || '').trim(),
@@ -468,6 +507,62 @@ async function updateDoctorEarnings(doctorId, tokens) {
   const updated = Math.max(0, current + tokens)
   await supabase.from('doctors').update({ earnings_tokens: updated }).eq('id', doctorId)
   return updated
+}
+
+function getFacilityConsultationUnitNgn(doctor = {}) {
+  const specialty = String(doctor.specialty || '').toLowerCase()
+  if (!specialty || specialty.includes('general')) return 500
+  if (['cardiology', 'neurology', 'oncology', 'orthopedics', 'obstetrics', 'gyn', 'urology', 'nephrology'].some((item) => specialty.includes(item))) {
+    return 1500
+  }
+  return 1000
+}
+
+function calculateFacilitySpecialtySplit({ channel, doctor, durationMin }) {
+  const blocks = Math.max(1, Math.ceil((Number(durationMin) || 15) / 15))
+  const unit = getFacilityConsultationUnitNgn(doctor)
+  const total = unit * blocks
+  const doctorShare = Math.round(total * 0.5)
+  const facilityShare = Math.round(total * 0.25)
+  const dataFee = Math.round(total * 0.05)
+  const platformShare = total - doctorShare - facilityShare - dataFee
+
+  return {
+    channel,
+    track: doctor?.specialty || 'facility_specialty',
+    durationMin: Math.max(1, Math.round(Number(durationMin) || 15)),
+    blocks,
+    total_ngn: total,
+    patient_copay_ngn: total,
+    facility_topup_ngn: 0,
+    doctor_ngn: doctorShare,
+    facility_ngn: facilityShare,
+    platform_ngn: platformShare,
+    data_fee_ngn: dataFee,
+  }
+}
+
+async function recordTokenRevenueSplit(payment, metadata = {}) {
+  const amountUsd = Number(metadata.amountUSD || metadata.amount_usd || 0)
+  const amountNgn = Number(payment?.amount || 0)
+  const baseAmount = amountNgn > 0 ? amountNgn : Math.round(amountUsd * KORA_USD_EXCHANGE_RATE)
+  if (!baseAmount) return
+  await insertAdaptive('token_revenue_splits', {
+    id: generateId('trsplit'),
+    payment_id: payment.id,
+    patient_id: payment.patient_id || metadata.patientId || null,
+    amount_ngn: baseAmount,
+    doctors_pool_ngn: Math.round(baseAmount * 0.5),
+    admin_ngn: Math.round(baseAmount * 0.4),
+    company_ngn: baseAmount - Math.round(baseAmount * 0.5) - Math.round(baseAmount * 0.4),
+    status: 'pending_distribution',
+    metadata: {
+      source: 'token_purchase',
+      rule: '50% doctors by specialty/time, 40% admin, 10% company',
+      tokensExpected: metadata.tokensExpected || null,
+    },
+    created_at: new Date().toISOString(),
+  })
 }
 
 async function getFacilityById(facilityId) {
@@ -628,9 +723,9 @@ app.post('/api/doctors/login', async (req, res) => {
 
 // ---------- DOCTOR REGISTRATION ----------
 app.post('/api/doctors/register', async (req, res) => {
-  const { email, password, name, specialty, location, licenseNumber, signatureDataUrl } = req.body
-  if (!email || !name || !specialty || !location || !licenseNumber) {
-    return res.status(400).json({ error: 'All fields are required' })
+  const { email, password, name, specialty, location, licenseNumber, signatureDataUrl, passportDataUrl } = req.body
+  if (!email || !name || !specialty || !location || !licenseNumber || !signatureDataUrl || !passportDataUrl) {
+    return res.status(400).json({ error: 'Email, name, specialty, country, license number, signature, and passport photo are required' })
   }
 
   const { data: existing } = await supabase.from('doctors_auth').select('id').eq('email', email).maybeSingle()
@@ -640,6 +735,7 @@ app.post('/api/doctors/register', async (req, res) => {
     email, password, name, specialty, location,
     license_number: licenseNumber,
     signature_data_url: signatureDataUrl || null,
+    passport_data_url: passportDataUrl || null,
     verified: false, created_at: new Date().toISOString()
   }
   const { data: authRow, error: authInsertError } = await supabase
@@ -658,6 +754,7 @@ app.post('/api/doctors/register', async (req, res) => {
     fee: 50, price: { basic: 50, premium: 100 },
     license_verified: false, license_number: licenseNumber,
     signature_data_url: signatureDataUrl || null,
+    passport_data_url: passportDataUrl || null,
     created_at: new Date().toISOString()
   }
   const { error: profileInsertError } = await insertAdaptive('doctors', profile)
@@ -702,7 +799,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       let { data: patient, error: patientLookupError } = await supabase.from('patients').select('*').eq('email', patientEmail).maybeSingle()
       if (patientLookupError) return res.status(500).json({ error: 'Failed to load patient: ' + patientLookupError.message })
       if (!patient) {
-        const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
+        const id = generateReadablePatientId('HRN')
         const newPatient = {
           id,
           ...patientProfile,
@@ -751,6 +848,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       location: location || country || 'Nigeria',
       license_number: licenseNumber || 'PENDING',
       signature_data_url: req.body.signatureDataUrl || req.body.signature_data_url || null,
+      passport_data_url: req.body.passportDataUrl || req.body.passport_data_url || null,
     }
     let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', doctorEmail).maybeSingle()
     if (doctorLookupError) return res.status(500).json({ error: 'Failed to load doctor: ' + doctorLookupError.message })
@@ -778,6 +876,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         license_verified: false,
         license_number: insertedDoctor.license_number,
         signature_data_url: insertedDoctor.signature_data_url || null,
+        passport_data_url: insertedDoctor.passport_data_url || null,
         created_at: new Date().toISOString()
       })
       if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
@@ -805,6 +904,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           is_online: true,
           license_number: doctorProfile.license_number,
           signature_data_url: doctorProfile.signature_data_url,
+          passport_data_url: doctorProfile.passport_data_url,
         }).eq('id', profileId)
       } else {
         await supabase.from('doctors').insert({
@@ -821,6 +921,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           license_verified: false,
           license_number: doctorProfile.license_number,
           signature_data_url: doctorProfile.signature_data_url,
+          passport_data_url: doctorProfile.passport_data_url,
           created_at: new Date().toISOString(),
         })
       }
@@ -903,7 +1004,7 @@ app.post('/api/patients/register', async (req, res) => {
     })
   }
 
-  const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
+  const id = generateReadablePatientId('HRN')
   const newPatient = {
     id, email, password, name, date_of_birth: dateOfBirth,
     phone, country, language: language || 'English',
@@ -961,7 +1062,7 @@ app.post('/api/patients/facility/register', async (req, res) => {
   const { data: existing } = await supabase.from('patients').select('id').eq('portal_pin', patientPin).eq('name', fullName).maybeSingle()
   if (existing) return res.status(409).json({ error: 'Patient already exists with this name and PIN' })
 
-  const id = `patient-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`
+  const id = generateReadablePatientId(getPatientIdPrefixForFacilityType(facility.type))
   const newPatient = {
     id, email: null, password: null, portal_pin: patientPin,
     name: fullName, date_of_birth: null, phone, country: 'NG', language: 'English',
@@ -993,11 +1094,16 @@ app.post('/api/patients/facility/login', async (req, res) => {
 
   if (!/^\d{6}$/.test(patientPin)) return res.status(400).json({ error: 'PIN must be a 6-digit number' })
 
-  let query = supabase.from('patients').select('*').eq('portal_pin', patientPin)
-  if (patientId) query = query.eq('id', patientId)
-  else if (fullName) query = query.eq('name', fullName)
-
-  const { data: patient } = await query.maybeSingle()
+  let patient = null
+  if (patientId) {
+    const found = await findPatientByIdentifier(patientId)
+    if (found?.portal_pin === patientPin) patient = found
+  } else {
+    let query = supabase.from('patients').select('*').eq('portal_pin', patientPin)
+    if (fullName) query = query.eq('name', fullName)
+    const { data } = await query.maybeSingle()
+    patient = data
+  }
   if (!patient) return res.status(401).json({ error: 'Invalid credentials' })
 
   await supabase.from('patients').update({ is_online: true }).eq('id', patient.id)
@@ -1487,24 +1593,28 @@ app.post('/api/prescriptions', async (req, res) => {
     return res.status(400).json({ error: 'consultationId, patientId, doctorId, and medications are required' })
   }
 
-  let signatureDataUrl = doctorSignatureDataUrl || null
-  if (!signatureDataUrl) {
-    const { data: doctorRow } = await supabase
+  const [{ data: doctorRow }, patientRecord] = await Promise.all([
+    supabase
       .from('doctors')
-      .select('signature_data_url')
+      .select('name, license_number, signature_data_url')
       .eq('id', doctorId)
-      .maybeSingle()
-    signatureDataUrl = doctorRow?.signature_data_url || null
-  }
+      .maybeSingle(),
+    findPatientByIdentifier(patientId),
+  ])
+  const signatureDataUrl = doctorSignatureDataUrl || doctorRow?.signature_data_url || null
+  const resolvedPatientId = patientRecord?.id || patientId
+  const resolvedPatientName = patientName || patientRecord?.name || 'Patient'
+  const resolvedDoctorName = doctorName || doctorRow?.name || 'Doctor'
+  const resolvedDoctorLicenseNumber = doctorLicenseNumber || doctorRow?.license_number || null
 
   const row = {
     id: generateId('rx'),
     consultation_id: consultationId,
-    patient_id: patientId,
-    patient_name: patientName || 'Patient',
+    patient_id: resolvedPatientId,
+    patient_name: resolvedPatientName,
     doctor_id: doctorId,
-    doctor_name: doctorName || 'Doctor',
-    doctor_license_number: doctorLicenseNumber || null,
+    doctor_name: resolvedDoctorName,
+    doctor_license_number: resolvedDoctorLicenseNumber,
     doctor_signature_data_url: signatureDataUrl,
     facility_id: facilityId || null,
     company_name: 'GlobalDoc',
@@ -1522,12 +1632,12 @@ app.post('/api/prescriptions', async (req, res) => {
 
   await insertAdaptive('notifications', {
     id: generateId('notif'),
-    user_id: patientId,
+    user_id: resolvedPatientId,
     user_type: 'patient',
     notification_type: 'prescription',
     type: 'prescription',
     title: 'New prescription available',
-    message: `Dr. ${doctorName || 'your doctor'} sent a prescription you can download.`,
+    message: `Dr. ${resolvedDoctorName || 'your doctor'} sent a prescription you can download.`,
     related_resource_type: 'prescription',
     related_resource_id: row.id,
     is_read: false,
@@ -1688,8 +1798,8 @@ app.get('/api/admin/doctors', async (req, res) => {
 app.post('/api/admin/doctors', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
   const payload = normalizeDoctorPayload(req.body)
-  if (!payload.email || !payload.password || !payload.name || !payload.specialty || !payload.location || !payload.licenseNumber) {
-    return res.status(400).json({ error: 'Email, password, name, specialty, location, and license number are required' })
+  if (!payload.email || !payload.password || !payload.name || !payload.specialty || !payload.location || !payload.licenseNumber || !payload.signatureDataUrl || !payload.passportDataUrl) {
+    return res.status(400).json({ error: 'Email, password, name, specialty, country, license number, signature, and passport photo are required' })
   }
   const { data: existing } = await supabase.from('doctors_auth').select('id').eq('email', payload.email).maybeSingle()
   if (existing) return res.status(409).json({ error: 'A doctor already exists with this email' })
@@ -1702,6 +1812,7 @@ app.post('/api/admin/doctors', async (req, res) => {
     location: payload.location,
     license_number: payload.licenseNumber,
     signature_data_url: payload.signatureDataUrl || null,
+    passport_data_url: payload.passportDataUrl || null,
     verified: true,
     created_at: new Date().toISOString(),
   }
@@ -1721,6 +1832,7 @@ app.post('/api/admin/doctors', async (req, res) => {
     currency: payload.currency || null, payout_method: payload.payoutMethod,
     mobile_money_operator: payload.mobileMoneyOperator || null, mobile_money_number: payload.mobileMoneyNumber || null,
     signature_data_url: payload.signatureDataUrl || null,
+    passport_data_url: payload.passportDataUrl || null,
     license_verified: true,
     created_at: new Date().toISOString()
   }
@@ -1766,6 +1878,8 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
   }
   if (payload.email) authUpdates.email = payload.email
   if (payload.password) authUpdates.password = payload.password
+  if (payload.signatureDataUrl) authUpdates.signature_data_url = payload.signatureDataUrl
+  if (payload.passportDataUrl) authUpdates.passport_data_url = payload.passportDataUrl
   const profileUpdates = {
     name: payload.name,
     specialty: payload.specialty,
@@ -1782,6 +1896,8 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
     mobile_money_operator: payload.mobileMoneyOperator || null,
     mobile_money_number: payload.mobileMoneyNumber || null,
   }
+  if (payload.signatureDataUrl) profileUpdates.signature_data_url = payload.signatureDataUrl
+  if (payload.passportDataUrl) profileUpdates.passport_data_url = payload.passportDataUrl
   const { data: authRow, error: authError } = await supabase.from('doctors_auth').update(authUpdates).eq('id', req.params.doctorId).select('*').maybeSingle()
   if (authError) return res.status(500).json({ error: authError.message })
   let { data: profile, error: profileError } = await supabase.from('doctors').update(profileUpdates).eq('id', String(req.params.doctorId)).select('*').maybeSingle()
@@ -1912,16 +2028,16 @@ app.get('/api/admin/patients', async (req, res) => {
 
 app.get('/api/admin/patients/:patientId', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  const { data: patient } = await supabase.from('patients').select('*').eq('id', req.params.patientId).maybeSingle()
+  const patient = await findPatientByIdentifier(req.params.patientId)
   if (!patient) return res.status(404).json({ error: 'Patient not found' })
   res.json({ patient: sanitizePatientForResponse(patient) })
 })
 
 // ---------- PATIENT RECORD AGGREGATION ----------
 app.get('/api/patients/:patientId/record', async (req, res) => {
-  const { patientId } = req.params
-  const { data: patient } = await supabase.from('patients').select('*').eq('id', patientId).maybeSingle()
+  const patient = await findPatientByIdentifier(req.params.patientId)
   if (!patient) return res.status(404).json({ error: 'Patient not found' })
+  const patientId = patient.id
 
   const [tokens, files, appointments, consultations, labOrders, labPayments, facilityReferrals, vitals, vitalRequests, reviews, prescriptions] = await Promise.all([
     supabase.from('patient_tokens').select('balance').eq('patient_id', patientId).maybeSingle(),
@@ -1982,6 +2098,65 @@ app.get('/api/facilities/:facilityId/patients', async (req, res) => {
     limit,
     offset,
   })
+})
+
+app.get('/api/facilities/:facilityId/stats', async (req, res) => {
+  const { facilityId } = req.params
+  const pin = String(req.query.pin || '').trim()
+  const facility = await getFacilityById(facilityId)
+  if (!facility || facility.pin !== pin) return res.status(401).json({ error: 'Invalid facility credentials' })
+
+  const now = new Date()
+  const startOfDay = new Date(now)
+  startOfDay.setHours(0, 0, 0, 0)
+  const startOfWeek = new Date(startOfDay)
+  startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay())
+
+  const [patientsTotal, patientsToday, patientsWeek, consultsTotal, consultsToday, consultsWeek] = await Promise.all([
+    supabase.from('patients').select('id', { count: 'exact', head: true }).eq('facility_id', facilityId),
+    supabase.from('patients').select('id', { count: 'exact', head: true }).eq('facility_id', facilityId).gte('created_at', startOfDay.toISOString()),
+    supabase.from('patients').select('id', { count: 'exact', head: true }).eq('facility_id', facilityId).gte('created_at', startOfWeek.toISOString()),
+    supabase.from('consultations_ng').select('id', { count: 'exact', head: true }).eq('facility_id', facilityId),
+    supabase.from('consultations_ng').select('id', { count: 'exact', head: true }).eq('facility_id', facilityId).gte('created_at', startOfDay.toISOString()),
+    supabase.from('consultations_ng').select('id', { count: 'exact', head: true }).eq('facility_id', facilityId).gte('created_at', startOfWeek.toISOString()),
+  ])
+
+  res.json({
+    patients: {
+      total: patientsTotal.count || 0,
+      today: patientsToday.count || 0,
+      this_week: patientsWeek.count || 0,
+    },
+    consultations: {
+      total: consultsTotal.count || 0,
+      today: consultsToday.count || 0,
+      this_week: consultsWeek.count || 0,
+    },
+  })
+})
+
+app.patch('/api/facilities/:facilityId/patients/:patientId', async (req, res) => {
+  const { facilityId, patientId } = req.params
+  const pin = String(req.body?.pin || req.query.pin || '').trim()
+  const facility = await getFacilityById(facilityId)
+  if (!facility || facility.pin !== pin) return res.status(401).json({ error: 'Invalid facility credentials' })
+
+  const patient = await findPatientByIdentifier(patientId)
+  if (!patient || patient.facility_id !== facilityId) return res.status(404).json({ error: 'Patient not found for this facility' })
+
+  const updates = {}
+  if (req.body?.name !== undefined) updates.name = String(req.body.name || '').trim()
+  if (req.body?.phone !== undefined) updates.phone = String(req.body.phone || '').trim()
+  if (req.body?.patientPin !== undefined || req.body?.portalPin !== undefined) {
+    const nextPin = String(req.body.patientPin || req.body.portalPin || '').trim()
+    if (nextPin && !/^\d{6}$/.test(nextPin)) return res.status(400).json({ error: 'Patient PIN must be 6 digits' })
+    if (nextPin) updates.portal_pin = nextPin
+  }
+  if (!updates.name && !updates.phone && !updates.portal_pin) return res.status(400).json({ error: 'No patient changes supplied' })
+
+  const { data, error } = await supabase.from('patients').update(updates).eq('id', patient.id).select('*').maybeSingle()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ patient: sanitizePatientForResponse(data || { ...patient, ...updates }), message: 'Patient updated' })
 })
 
 app.get('/api/doctors/:doctorId/facility-patients', async (req, res) => {
@@ -2163,6 +2338,9 @@ app.post('/api/consultations/start', async (req, res) => {
   const allowedChannels = ['direct_home', 'facility_private', 'facility_phc']
   if (!patientId || !doctorId || !allowedChannels.includes(channel)) return res.status(400).json({ error: 'patientId, doctorId, and valid channel required' })
 
+  const patientRecord = await findPatientByIdentifier(patientId)
+  if (!patientRecord) return res.status(404).json({ error: 'Patient not found' })
+
   const doctor = await getDoctorProfile(doctorId)
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
 
@@ -2176,16 +2354,17 @@ app.post('/api/consultations/start', async (req, res) => {
     }
   }
 
-  const split = calculateConsultationSplitNgn({ channel, track: track || 'economy', durationMin: durationMin || 15 })
+  const split = channel === 'direct_home'
+    ? calculateConsultationSplitNgn({ channel, track: track || 'economy', durationMin: durationMin || 15 })
+    : calculateFacilitySpecialtySplit({ channel, doctor, durationMin: durationMin || 15 })
   const id = generateId('cng')
   const consultation = {
-    id, patient_id: patientId, doctor_id: doctorId, facility_id: facilityId,
+    id, patient_id: patientRecord.id, doctor_id: doctorId, facility_id: facilityId,
     channel: split.channel, track: split.track, duration_min: split.durationMin,
     blocks: split.blocks, total_ngn: split.total_ngn, status: 'in_progress',
     created_at: new Date().toISOString()
   }
   await supabase.from('consultations_ng').insert(consultation)
-  const { data: patient } = await supabase.from('patients').select('name, email, phone').eq('id', patientId).maybeSingle()
   await insertAdaptive('notifications', {
     id: generateId('notif'),
     user_id: doctorId,
@@ -2193,7 +2372,7 @@ app.post('/api/consultations/start', async (req, res) => {
     notification_type: 'consultation_started',
     type: 'consultation',
     title: channel === 'direct_home' ? 'Patient started a live consultation' : 'Facility consultation started',
-    message: `${patient?.name || 'A patient'} is waiting in consultation ${id}.`,
+    message: `${patientRecord?.name || 'A patient'} is waiting in consultation ${id}.`,
     related_resource_type: 'consultation',
     related_resource_id: id,
     is_read: false,
@@ -2220,11 +2399,18 @@ app.post('/api/consultations/end', async (req, res) => {
   }
 
   const finalDurationMin = durationMin || consultation.duration_min
-  const split = calculateConsultationSplitNgn({
-    channel: consultation.channel,
-    track: consultation.track,
-    durationMin: finalDurationMin
-  })
+  const doctor = await getDoctorProfile(consultation.doctor_id)
+  const split = consultation.channel === 'direct_home'
+    ? calculateConsultationSplitNgn({
+        channel: consultation.channel,
+        track: consultation.track,
+        durationMin: finalDurationMin
+      })
+    : calculateFacilitySpecialtySplit({
+        channel: consultation.channel,
+        doctor,
+        durationMin: finalDurationMin
+      })
 
   if (split.channel === 'facility_phc' && consultation.facility_id) {
     const debitResult = await debitFacilityWallet(consultation.facility_id, split.facility_topup_ngn, {
@@ -2344,22 +2530,28 @@ app.post('/api/referrals/facility/redeem', async (req, res) => {
 
 // ---------- LAB ORDERS & PAYMENTS ----------
 app.post('/api/labs/order', async (req, res) => {
-  const { consultationId, patientId, patientName, doctorId, doctorName, doctorSignatureDataUrl, facilityId, tests, total_price_ngn } = req.body
+  const { consultationId, patientId, patientName, doctorId, doctorName, doctorLicenseNumber, doctorSignatureDataUrl, facilityId, tests, total_price_ngn } = req.body
   if (!patientId || !doctorId || !facilityId || !tests?.length || !total_price_ngn) return res.status(400).json({ error: 'Missing fields' })
 
   const facility = await getFacilityById(facilityId)
   if (!facility || facility.type !== 'lab') return res.status(400).json({ error: 'facilityId must be a lab' })
 
-  let signatureDataUrl = doctorSignatureDataUrl || null
-  if (!signatureDataUrl) {
-    const { data: doctorRow } = await supabase.from('doctors').select('signature_data_url').eq('id', doctorId).maybeSingle()
-    signatureDataUrl = doctorRow?.signature_data_url || null
-  }
+  const [{ data: doctorRow }, patientRecord] = await Promise.all([
+    supabase.from('doctors').select('name, license_number, signature_data_url').eq('id', doctorId).maybeSingle(),
+    findPatientByIdentifier(patientId),
+  ])
+  const signatureDataUrl = doctorSignatureDataUrl || doctorRow?.signature_data_url || null
+  const resolvedPatientId = patientRecord?.id || patientId
+  const resolvedPatientName = patientName || patientRecord?.name || null
+  const resolvedDoctorName = doctorName || doctorRow?.name || null
+  const resolvedDoctorLicenseNumber = doctorLicenseNumber || doctorRow?.license_number || null
 
   const order = {
     id: generateId('labord'),
-    consultation_id: consultationId || null, patient_id: patientId, doctor_id: doctorId,
-    patient_name: patientName || null, doctor_name: doctorName || null, doctor_signature_data_url: signatureDataUrl,
+    consultation_id: consultationId || null, patient_id: resolvedPatientId, doctor_id: doctorId,
+    patient_name: resolvedPatientName, doctor_name: resolvedDoctorName,
+    doctor_license_number: resolvedDoctorLicenseNumber,
+    doctor_signature_data_url: signatureDataUrl,
     company_name: 'GlobalDoc', logo_text: 'GD',
     facility_id: facilityId, tests, total_price_ngn: Math.round(total_price_ngn),
     status: 'ordered', created_at: new Date().toISOString()

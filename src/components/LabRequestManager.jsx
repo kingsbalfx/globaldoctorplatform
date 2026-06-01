@@ -21,7 +21,9 @@ body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0}.pag
 <div class="box"><p class="label">Patient Name</p><p class="value">${escapeHtml(order.patient_name || fallback.patientName || order.patient_id)}</p></div>
 <div class="box"><p class="label">Patient ID</p><p class="value">${escapeHtml(order.patient_id)}</p></div>
 <div class="box"><p class="label">Doctor Name</p><p class="value">Dr. ${escapeHtml(order.doctor_name || fallback.doctorName || order.doctor_id)}</p></div>
+<div class="box"><p class="label">Doctor R/N Number</p><p class="value">${escapeHtml(order.doctor_license_number || fallback.doctorLicenseNumber || 'Not provided')}</p></div>
 <div class="box"><p class="label">Request ID</p><p class="value">${escapeHtml(order.id)}</p></div>
+<div class="box"><p class="label">Company</p><p class="value">${escapeHtml(order.company_name || COMPANY_NAME)}</p></div>
 </section>
 <section class="tests"><p class="label">Requested Tests / Imaging</p><ul>${tests.map((test) => `<li>${escapeHtml(typeof test === 'string' ? test : test.name || JSON.stringify(test))}</li>`).join('')}</ul></section>
 <section class="signature">${order.doctor_signature_data_url || fallback.doctorSignatureDataUrl ? `<img src="${escapeHtml(order.doctor_signature_data_url || fallback.doctorSignatureDataUrl)}" alt="Doctor signature" />` : ''}<div class="line">Dr. ${escapeHtml(order.doctor_name || fallback.doctorName || order.doctor_id)}</div></section>
@@ -83,6 +85,7 @@ function LabRequestManager({ mode = 'list', consultationId, patientId, patientNa
           patientName,
           doctorId: doctor.id,
           doctorName: doctor.name,
+          doctorLicenseNumber: doctor.licenseNumber || doctor.license_number || doctor.rnNumber || '',
           doctorSignatureDataUrl: doctor.signatureDataUrl || doctor.signature_data_url || '',
           facilityId: labFacilityId,
           tests,
@@ -101,7 +104,12 @@ function LabRequestManager({ mode = 'list', consultationId, patientId, patientNa
     }
   }
 
-  const fallback = { patientName, doctorName: doctor?.name, doctorSignatureDataUrl: doctor?.signatureDataUrl || doctor?.signature_data_url }
+  const fallback = {
+    patientName,
+    doctorName: doctor?.name,
+    doctorLicenseNumber: doctor?.licenseNumber || doctor?.license_number || doctor?.rnNumber,
+    doctorSignatureDataUrl: doctor?.signatureDataUrl || doctor?.signature_data_url
+  }
 
   return (
     <div className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200/40">

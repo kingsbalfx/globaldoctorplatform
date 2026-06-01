@@ -24,6 +24,16 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const participantId = String(userId || doctorId || patientId || userType || '').trim()
   const shouldCreateOffer = CALLER_TYPES.has(String(userType || '').toLowerCase())
 
+  const isClosedPeer = (peer) => {
+    return !peer || peer.signalingState === 'closed' || peer.connectionState === 'closed'
+  }
+
+  const resetPeerOnly = () => {
+    peerRef.current?.close()
+    peerRef.current = null
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+  }
+
   const sendSignal = async (type, payload) => {
     if (!roomId || !participantId) return
     await apiFetch('/api/video-signal', {
@@ -42,7 +52,8 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   }
 
   const createPeer = async () => {
-    if (peerRef.current) return peerRef.current
+    if (peerRef.current && !isClosedPeer(peerRef.current)) return peerRef.current
+    resetPeerOnly()
     const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS })
     peerRef.current = peer
 
@@ -64,12 +75,15 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     }
 
     const stream = await attachLocalStream()
-    stream.getTracks().forEach((track) => peer.addTrack(track, stream))
+    stream.getTracks().forEach((track) => {
+      if (!isClosedPeer(peer)) peer.addTrack(track, stream)
+    })
     return peer
   }
 
   const createOffer = async () => {
     const peer = await createPeer()
+    if (isClosedPeer(peer)) return
     const offer = await peer.createOffer()
     await peer.setLocalDescription(offer)
     await sendSignal('offer', offer)
@@ -80,6 +94,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (!signal?.id || processedSignalsRef.current.has(signal.id)) return
     processedSignalsRef.current.add(signal.id)
     const peer = await createPeer()
+    if (isClosedPeer(peer)) return
 
     if (signal.type === 'offer') {
       if (peer.signalingState !== 'stable') return
@@ -150,6 +165,17 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     setVideoMuted(false)
     setStatus('Closed')
   }
+
+  useEffect(() => {
+    lastSignalSeqRef.current = 0
+    processedSignalsRef.current = new Set()
+    if (peerRef.current) {
+      resetPeerOnly()
+      setCallStarted(false)
+      setStatus('Ready')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, participantId])
 
   const toggleAudio = () => {
     const next = !audioMuted

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getSpecialtyInfo, getSpecialtyLogo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
+import { COUNTRIES } from './DoctorAuth'
 
 const specialties = ['General Practitioner', 'Neurology', 'Urology', 'Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Obstetrics & GYN', 'Ophthalmology']
 
@@ -20,6 +21,8 @@ const emptyForm = {
   bankCode: '',
   bankAccount: '',
   currency: '',
+  signatureDataUrl: '',
+  passportDataUrl: '',
 }
 
 function doctorToForm(doctor) {
@@ -38,6 +41,8 @@ function doctorToForm(doctor) {
     bankCode: doctor.bank_code || '',
     bankAccount: doctor.bank_account || '',
     currency: doctor.currency || '',
+    signatureDataUrl: doctor.signature_data_url || '',
+    passportDataUrl: doctor.passport_data_url || '',
   }
 }
 
@@ -72,6 +77,22 @@ function DoctorManagement({ adminHeaders }) {
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleImageUpload = (field, file, maxKb) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      addError('Upload an image file.', 'warning')
+      return
+    }
+    if (file.size > maxKb * 1024) {
+      addError(`Image must be ${maxKb}KB or less.`, 'warning')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => handleChange(field, String(reader.result || ''))
+    reader.onerror = () => addError('Could not read image file.', 'error')
+    reader.readAsDataURL(file)
   }
 
   const resetForm = () => {
@@ -184,7 +205,10 @@ function DoctorManagement({ adminHeaders }) {
             <select value={formData.specialty} onChange={(e) => handleChange('specialty', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500">
               {specialties.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
-            <input type="text" placeholder="Location / country" value={formData.location} onChange={(e) => handleChange('location', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required />
+            <select value={formData.location} onChange={(e) => handleChange('location', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required>
+              <option value="">Select country</option>
+              {COUNTRIES.map((country) => <option key={country} value={country}>{country}</option>)}
+            </select>
             <input type="text" placeholder="Languages, comma separated" value={formData.languages} onChange={(e) => handleChange('languages', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" />
             <input type="text" placeholder="License number" value={formData.licenseNumber} onChange={(e) => handleChange('licenseNumber', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required />
             <input type="text" placeholder="License issuer / council" value={formData.licenseIssuer} onChange={(e) => handleChange('licenseIssuer', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" />
@@ -192,6 +216,16 @@ function DoctorManagement({ adminHeaders }) {
             <input type="number" placeholder="Consultation fee" value={formData.fee} onChange={(e) => handleChange('fee', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required />
             <input type="text" placeholder="Bank code" value={formData.bankCode} onChange={(e) => handleChange('bankCode', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" />
             <input type="text" placeholder="Bank account" value={formData.bankAccount} onChange={(e) => handleChange('bankAccount', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" />
+            <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              Signature image
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => handleImageUpload('signatureDataUrl', e.target.files?.[0], 300)} className="mt-2 w-full text-xs" required={!formData.id && !formData.signatureDataUrl} />
+              {formData.signatureDataUrl && <img src={formData.signatureDataUrl} alt="Signature preview" className="mt-2 max-h-16 object-contain" />}
+            </label>
+            <label className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              Passport photo
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => handleImageUpload('passportDataUrl', e.target.files?.[0], 500)} className="mt-2 w-full text-xs" required={!formData.id && !formData.passportDataUrl} />
+              {formData.passportDataUrl && <img src={formData.passportDataUrl} alt="Passport preview" className="mt-2 h-20 w-20 rounded-2xl object-cover" />}
+            </label>
           </div>
           <div className="mt-5 flex flex-wrap gap-3">
             <button type="submit" disabled={loading} className="rounded-2xl bg-brand-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50">

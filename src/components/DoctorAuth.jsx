@@ -8,7 +8,7 @@ import { useError } from './ErrorHandler'
 import ForgotPassword from '../pages/ForgotPassword'   // ← new import
 
 // ===== COUNTRY LIST (extend as needed) =====
-const COUNTRIES = [
+export const COUNTRIES = [
   'Afghanistan','Albania','Algeria','Andorra','Angola','Argentina','Armenia','Australia','Austria','Azerbaijan',
   'Bahamas','Bahrain','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan','Bolivia',
   'Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi',
@@ -65,6 +65,7 @@ function DoctorAuth({ onAuth }) {
     location: '',
     licenseNumber: '',
     signatureDataUrl: '',
+    passportDataUrl: '',
   })
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -148,6 +149,10 @@ function DoctorAuth({ onAuth }) {
         }
       }
 
+      if (!isLogin && (!formData.signatureDataUrl || !formData.passportDataUrl)) {
+        throw new Error('Upload both your signature and passport photo before submitting.')
+      }
+
       if (!formData.email || (isLogin && !formData.password)) {
         throw new Error('Please enter your email and password.')
       }
@@ -160,6 +165,7 @@ function DoctorAuth({ onAuth }) {
             location: formData.location,
             license_number: formData.licenseNumber,
             signature_data_url: formData.signatureDataUrl,
+            passport_data_url: formData.passportDataUrl,
           },
         })
         if (updateError) throw updateError
@@ -172,6 +178,7 @@ function DoctorAuth({ onAuth }) {
           location: formData.location,
           licenseNumber: formData.licenseNumber,
           signatureDataUrl: formData.signatureDataUrl,
+          passportDataUrl: formData.passportDataUrl,
         })
         onAuth({ type: 'login', ...doctor })
         return
@@ -189,6 +196,7 @@ function DoctorAuth({ onAuth }) {
             location: formData.location,
             licenseNumber: formData.licenseNumber,
             signatureDataUrl: formData.signatureDataUrl,
+            passportDataUrl: formData.passportDataUrl,
           }
 
       let response
@@ -260,6 +268,22 @@ function DoctorAuth({ onAuth }) {
     const reader = new FileReader()
     reader.onload = () => handleChange('signatureDataUrl', String(reader.result || ''))
     reader.onerror = () => addError('Could not read signature image.', 'error')
+    reader.readAsDataURL(file)
+  }
+
+  const handlePassportUpload = (file) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      addError('Upload a passport photo image file.', 'warning')
+      return
+    }
+    if (file.size > 500 * 1024) {
+      addError('Passport photo must be 500KB or less.', 'warning')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => handleChange('passportDataUrl', String(reader.result || ''))
+    reader.onerror = () => addError('Could not read passport photo.', 'error')
     reader.readAsDataURL(file)
   }
 
@@ -393,6 +417,22 @@ function DoctorAuth({ onAuth }) {
                   {formData.signatureDataUrl && (
                     <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
                       <img src={formData.signatureDataUrl} alt="Signature preview" className="max-h-20 object-contain" />
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Passport Photo</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => handlePassportUpload(e.target.files?.[0])}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    required={!formData.passportDataUrl}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Upload a clear doctor passport/headshot. Max 500KB.</p>
+                  {formData.passportDataUrl && (
+                    <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <img src={formData.passportDataUrl} alt="Passport preview" className="h-24 w-24 rounded-2xl object-cover" />
                     </div>
                   )}
                 </div>

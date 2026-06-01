@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS public.doctors_auth (
   location text DEFAULT 'Nigeria',
   license_number text,
   signature_data_url text,
+  passport_data_url text,
   verified boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -82,6 +83,7 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   license_verified boolean DEFAULT false,
   license_number text,
   signature_data_url text,
+  passport_data_url text,
   license_issuer text,
   license_expiry date,
   fee numeric(12,2) DEFAULT 35,
@@ -359,6 +361,7 @@ CREATE TABLE IF NOT EXISTS public.lab_orders (
   patient_name text,
   doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
   doctor_name text,
+  doctor_license_number text,
   doctor_signature_data_url text,
   facility_id text REFERENCES public.facilities(id) ON DELETE SET NULL,
   company_name text DEFAULT 'GlobalDoc',
@@ -433,6 +436,19 @@ CREATE TABLE IF NOT EXISTS public.payments (
   refund_policy_accepted boolean DEFAULT true,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.token_revenue_splits (
+  id text PRIMARY KEY,
+  payment_id text,
+  patient_id text REFERENCES public.patients(id) ON DELETE SET NULL,
+  amount_ngn integer DEFAULT 0,
+  doctors_pool_ngn integer DEFAULT 0,
+  admin_ngn integer DEFAULT 0,
+  company_ngn integer DEFAULT 0,
+  status text DEFAULT 'pending_distribution',
+  metadata jsonb,
+  created_at timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS public.prescriptions (
@@ -516,6 +532,7 @@ ALTER TABLE public.patients ALTER COLUMN date_of_birth DROP NOT NULL;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS signature_data_url text;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS passport_data_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS availability text DEFAULT 'Available upon request';
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS consultation_fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS price jsonb DEFAULT '{"basic":50,"premium":100}'::jsonb;
@@ -559,6 +576,7 @@ ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS specialty text DEFAULT 
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS location text DEFAULT 'Nigeria';
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS license_number text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS signature_data_url text;
+ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS passport_data_url text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS verified boolean DEFAULT false;
 
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS type text;
@@ -627,6 +645,7 @@ ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS notification_channels 
 
 ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS patient_name text;
 ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS doctor_name text;
+ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS doctor_license_number text;
 ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS doctor_signature_data_url text;
 ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS company_name text DEFAULT 'GlobalDoc';
 ALTER TABLE public.lab_orders ADD COLUMN IF NOT EXISTS logo_text text DEFAULT 'GD';
@@ -707,6 +726,15 @@ ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS metadata jsonb;
 ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS measured_at timestamptz DEFAULT now();
 ALTER TABLE public.vital_parameters ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS payment_id text;
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS patient_id text;
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS amount_ngn integer DEFAULT 0;
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS doctors_pool_ngn integer DEFAULT 0;
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS admin_ngn integer DEFAULT 0;
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS company_ngn integer DEFAULT 0;
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending_distribution';
+ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS metadata jsonb;
+
 DO $$
 DECLARE r record;
 BEGIN
@@ -761,6 +789,8 @@ CREATE INDEX IF NOT EXISTS idx_vital_requests_patient_status ON public.vital_par
 CREATE INDEX IF NOT EXISTS idx_vitals_consultation ON public.vital_parameters(consultation_id);
 CREATE INDEX IF NOT EXISTS idx_vitals_patient ON public.vital_parameters(patient_id);
 CREATE INDEX IF NOT EXISTS idx_vitals_doctor ON public.vital_parameters(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_payment ON public.token_revenue_splits(payment_id);
+CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_patient ON public.token_revenue_splits(patient_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_community_messages_created_at ON public.community_messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_announcements_audience ON public.announcements(audience, is_active);
@@ -784,5 +814,9 @@ DROP TRIGGER IF EXISTS trg_vital_requests_updated_at ON public.vital_parameter_r
 CREATE TRIGGER trg_vital_requests_updated_at BEFORE UPDATE ON public.vital_parameter_requests FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_vital_parameters_updated_at ON public.vital_parameters;
 CREATE TRIGGER trg_vital_parameters_updated_at BEFORE UPDATE ON public.vital_parameters FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- Recreate compatibility view after all consultation columns are patched so PostgREST sees it.
+DROP VIEW IF EXISTS public.consultation_ng;
+CREATE VIEW public.consultation_ng AS SELECT * FROM public.consultations_ng;
 
 NOTIFY pgrst, 'reload schema';
