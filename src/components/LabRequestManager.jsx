@@ -70,8 +70,8 @@ function LabRequestManager({ mode = 'list', consultationId, patientId, patientNa
   const createOrder = async (event) => {
     event.preventDefault()
     const tests = testsText.split('\n').map((item) => item.trim()).filter(Boolean)
-    if (!patientId || !doctor?.id || !labFacilityId || tests.length === 0) {
-      addError('Patient, doctor, lab facility, and tests are required.', 'warning')
+    if (!patientId || !doctor?.id || tests.length === 0) {
+      addError('Patient, doctor, and tests are required.', 'warning')
       return
     }
     setLoading(true)
@@ -87,7 +87,7 @@ function LabRequestManager({ mode = 'list', consultationId, patientId, patientNa
           doctorName: doctor.name,
           doctorLicenseNumber: doctor.licenseNumber || doctor.license_number || doctor.rnNumber || '',
           doctorSignatureDataUrl: doctor.signatureDataUrl || doctor.signature_data_url || '',
-          facilityId: labFacilityId,
+          facilityId: labFacilityId || null,
           tests,
           total_price_ngn: Number(total) || 1000,
         }),
@@ -123,7 +123,7 @@ function LabRequestManager({ mode = 'list', consultationId, patientId, patientNa
 
       {mode === 'doctor' && (
         <form onSubmit={createOrder} className="mt-5 space-y-4">
-          <input value={labFacilityId} onChange={(event) => setLabFacilityId(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand-500" placeholder="Lab facility ID" />
+          <input value={labFacilityId} onChange={(event) => setLabFacilityId(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand-500" placeholder="Optional lab facility ID" />
           <textarea value={testsText} onChange={(event) => setTestsText(event.target.value)} rows={4} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand-500" placeholder="One test per line e.g. FBC, Malaria test, USS abdomen" />
           <input type="number" value={total} onChange={(event) => setTotal(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand-500" placeholder="Estimated price NGN" />
           <button type="submit" disabled={loading} className="rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50">{loading ? 'Creating...' : 'Create request form'}</button>

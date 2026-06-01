@@ -113,8 +113,14 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
 
   const loadRequests = async () => {
     if (!consultationId && !patientId && !doctorId) return
+    if (userType !== 'doctor' && !consultationId) {
+      setRequests([])
+      setAcceptedRequestId('')
+      setActiveRequest(null)
+      return
+    }
     const params = new URLSearchParams()
-    if (consultationId && userType === 'doctor') params.set('consultationId', consultationId)
+    if (consultationId) params.set('consultationId', consultationId)
     if (patientId) params.set('patientId', patientId)
     if (doctorId && userType === 'doctor') params.set('doctorId', doctorId)
     const response = await apiFetch(`/api/vital-requests?${params.toString()}`)
@@ -142,7 +148,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   const loadVitals = async () => {
     if (!consultationId && !patientId && !doctorId) return
     const params = new URLSearchParams()
-    if (consultationId && userType === 'doctor') params.set('consultationId', consultationId)
+    if (consultationId) params.set('consultationId', consultationId)
     if (patientId) params.set('patientId', patientId)
     if (doctorId && userType === 'doctor') params.set('doctorId', doctorId)
     const response = await apiFetch(`/api/vital-parameters?${params.toString()}`)

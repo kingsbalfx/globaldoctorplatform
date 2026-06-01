@@ -1252,13 +1252,28 @@ app.post('/api/patients/register', async (req, res) => {
 })
 
 app.post('/api/patients/login', async (req, res) => {
-  const email = String(req.body.email || '').trim().toLowerCase()
+  const emailOrPatientId = String(req.body.email || req.body.patientId || '').trim()
+  const email = emailOrPatientId.toLowerCase()
   const password = String(req.body.password || '')
 
-  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
+  if (!emailOrPatientId || !password) return res.status(400).json({ error: 'Email/PID and password/PIN are required' })
 
-  const { data: patient } = await supabase.from('patients').select('*').eq('email', email).eq('password', password).maybeSingle()
-  if (!patient) return res.status(401).json({ error: 'Invalid credentials' })
+  let patient = null
+  if (/^\d{6}$/.test(password) || emailOrPatientId.toUpperCase().startsWith('PID-')) {
+    const byIdentifier = await findPatientByIdentifier(emailOrPatientId)
+    if (byIdentifier?.portal_pin === password) patient = byIdentifier
+  }
+
+  if (!patient && email.includes('@')) {
+    const { data: patientByEmail } = await supabase.from('patients').select('*').eq('email', email).maybeSingle()
+    if (patientByEmail) {
+      const { data: passwordOk, error: passwordError } = await supabase.rpc('check_password', { pass: password, hashed: patientByEmail.password || '' })
+      if (passwordError) return res.status(500).json({ error: 'check_password function error: ' + passwordError.message })
+      if (passwordOk) patient = patientByEmail
+    }
+  }
+
+  if (!patient) return res.status(401).json({ error: 'Invalid credentials. Facility-created patients should use their PID and 6-digit PIN.' })
 
   await supabase.from('patients').update({ is_online: true }).eq('id', patient.id)
   await recordAuditLog(req, {
@@ -1286,7 +1301,7 @@ app.post('/api/patients/facility/register', async (req, res) => {
   const { data: facility } = await supabase.from('facilities').select('*').eq('id', facilityId).eq('pin', facilityPin).maybeSingle()
   if (!facility) return res.status(401).json({ error: 'Invalid facility credentials' })
 
-  const { data: existing } = await supabase.from('patients').select('id').eq('portal_pin', patientPin).eq('name', fullName).maybeSingle()
+  const { data: existing } = await supabase.from('patients').select('id').eq('facility_id', facilityId).eq('portal_pin', patientPin).eq('name', fullName).maybeSingle()
   if (existing) return res.status(409).json({ error: 'Patient already exists with this name and PIN' })
 
   const id = generateReadablePatientId(getPatientIdPrefixForFacilityType(facility.type))
@@ -1297,7 +1312,7 @@ app.post('/api/patients/facility/register', async (req, res) => {
     facility_type: facility.type, created_at: new Date().toISOString()
   }
   await supabase.from('patients').insert(newPatient)
-  await supabase.from('patient_tokens').insert({ patient_id: id, balance: 0 })
+  await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
   await recordAuditLog(req, {
     userId: facilityId,
     userType: 'facility',
@@ -1327,7 +1342,7 @@ app.post('/api/patients/facility/login', async (req, res) => {
     if (found?.portal_pin === patientPin) patient = found
   } else {
     let query = supabase.from('patients').select('*').eq('portal_pin', patientPin)
-    if (fullName) query = query.eq('name', fullName)
+    if (fullName) query = query.ilike('name', fullName)
     const { data } = await query.maybeSingle()
     patient = data
   }
@@ -2540,6 +2555,53 @@ app.get('/api/facilities/:facilityId/patients', async (req, res) => {
   })
 })
 
+app.get('/api/facilities/:facilityId/patients/:patientId/record', async (req, res) => {
+  const { facilityId, patientId } = req.params
+  const pin = String(req.query.pin || '').trim()
+  const facility = await getFacilityById(facilityId)
+  if (!facility || facility.pin !== pin) return res.status(401).json({ error: 'Invalid facility credentials' })
+
+  const patient = await findPatientByIdentifier(patientId)
+  if (!patient) return res.status(404).json({ error: 'Patient not found' })
+  if (patient.facility_id && String(patient.facility_id) !== String(facilityId)) {
+    return res.status(404).json({ error: 'Patient not found for this facility' })
+  }
+  if (!patient.facility_id) {
+    await supabase.from('patients').update({ facility_id: facilityId, facility_type: facility.type, registered_via: patient.registered_via || 'facility' }).eq('id', patient.id)
+  }
+
+  const patientIdResolved = patient.id
+  const [tokens, files, appointments, consultations, labOrders, labPayments, facilityReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
+    supabase.from('patient_tokens').select('balance').eq('patient_id', patientIdResolved).maybeSingle(),
+    supabase.from('patient_files').select('*').eq('patient_id', patientIdResolved),
+    supabase.from('appointments').select('*').eq('patient_id', patientIdResolved),
+    supabase.from('consultations_ng').select('*').eq('patient_id', patientIdResolved),
+    supabase.from('lab_orders').select('*').eq('patient_id', patientIdResolved),
+    supabase.from('lab_payments').select('*').in('order_id', (await supabase.from('lab_orders').select('id').eq('patient_id', patientIdResolved)).data?.map(o => o.id) || []),
+    supabase.from('facility_referrals').select('*').eq('patient_id', patientIdResolved),
+    supabase.from('vital_parameters').select('*').eq('patient_id', patientIdResolved).order('measured_at', { ascending: false }),
+    supabase.from('vital_parameter_requests').select('*').eq('patient_id', patientIdResolved).order('requested_at', { ascending: false }),
+    supabase.from('reviews').select('*').eq('patient_id', patientIdResolved).order('created_at', { ascending: false }),
+    supabase.from('prescriptions').select('*').eq('patient_id', patientIdResolved).order('issued_at', { ascending: false }),
+    supabase.from('patient_clinical_notes').select('*').eq('patient_id', patientIdResolved).order('created_at', { ascending: false })
+  ])
+
+  res.json({
+    patient: sanitizePatientForResponse(patient),
+    tokens: { balance: tokens.data?.balance || 0, transactions: [] },
+    files: files.data || [],
+    referrals: { specialty: [], facility: facilityReferrals.data || [] },
+    appointments: appointments.data || [],
+    consultations_ng: consultations.data || [],
+    labs: { orders: labOrders.data || [], payments: labPayments.data || [] },
+    vitals: vitals.data || [],
+    vital_requests: vitalRequests.data || [],
+    reviews: reviews.data || [],
+    prescriptions: prescriptions.data || [],
+    clinical_notes: clinicalNotes.data || []
+  })
+})
+
 app.get('/api/facilities/:facilityId/stats', async (req, res) => {
   const { facilityId } = req.params
   const pin = String(req.query.pin || '').trim()
@@ -2840,6 +2902,12 @@ app.post('/api/consultations/start', async (req, res) => {
         (channel === 'facility_phc' && facility.type !== 'phc')) {
       return res.status(400).json({ error: 'Facility type mismatch' })
     }
+    if (patientRecord.facility_id && String(patientRecord.facility_id) !== String(facilityId)) {
+      return res.status(404).json({ error: 'Patient not found for this facility' })
+    }
+    if (!patientRecord.facility_id) {
+      await supabase.from('patients').update({ facility_id: facilityId, facility_type: facility.type, registered_via: patientRecord.registered_via || 'facility' }).eq('id', patientRecord.id)
+    }
   }
 
   const split = channel === 'direct_home'
@@ -3056,10 +3124,12 @@ app.post('/api/referrals/facility/redeem', async (req, res) => {
 // ---------- LAB ORDERS & PAYMENTS ----------
 app.post('/api/labs/order', async (req, res) => {
   const { consultationId, patientId, patientName, doctorId, doctorName, doctorLicenseNumber, doctorSignatureDataUrl, facilityId, tests, total_price_ngn } = req.body
-  if (!patientId || !doctorId || !facilityId || !tests?.length || !total_price_ngn) return res.status(400).json({ error: 'Missing fields' })
+  if (!patientId || !doctorId || !tests?.length || !total_price_ngn) return res.status(400).json({ error: 'Patient, doctor, requested tests, and estimated price are required' })
 
-  const facility = await getFacilityById(facilityId)
-  if (!facility || facility.type !== 'lab') return res.status(400).json({ error: 'facilityId must be a lab' })
+  if (facilityId) {
+    const facility = await getFacilityById(facilityId)
+    if (!facility || facility.type !== 'lab') return res.status(400).json({ error: 'facilityId must be a lab when supplied' })
+  }
 
   const [{ data: doctorRow }, patientRecord] = await Promise.all([
     supabase.from('doctors').select('name, license_number, signature_data_url').eq('id', doctorId).maybeSingle(),

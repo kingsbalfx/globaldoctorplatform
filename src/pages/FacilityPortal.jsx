@@ -343,11 +343,13 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
   }
 
   const loadPatientRecord = async () => {
+    if (!facility?.id) return
     if (!selectedPatientId.trim()) return
     setLoading(true)
     setError('')
     try {
-      const response = await apiFetch(`/api/patients/${encodeURIComponent(selectedPatientId.trim())}/record`)
+      const params = new URLSearchParams({ pin: pin.trim() })
+      const response = await apiFetch(`/api/facilities/${encodeURIComponent(facility.id)}/patients/${encodeURIComponent(selectedPatientId.trim())}/record?${params.toString()}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load patient record')
       setPatientRecord(data)
