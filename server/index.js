@@ -253,6 +253,27 @@ async function insertPaymentRecord(row) {
   return { error: lastError || error, mode: 'adaptive' }
 }
 
+async function insertAdaptive(table, rowOrRows) {
+  const rows = Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows]
+  let candidate = rows.map((row) => ({ ...row }))
+  let lastError = null
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { error } = await supabase.from(table).insert(Array.isArray(rowOrRows) ? candidate : candidate[0])
+    if (!error) return { error: null }
+    lastError = error
+    if (!isMissingColumnError(error)) break
+    const missingColumn = getMissingColumnName(error)
+    if (!missingColumn || !candidate.some((row) => missingColumn in row)) break
+    candidate = candidate.map((row) => {
+      const { [missingColumn]: _removed, ...nextRow } = row
+      return nextRow
+    })
+  }
+
+  return { error: lastError }
+}
+
 async function resolvePaymentDoctorId(value) {
   const requested = String(value || '').trim()
   if (requested && requested !== 'system') return requested
@@ -1279,7 +1300,8 @@ app.post('/api/reviews', async (req, res) => {
 
 // ---------- APPOINTMENTS ----------
 app.post('/api/appointments', async (req, res) => {
-  const { patientId, doctorId, scheduledDate, consultationType, notes, subscriptionType, tokensRequired } = req.body
+  const { patientId, doctorId, consultationType, notes, subscriptionType, tokensRequired } = req.body
+  const scheduledDate = req.body.scheduledDate || (req.body.date && req.body.time ? new Date(`${req.body.date}T${req.body.time}:00`).toISOString() : '')
   if (!patientId || !doctorId || !scheduledDate || !consultationType) return res.status(400).json({ error: 'Missing fields' })
 
   const requiredTokens = tokensRequired || (consultationType === 'referral' ? 15 : 20)
@@ -1298,10 +1320,11 @@ app.post('/api/appointments', async (req, res) => {
     subscription_type: subscriptionType, tokens_charged: requiredTokens,
     status: 'confirmed', created_at: new Date().toISOString()
   }
-  await supabase.from('appointments').insert(appointment)
+  const appointmentInsert = await insertAdaptive('appointments', appointment)
+  if (appointmentInsert.error) return res.status(500).json({ error: appointmentInsert.error.message })
 
   const date = new Date(scheduledDate)
-  await supabase.from('appointment_reminders').insert([
+  await insertAdaptive('appointment_reminders', [
     {
       id: generateId('rem24'), appointment_id: id, reminder_type: '24_hours',
       should_send_to: ['doctor', 'patient'], notification_channels: ['in_app', 'email'],
@@ -1316,7 +1339,7 @@ app.post('/api/appointments', async (req, res) => {
     }
   ])
 
-  await supabase.from('notifications').insert([
+  await insertAdaptive('notifications', [
     {
       id: generateId('notif'), user_id: patientId, user_type: 'patient',
       notification_type: 'appointment_confirmed', title: 'Appointment confirmed',
@@ -2309,7 +2332,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
     })
   }
 
-  if (payment.type === 'token_purchase') {
+  if ((payment.type || payment.payment_type) === 'token_purchase') {
     const result = await creditTokenPurchasePayment(payment, 'Kora')
     return res.json({
       status: 'success',
@@ -2340,7 +2363,7 @@ app.post('/api/webhooks/kora', async (req, res) => {
     return res.json({ received: true, credited: false })
   }
 
-  if (payment.type === 'token_purchase') {
+  if ((payment.type || payment.payment_type) === 'token_purchase') {
     const result = await creditTokenPurchasePayment(payment, 'Kora webhook')
     return res.json({ received: true, credited: result.credited, tokens: result.tokens })
   }

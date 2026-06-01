@@ -202,6 +202,71 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     setCurrentStep('calendar')
   }
 
+  const handleInstantConsultation = async (doctor, subType) => {
+    const price = Number(doctor?.price?.[subType] || (subType === 'premium' ? 100 : 50))
+    try {
+      const balanceResponse = await apiFetch(`/api/patients/${encodeURIComponent(patient.id)}/tokens`)
+      const balanceData = await balanceResponse.json().catch(() => ({}))
+      if (!balanceResponse.ok) throw new Error(balanceData.error || 'Unable to confirm token balance')
+      if (Number(balanceData.tokens || 0) < price) {
+        throw new Error('Insufficient tokens. Buy tokens before starting this consultation.')
+      }
+
+      const response = await apiFetch('/api/consultations/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientId: patient.id,
+          doctorId: doctor.id,
+          channel: 'direct_home',
+          track: subType === 'premium' ? 'premium' : 'economy',
+          durationMin: subType === 'premium' ? 30 : 15,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to start consultation')
+
+      const debitResponse = await apiFetch('/api/tokens/deduct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientId: patient.id, amount: price }),
+      })
+      const debitData = await debitResponse.json().catch(() => ({}))
+      if (!debitResponse.ok) throw new Error(debitData.error || 'Unable to debit consultation tokens')
+
+      const consultation = data.consultation || {}
+      const liveAppointment = {
+        id: consultation.id,
+        consultationId: consultation.id,
+        consultation_id: consultation.id,
+        patientId: patient.id,
+        patient_id: patient.id,
+        doctorId: doctor.id,
+        doctor_id: doctor.id,
+        doctorName: doctor.name,
+        doctor_name: doctor.name,
+        doctorSpecialty: doctor.specialty,
+        doctor_specialty: doctor.specialty,
+        consultationType: 'live_consultation',
+        consultation_type: 'live_consultation',
+        scheduledDate: new Date().toISOString(),
+        scheduled_date: new Date().toISOString(),
+        status: 'in_progress',
+        tokens_charged: price,
+      }
+      setSelectedDoctor(doctor)
+      setSubscriptionType(subType)
+      setTokens(debitData.tokens ?? debitData.balance ?? Math.max(0, tokens - price))
+      setAppointments((prev) => [liveAppointment, ...prev])
+      setSelectedConsultationId(liveAppointment.id)
+      setActiveTab('video')
+      setCurrentStep('dashboard')
+      addError('Live consultation started. Video room is ready.', 'success')
+    } catch (error) {
+      addError(error.message, 'error')
+    }
+  }
+
   const handleAppointmentScheduled = (appointment) => {
     setCurrentStep('dashboard')
     loadOverview()
@@ -241,7 +306,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
 
   // Doctor selection step
   if (currentStep === 'doctor') {
-    return <DoctorSelection patient={patient} onDoctorSelected={handleDoctorSelected} />
+    return <DoctorSelection patient={patient} onDoctorSelected={handleDoctorSelected} onInstantConsultation={handleInstantConsultation} />
   }
 
   // Calendar scheduling step
@@ -428,7 +493,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
           consultationId={selectedConsultationId}
           userId={patient.id}
           userType="patient"
-          recipientId={appointments.find((appt) => appt.id === selectedConsultationId)?.doctorId || ''}
+          recipientId={appointments.find((appt) => appt.id === selectedConsultationId)?.doctorId || appointments.find((appt) => appt.id === selectedConsultationId)?.doctor_id || selectedDoctor?.id || ''}
           recipientType="doctor"
         />
       )}

@@ -22,7 +22,9 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS trigger AS $$
 BEGIN
-  NEW.updated_at = now();
+  IF to_jsonb(NEW) ? 'updated_at' THEN
+    NEW := jsonb_populate_record(NEW, jsonb_build_object('updated_at', now()));
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -180,8 +182,12 @@ CREATE TABLE IF NOT EXISTS public.appointment_reminders (
   appointment_id text REFERENCES public.appointments(id) ON DELETE CASCADE,
   patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
   reminder_type text,
+  should_send_to text[] DEFAULT ARRAY[]::text[],
+  notification_channels text[] DEFAULT ARRAY['in_app']::text[],
   scheduled_for timestamptz,
+  scheduled_send_time timestamptz,
   sent boolean DEFAULT false,
+  is_sent boolean DEFAULT false,
   created_at timestamptz DEFAULT now()
 );
 
@@ -192,6 +198,10 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   title text,
   message text,
   type text DEFAULT 'info',
+  notification_type text,
+  related_resource_type text,
+  related_resource_id text,
+  notification_channels text[] DEFAULT ARRAY['in_app']::text[],
   is_read boolean DEFAULT false,
   read_at timestamptz,
   created_at timestamptz DEFAULT now()
@@ -534,6 +544,25 @@ ALTER TABLE public.chat_messages ADD COLUMN IF NOT EXISTS recipient_type text;
 ALTER TABLE public.chat_messages ADD COLUMN IF NOT EXISTS message_type text DEFAULT 'text';
 ALTER TABLE public.chat_messages ADD COLUMN IF NOT EXISTS message_content text;
 ALTER TABLE public.chat_messages ADD COLUMN IF NOT EXISTS is_read boolean DEFAULT false;
+
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS doctor_name text;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS doctor_specialty text;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS consultation_type text;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS subscription_type text;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS scheduled_date timestamptz;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS duration_minutes integer DEFAULT 30;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS tokens_charged integer DEFAULT 0;
+
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS should_send_to text[] DEFAULT ARRAY[]::text[];
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS notification_channels text[] DEFAULT ARRAY['in_app']::text[];
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS scheduled_send_time timestamptz;
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS is_sent boolean DEFAULT false;
+
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS notification_type text;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS related_resource_type text;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS related_resource_id text;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS notification_channels text[] DEFAULT ARRAY['in_app']::text[];
 
 ALTER TABLE public.patient_files ADD COLUMN IF NOT EXISTS file_name text;
 ALTER TABLE public.patient_files ADD COLUMN IF NOT EXISTS file_type text;

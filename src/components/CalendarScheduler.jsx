@@ -114,8 +114,7 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
       const appointmentData = {
         patientId: patient.id,
         doctorId: doctor.id,
-        date: selectedDate.toISOString().split('T')[0],
-        time: selectedTime,
+        scheduledDate: new Date(`${selectedDate.toISOString().split('T')[0]}T${selectedTime}:00`).toISOString(),
         consultationType,
         subscriptionType,
         tokensRequired: subscriptionType === 'basic' ? (doctor.price?.basic || 50) : (doctor.price?.premium || 100)

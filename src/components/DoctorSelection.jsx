@@ -8,7 +8,7 @@ const consultationTypes = [
   { id: 'premium', label: 'Premium', tokens: 100, description: 'Extended visit with specialist review.' },
 ]
 
-function DoctorSelection({ patient, onDoctorSelected }) {
+function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
   const { addError } = useError()
   const [doctors, setDoctors] = useState([])
   const [selectedDoctor, setSelectedDoctor] = useState(null)
@@ -103,6 +103,19 @@ function DoctorSelection({ patient, onDoctorSelected }) {
       return
     }
     onDoctorSelected(selectedDoctor, subscriptionType)
+  }
+
+  const handleStartNow = () => {
+    if (!selectedDoctor) return
+    if (!selectedDoctor.isOnline && !selectedDoctor.isVirtual) {
+      addError('This doctor is offline. Please schedule a future appointment instead.', 'warning')
+      return
+    }
+    if (!canAffordSelected) {
+      setShowPurchase(true)
+      return
+    }
+    onInstantConsultation?.(selectedDoctor, subscriptionType)
   }
 
   const handlePurchaseTokens = async () => {
@@ -335,14 +348,24 @@ function DoctorSelection({ patient, onDoctorSelected }) {
                 {selectedDoctor ? `${selectedType.label} consultation: ${selectedPrice} tokens` : 'Specialists appear above after filtering.'}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleConfirmSelection}
-              disabled={!selectedDoctor}
-              className="rounded-xl bg-brand-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {!selectedDoctor ? 'Choose a specialist' : canAffordSelected ? 'Continue to scheduling' : 'Go to subscription'}
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleStartNow}
+                disabled={!selectedDoctor}
+                className="rounded-xl bg-emerald-700 px-6 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {!selectedDoctor ? 'Choose a specialist' : canAffordSelected ? 'Start consultation now' : 'Buy tokens'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSelection}
+                disabled={!selectedDoctor}
+                className="rounded-xl bg-brand-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {!selectedDoctor ? 'Choose a specialist' : canAffordSelected ? 'Schedule for later' : 'Buy tokens'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
