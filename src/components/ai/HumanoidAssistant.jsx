@@ -94,9 +94,21 @@ function speak(text) {
   window.speechSynthesis.speak(utterance)
 }
 
+function getDismissedKey(portal) {
+  return `gd_ai_assistant_dismissed_${portal || 'landing'}`
+}
+
 function HumanoidAssistant({ portal = 'landing', docked = true }) {
   const profile = getPortalProfile(portal)
-  const [panelState, setPanelState] = useState(docked ? 'minimized' : 'expanded')
+  const dismissedKey = getDismissedKey(portal)
+  const [panelState, setPanelState] = useState(() => {
+    if (!docked) return 'expanded'
+    try {
+      return window.sessionStorage.getItem(dismissedKey) === '1' ? 'closed' : 'minimized'
+    } catch {
+      return 'minimized'
+    }
+  })
   const [input, setInput] = useState('')
   const [mode, setMode] = useState('idle')
   const [voiceEnabled, setVoiceEnabled] = useState(false)
@@ -139,9 +151,14 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
     setPanelState('minimized')
   }
 
-  const closeAssistant = () => {
+  const cancelAssistant = () => {
     recognitionRef.current?.stop?.()
     setMode('idle')
+    try {
+      window.sessionStorage.setItem(dismissedKey, '1')
+    } catch {
+      // ignore
+    }
     setPanelState('closed')
   }
 
@@ -152,21 +169,32 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
     { icon: ShieldCheck, label: 'Guardrails', body: 'Guide users without replacing professionals.' },
   ]
 
-  if (!docked && panelState === 'closed') return null
+  if (panelState === 'closed') return null
 
   return (
     <div className={docked ? 'fixed bottom-5 right-5 z-40 w-[calc(100vw-2.5rem)] max-w-md' : 'w-full'}>
-      {panelState !== 'expanded' && docked && (
-        <button
-          type="button"
-          onClick={() => setPanelState('expanded')}
-          className={`ml-auto flex items-center gap-3 rounded-full px-5 py-4 text-sm font-semibold text-white shadow-2xl shadow-slate-900/30 transition hover:-translate-y-0.5 ${panelState === 'closed' ? 'bg-brand-700 hover:bg-brand-600' : 'bg-slate-950 hover:bg-brand-700'}`}
-          aria-label="Open GlobalDoc AI guide"
-        >
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15"><Bot className="h-5 w-5" /></span>
-          {panelState === 'closed' ? 'Open AI Assistant' : 'Need help?'}
-          <Sparkles className="h-4 w-4" />
-        </button>
+      {panelState === 'minimized' && docked && (
+        <div className="ml-auto flex w-fit items-center gap-2 rounded-full bg-white p-1 shadow-2xl shadow-slate-900/25 ring-1 ring-slate-200">
+          <button
+            type="button"
+            onClick={() => setPanelState('expanded')}
+            className="flex items-center gap-3 rounded-full bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-brand-700"
+            aria-label="Open GlobalDoc AI guide"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15"><Bot className="h-4 w-4" /></span>
+            Need help?
+            <Sparkles className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={cancelAssistant}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 hover:bg-red-50 hover:text-red-600"
+            aria-label="Cancel AI assistant"
+            title="Cancel assistant"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
       )}
 
       {panelState === 'expanded' && (
@@ -182,20 +210,22 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
                 <button
                   type="button"
                   onClick={minimizeAssistant}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+                  className="flex h-9 items-center gap-1 rounded-full bg-white/10 px-3 text-sm font-semibold text-white hover:bg-white/20"
                   aria-label="Minimize AI assistant"
                   title="Minimize"
                 >
                   <Minus className="h-4 w-4" />
+                  Minimize
                 </button>
                 <button
                   type="button"
-                  onClick={closeAssistant}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white hover:bg-red-500/70"
-                  aria-label="Close AI assistant"
-                  title="Close"
+                  onClick={cancelAssistant}
+                  className="flex h-9 items-center gap-1 rounded-full bg-white px-3 text-sm font-semibold text-red-600 hover:bg-red-50"
+                  aria-label="Cancel AI assistant"
+                  title="Cancel assistant"
                 >
                   <X className="h-4 w-4" />
+                  Cancel
                 </button>
               </div>
             </div>
@@ -231,7 +261,10 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-white px-4 py-2 shadow-sm"><MessageCircle className="h-4 w-4 shrink-0 text-slate-400" /><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask about booking, video, records..." className="min-w-0 flex-1 bg-transparent text-sm outline-none" /></div>
               <button type="submit" className="rounded-full bg-brand-700 p-3 text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600"><Send className="h-4 w-4" /></button>
             </div>
-            <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-500"><FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" /> AI guidance is for navigation and preparation only.</p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="flex items-start gap-2 text-xs leading-5 text-slate-500"><FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" /> AI guidance is for navigation and preparation only.</p>
+              <button type="button" onClick={cancelAssistant} className="text-xs font-bold text-red-600 hover:text-red-700">Cancel assistant</button>
+            </div>
           </form>
         </section>
       )}
