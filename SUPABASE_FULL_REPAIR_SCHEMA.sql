@@ -473,6 +473,19 @@ CREATE TABLE IF NOT EXISTS public.prescriptions (
   updated_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.patient_clinical_notes (
+  id text PRIMARY KEY,
+  patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
+  doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  consultation_id text,
+  diagnosis text NOT NULL,
+  plan text NOT NULL,
+  follow_up text,
+  visibility text DEFAULT 'care_team',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.vital_parameter_requests (
   id text PRIMARY KEY,
   consultation_id text,
@@ -781,6 +794,15 @@ ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS status text DEFAULT 's
 ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS issued_at timestamptz DEFAULT now();
 ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS patient_id text;
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS doctor_id text;
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS consultation_id text;
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS diagnosis text;
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS plan text;
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS follow_up text;
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS visibility text DEFAULT 'care_team';
+ALTER TABLE public.patient_clinical_notes ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
 ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS consultation_id text;
 ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS patient_id text;
 ALTER TABLE public.vital_parameter_requests ADD COLUMN IF NOT EXISTS doctor_id text;
@@ -870,6 +892,10 @@ CREATE INDEX IF NOT EXISTS idx_prescriptions_patient ON public.prescriptions(pat
 CREATE INDEX IF NOT EXISTS idx_prescriptions_doctor ON public.prescriptions(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_facility ON public.prescriptions(facility_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_consultation ON public.prescriptions(consultation_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_consultation ON public.chat_messages(consultation_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_recipient ON public.chat_messages(sender_id, recipient_id);
+CREATE INDEX IF NOT EXISTS idx_clinical_notes_patient ON public.patient_clinical_notes(patient_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clinical_notes_doctor ON public.patient_clinical_notes(doctor_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_vital_requests_consultation ON public.vital_parameter_requests(consultation_id);
 CREATE INDEX IF NOT EXISTS idx_vital_requests_patient_status ON public.vital_parameter_requests(patient_id, status);
 CREATE INDEX IF NOT EXISTS idx_vitals_consultation ON public.vital_parameters(consultation_id);
@@ -897,6 +923,8 @@ DROP TRIGGER IF EXISTS trg_payments_updated_at ON public.payments;
 CREATE TRIGGER trg_payments_updated_at BEFORE UPDATE ON public.payments FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_prescriptions_updated_at ON public.prescriptions;
 CREATE TRIGGER trg_prescriptions_updated_at BEFORE UPDATE ON public.prescriptions FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+DROP TRIGGER IF EXISTS trg_patient_clinical_notes_updated_at ON public.patient_clinical_notes;
+CREATE TRIGGER trg_patient_clinical_notes_updated_at BEFORE UPDATE ON public.patient_clinical_notes FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_vital_requests_updated_at ON public.vital_parameter_requests;
 CREATE TRIGGER trg_vital_requests_updated_at BEFORE UPDATE ON public.vital_parameter_requests FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_vital_parameters_updated_at ON public.vital_parameters;

@@ -20,6 +20,16 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey)
 
+export async function recoverInvalidSupabaseSession() {
+  if (!isSupabaseConfigured) return
+  const { error } = await supabase.auth.getSession()
+  if (error && /refresh token|invalid/i.test(error.message || '')) {
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => null)
+  }
+}
+
+void recoverInvalidSupabaseSession().catch(() => null)
+
 export async function getDoctorProfile(doctorId) {
   const { data, error } = await supabase
     .from('doctors')

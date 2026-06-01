@@ -101,6 +101,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   const [measuring, setMeasuring] = useState(false)
   const [progress, setProgress] = useState(0)
   const [captureHint, setCaptureHint] = useState('')
+  const [acceptedRequestId, setAcceptedRequestId] = useState('')
 
   const speak = (text) => {
     if (!('speechSynthesis' in window)) return
@@ -127,11 +128,13 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         .filter((request) => request.status === 'pending' || request.status === 'measuring')
         .sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
       if (pendingRows) {
-        setActiveRequest((current) => current?.id ? current : pendingRows)
         if (!handledRequestsRef.current.has(pendingRows.id)) {
           handledRequestsRef.current.add(pendingRows.id)
           speak(`Your doctor requested ${getVital(pendingRows.parameter_name).label}. ${pendingRows.instructions || getVital(pendingRows.parameter_name).guide}`)
         }
+      } else {
+        setAcceptedRequestId('')
+        setActiveRequest(null)
       }
     }
   }
@@ -212,6 +215,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     if (!response.ok) throw new Error(data.error || 'Failed to save vital reading')
     addError('Vital reading saved to the consultation.', 'success')
     setActiveRequest(null)
+    setAcceptedRequestId('')
     setManualValue('')
     await Promise.all([loadRequests(), loadVitals()])
   }
@@ -399,6 +403,9 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   }, [consultationId, patientId, doctorId, userType])
 
   const actionableRequests = requests.filter((request) => request.status === 'pending' || request.status === 'measuring')
+  const currentPatientRequest = userType === 'doctor'
+    ? null
+    : [...actionableRequests].sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
   const pending = requests.filter((request) => request.status === 'pending')
   const measuringRequests = requests.filter((request) => request.status === 'measuring')
 
@@ -438,35 +445,35 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         </div>
       )}
 
-      {userType !== 'doctor' && actionableRequests.length > 0 && (
+      {userType !== 'doctor' && currentPatientRequest && acceptedRequestId !== currentPatientRequest.id && (
         <div className="rounded-3xl bg-white p-6 shadow-lg">
           <h3 className="text-lg font-semibold text-slate-900">Doctor Vital Requests</h3>
-          <p className="mt-1 text-sm text-slate-500">Tap a request to hear the guide and capture the reading.</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {actionableRequests.map((request) => {
-              const vital = getVital(request.parameter_name)
-              return (
-                <button
-                  key={request.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveRequest(request)
-                    speak(`Your doctor requested ${vital.label}. ${request.instructions || vital.guide}`)
-                  }}
-                  className={`rounded-2xl border p-4 text-left ${activeRequest?.id === request.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 bg-slate-50 hover:border-brand-300'}`}
-                >
-                  <div className="mb-2 h-10 w-10" dangerouslySetInnerHTML={{ __html: vital.icon }} />
-                  <p className="font-bold text-slate-900">{vital.label}</p>
-                  {request.status === 'measuring' && <p className="mt-1 text-xs font-black text-emerald-700">Measuring now</p>}
-                  <p className="mt-1 text-xs text-slate-600">{request.instructions || vital.guide}</p>
-                </button>
-              )
-            })}
+          <p className="mt-1 text-sm text-slate-500">Accept this request before the capture panel opens.</p>
+          <div className="mt-4 rounded-2xl border border-brand-200 bg-brand-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 shrink-0" dangerouslySetInnerHTML={{ __html: getVital(currentPatientRequest.parameter_name).icon }} />
+              <div>
+                <p className="font-bold text-slate-900">{getVital(currentPatientRequest.parameter_name).label}</p>
+                {currentPatientRequest.status === 'measuring' && <p className="mt-1 text-xs font-black text-emerald-700">Measuring now</p>}
+                <p className="mt-1 text-xs text-slate-600">{currentPatientRequest.instructions || getVital(currentPatientRequest.parameter_name).guide}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setAcceptedRequestId(currentPatientRequest.id)
+                setActiveRequest(currentPatientRequest)
+                speak(`Accepted. ${getVital(currentPatientRequest.parameter_name).label}. ${currentPatientRequest.instructions || getVital(currentPatientRequest.parameter_name).guide}`)
+              }}
+              className="mt-4 rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600"
+            >
+              Accept and continue
+            </button>
           </div>
         </div>
       )}
 
-      {userType !== 'doctor' && activeRequest && (
+      {userType !== 'doctor' && activeRequest && acceptedRequestId === activeRequest.id && (
         <div className="rounded-3xl border border-brand-200 bg-brand-50 p-6 shadow-lg">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>

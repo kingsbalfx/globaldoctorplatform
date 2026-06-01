@@ -64,6 +64,14 @@ function DoctorAuth({ onAuth }) {
     specialty: '',
     location: '',
     licenseNumber: '',
+    licenseIssuer: '',
+    licenseExpiry: '',
+    bankCode: '',
+    bankAccount: '',
+    currency: 'NGN',
+    payoutMethod: 'bank_account',
+    mobileMoneyOperator: '',
+    mobileMoneyNumber: '',
     signatureDataUrl: '',
     passportDataUrl: '',
   })
@@ -164,6 +172,8 @@ function DoctorAuth({ onAuth }) {
             specialty: formData.specialty,
             location: formData.location,
             license_number: formData.licenseNumber,
+            license_issuer: formData.licenseIssuer,
+            license_expiry: formData.licenseExpiry,
             signature_data_url: formData.signatureDataUrl,
             passport_data_url: formData.passportDataUrl,
           },
@@ -177,6 +187,14 @@ function DoctorAuth({ onAuth }) {
           specialty: formData.specialty,
           location: formData.location,
           licenseNumber: formData.licenseNumber,
+          licenseIssuer: formData.licenseIssuer,
+          licenseExpiry: formData.licenseExpiry,
+          bankCode: formData.bankCode,
+          bankAccount: formData.bankAccount,
+          currency: formData.currency,
+          payoutMethod: formData.payoutMethod,
+          mobileMoneyOperator: formData.mobileMoneyOperator,
+          mobileMoneyNumber: formData.mobileMoneyNumber,
           signatureDataUrl: formData.signatureDataUrl,
           passportDataUrl: formData.passportDataUrl,
         })
@@ -195,6 +213,14 @@ function DoctorAuth({ onAuth }) {
             specialty: formData.specialty,
             location: formData.location,
             licenseNumber: formData.licenseNumber,
+            licenseIssuer: formData.licenseIssuer,
+            licenseExpiry: formData.licenseExpiry,
+            bankCode: formData.bankCode,
+            bankAccount: formData.bankAccount,
+            currency: formData.currency,
+            payoutMethod: formData.payoutMethod,
+            mobileMoneyOperator: formData.mobileMoneyOperator,
+            mobileMoneyNumber: formData.mobileMoneyNumber,
             signatureDataUrl: formData.signatureDataUrl,
             passportDataUrl: formData.passportDataUrl,
           }
@@ -402,6 +428,78 @@ function DoctorAuth({ onAuth }) {
                     <p className="mt-1 text-xs text-slate-500">
                       Expected format: {getLicensePattern(formData.location)?.toString() || 'Any non‑empty value'}
                     </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">License Issuer / Medical Council</label>
+                  <input
+                    type="text"
+                    value={formData.licenseIssuer}
+                    onChange={(e) => handleChange('licenseIssuer', e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    placeholder="e.g., Medical and Dental Council of Nigeria"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">License Expiry Date</label>
+                  <input
+                    type="date"
+                    value={formData.licenseExpiry}
+                    onChange={(e) => handleChange('licenseExpiry', e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                  />
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="block text-sm font-medium text-slate-700">Payout Method</label>
+                  <select
+                    value={formData.payoutMethod}
+                    onChange={(e) => handleChange('payoutMethod', e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                  >
+                    <option value="bank_account">Bank account</option>
+                    <option value="mobile_money">Mobile money</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={formData.currency}
+                    onChange={(e) => handleChange('currency', e.target.value.toUpperCase())}
+                    className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                    placeholder="Currency, e.g. NGN"
+                  />
+                  {formData.payoutMethod === 'bank_account' ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <input
+                        type="text"
+                        value={formData.bankCode}
+                        onChange={(e) => handleChange('bankCode', e.target.value)}
+                        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                        placeholder="Bank code"
+                      />
+                      <input
+                        type="text"
+                        value={formData.bankAccount}
+                        onChange={(e) => handleChange('bankAccount', e.target.value)}
+                        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                        placeholder="Bank account number"
+                      />
+                    </div>
+                  ) : (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <input
+                        type="text"
+                        value={formData.mobileMoneyOperator}
+                        onChange={(e) => handleChange('mobileMoneyOperator', e.target.value)}
+                        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                        placeholder="Mobile money operator"
+                      />
+                      <input
+                        type="text"
+                        value={formData.mobileMoneyNumber}
+                        onChange={(e) => handleChange('mobileMoneyNumber', e.target.value)}
+                        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                        placeholder="Mobile money number"
+                      />
+                    </div>
                   )}
                 </div>
                 <div>

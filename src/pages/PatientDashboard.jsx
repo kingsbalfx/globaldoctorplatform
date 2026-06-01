@@ -535,6 +535,8 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
           userType="patient"
           recipientId={appointments.find((appt) => appt.id === selectedConsultationId)?.doctorId || appointments.find((appt) => appt.id === selectedConsultationId)?.doctor_id || selectedDoctor?.id || ''}
           recipientType="doctor"
+          patientId={patient.id}
+          doctorId={appointments.find((appt) => appt.id === selectedConsultationId)?.doctorId || appointments.find((appt) => appt.id === selectedConsultationId)?.doctor_id || selectedDoctor?.id || ''}
         />
       )}
 

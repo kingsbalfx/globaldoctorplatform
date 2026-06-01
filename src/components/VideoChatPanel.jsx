@@ -19,6 +19,8 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const remoteVideoRef = useRef(null)
   const peerRef = useRef(null)
   const streamRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const rawAudioTracksRef = useRef([])
   const pendingIceRef = useRef([])
   const lastSignalSeqRef = useRef(0)
   const processedSignalsRef = useRef(new Set())
@@ -83,6 +85,42 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     await startCall()
   }
 
+  const createManagedAudioTrack = (stream) => {
+    const [rawAudioTrack] = stream.getAudioTracks()
+    if (!rawAudioTrack) return null
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextCtor) return rawAudioTrack
+
+    try {
+      const audioContext = new AudioContextCtor()
+      const source = audioContext.createMediaStreamSource(new MediaStream([rawAudioTrack]))
+      const highPass = audioContext.createBiquadFilter()
+      highPass.type = 'highpass'
+      highPass.frequency.value = 120
+
+      const compressor = audioContext.createDynamicsCompressor()
+      compressor.threshold.value = -36
+      compressor.knee.value = 18
+      compressor.ratio.value = 8
+      compressor.attack.value = 0.006
+      compressor.release.value = 0.2
+
+      const gain = audioContext.createGain()
+      gain.gain.value = 0.82
+
+      const destination = audioContext.createMediaStreamDestination()
+      source.connect(highPass)
+      highPass.connect(compressor)
+      compressor.connect(gain)
+      gain.connect(destination)
+      audioContextRef.current = audioContext
+      rawAudioTracksRef.current = [rawAudioTrack]
+      return destination.stream.getAudioTracks()[0] || rawAudioTrack
+    } catch {
+      return rawAudioTrack
+    }
+  }
+
   const attachLocalStream = async () => {
     if (streamRef.current) return streamRef.current
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -97,9 +135,14 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     stream.getAudioTracks().forEach((track) => {
       track.applyConstraints?.(CLEAN_AUDIO_CONSTRAINTS).catch(() => null)
     })
-    streamRef.current = stream
-    if (localVideoRef.current) localVideoRef.current.srcObject = stream
-    return stream
+    const managedAudioTrack = createManagedAudioTrack(stream)
+    const managedStream = new MediaStream([
+      ...stream.getVideoTracks(),
+      ...(managedAudioTrack ? [managedAudioTrack] : stream.getAudioTracks()),
+    ])
+    streamRef.current = managedStream
+    if (localVideoRef.current) localVideoRef.current.srcObject = managedStream
+    return managedStream
   }
 
   const refreshFrontCamera = async () => {
@@ -286,6 +329,10 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     peerRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
+    rawAudioTracksRef.current.forEach((track) => track.stop())
+    rawAudioTracksRef.current = []
+    audioContextRef.current?.close?.().catch(() => null)
+    audioContextRef.current = null
     if (localVideoRef.current) localVideoRef.current.srcObject = null
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
     setCallStarted(false)

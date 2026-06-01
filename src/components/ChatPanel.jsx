@@ -1,21 +1,25 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 
-function ChatPanel({ consultationId, userId, userType, recipientId, recipientType }) {
+function ChatPanel({ consultationId, userId, userType, recipientId, recipientType, patientId, doctorId }) {
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (consultationId) {
+    if (consultationId || (patientId && doctorId)) {
       loadMessages()
     }
-  }, [consultationId])
+  }, [consultationId, patientId, doctorId])
 
   const loadMessages = async () => {
     setLoading(true)
     try {
-      const response = await apiFetch(`/api/chat/messages?consultationId=${encodeURIComponent(consultationId)}`)
+      const params = new URLSearchParams()
+      if (consultationId) params.set('consultationId', consultationId)
+      if (patientId) params.set('patientId', patientId)
+      if (doctorId) params.set('doctorId', doctorId)
+      const response = await apiFetch(`/api/chat/messages?${params.toString()}`)
       const data = await response.json()
       setMessages(data.messages || [])
     } catch (error) {
@@ -27,7 +31,7 @@ function ChatPanel({ consultationId, userId, userType, recipientId, recipientTyp
 
   const handleSend = async (event) => {
     event.preventDefault()
-    if (!draft.trim() || !consultationId || !recipientId) return
+    if (!draft.trim() || !recipientId) return
 
     try {
       const response = await apiFetch(`/api/chat/messages`, {
@@ -66,9 +70,9 @@ function ChatPanel({ consultationId, userId, userType, recipientId, recipientTyp
         </div>
       </div>
 
-      {!consultationId ? (
+      {!consultationId && (!patientId || !doctorId) ? (
         <div className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200/40 text-slate-600">
-          Select an appointment first to begin chat with your doctor.
+          Select an appointment or consultation first to begin chat with your doctor.
         </div>
       ) : loading ? (
         <div className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200/40">Loading chat...</div>

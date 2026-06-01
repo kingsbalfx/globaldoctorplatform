@@ -9,6 +9,7 @@ import VideoChatPanel from '../components/VideoChatPanel'
 import ChatPanel from '../components/ChatPanel'
 import PrescriptionManager from '../components/PrescriptionManager'
 import LabRequestManager from '../components/LabRequestManager'
+import DoctorPatientNotes from '../components/DoctorPatientNotes'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
@@ -25,7 +26,7 @@ function AdminDashboard({ doctor, onLogout }) {
   const [savingPayoutDetails, setSavingPayoutDetails] = useState(false)
   const minWithdrawTokens = 50
   const [withdrawTokenAmount, setWithdrawTokenAmount] = useState(() => {
-    const value = Number(doctor?.earningsTokens || 0)
+    const value = Number(doctor?.earningsTokens ?? doctor?.earnings_tokens ?? 0)
     return value > 0 ? String(Math.floor(value)) : ''
   })
   const [payoutDetails, setPayoutDetails] = useState(() => ({
@@ -42,6 +43,9 @@ function AdminDashboard({ doctor, onLogout }) {
   const [consultationPatientLimit, setConsultationPatientLimit] = useState(10)
   const [loadingConsultationPatients, setLoadingConsultationPatients] = useState(false)
   const [selectedConsultationPatient, setSelectedConsultationPatient] = useState(null)
+  const [financials, setFinancials] = useState(null)
+  const earningsTokens = Number(financials?.earningsTokens ?? doctor?.earningsTokens ?? doctor?.earnings_tokens ?? 0) || 0
+  const estimatedUsd = financials?.estimatedUsd ?? (earningsTokens / 10)
 
   const loadConsultationPatients = async (limit = consultationPatientLimit, search = consultationPatientSearch) => {
     if (!doctor?.id) return
@@ -72,6 +76,18 @@ function AdminDashboard({ doctor, onLogout }) {
     }
   }
 
+  const loadFinancials = async () => {
+    if (!doctor?.id) return
+    try {
+      const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/financials`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to load financials')
+      setFinancials(data)
+    } catch (err) {
+      addError(err.message, 'error')
+    }
+  }
+
   useEffect(() => {
     if (!doctor?.id) return
     const timer = window.setTimeout(() => {
@@ -89,6 +105,16 @@ function AdminDashboard({ doctor, onLogout }) {
     return () => window.clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doctor?.id, consultationPatientLimit, consultationPatientSearch])
+
+  useEffect(() => {
+    if (!doctor?.id) return
+    void loadFinancials()
+    const interval = window.setInterval(() => {
+      void loadFinancials()
+    }, 15000)
+    return () => window.clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doctor?.id])
 
   useEffect(() => {
     if (consultationPatients.some((patient) => patient.latest_consultation?.status === 'in_progress')) {
@@ -126,7 +152,7 @@ function AdminDashboard({ doctor, onLogout }) {
       addError(`Minimum withdrawal is ${minWithdrawTokens} tokens ($5).`, 'error')
       return
     }
-    if (tokens > (doctor.earningsTokens || 0)) {
+    if (tokens > earningsTokens) {
       addError('Requested amount exceeds your available tokens.', 'error')
       return
     }
@@ -145,6 +171,8 @@ function AdminDashboard({ doctor, onLogout }) {
       const payoutLine = data.currency ? `Payout: ${data.payoutAmount ?? ''} ${data.currency}` : ''
       const usdLine = typeof data.amountUSD === 'number' ? `USD: $${data.amountUSD.toFixed(2)}` : ''
       addError([`Success: ${data.message}`, `Reference: ${data.reference}`, payoutLine, usdLine].filter(Boolean).join('\n'), 'success')
+      setWithdrawTokenAmount('')
+      await loadFinancials()
     } catch (err) {
       addError(err.message, 'error')
     } finally {
@@ -256,7 +284,7 @@ function AdminDashboard({ doctor, onLogout }) {
                   </div>
                   <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-sm">
                     <span>Monthly revenue</span>
-                    <strong className="text-2xl">${((doctor.earningsTokens || 0) / 10).toFixed(2)}</strong>
+                    <strong className="text-2xl">${estimatedUsd.toFixed(2)}</strong>
                   </div>
                   <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-4 shadow-sm">
                     <span>Profile views</span>
@@ -314,8 +342,15 @@ function AdminDashboard({ doctor, onLogout }) {
             <div className="grid gap-6 md:grid-cols-2">
               <div className="bg-brand-50 rounded-3xl p-8 border border-brand-100">
                 <p className="text-brand-700 font-medium">Accumulated Tokens</p>
-                <p className="text-5xl font-bold text-brand-900 mt-2">{doctor.earningsTokens || 0}</p>
-                <p className="text-brand-600 mt-4 text-sm">Estimated Payout: <span className="font-bold">${((doctor.earningsTokens || 0) / 10).toFixed(2)}</span></p>
+                <p className="text-5xl font-bold text-brand-900 mt-2">{earningsTokens}</p>
+                <p className="text-brand-600 mt-4 text-sm">Estimated Payout: <span className="font-bold">${estimatedUsd.toFixed(2)}</span></p>
+                <button
+                  type="button"
+                  onClick={loadFinancials}
+                  className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-semibold text-brand-700 ring-1 ring-brand-100 hover:bg-brand-100"
+                >
+                  Refresh earnings
+                </button>
 
                 <div className="mt-6">
                   <label className="block text-sm font-semibold text-brand-900">Withdraw token amount</label>
@@ -412,7 +447,7 @@ function AdminDashboard({ doctor, onLogout }) {
                       {savingPayoutDetails ? 'Saving...' : 'Save details'}
                     </button>
                     <button
-                      disabled={withdrawing || Number(doctor.earningsTokens || 0) < minWithdrawTokens}
+                      disabled={withdrawing || earningsTokens < minWithdrawTokens}
                       onClick={handleWithdraw}
                       className="flex-1 rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
                     >
@@ -585,6 +620,16 @@ function AdminDashboard({ doctor, onLogout }) {
                   userType="doctor"
                   recipientId={selectedConsultationPatient.id}
                   recipientType="patient"
+                  patientId={selectedConsultationPatient.id}
+                  doctorId={doctor.id}
+                />
+              </div>
+
+              <div className="mt-8">
+                <DoctorPatientNotes
+                  patientId={selectedConsultationPatient.id}
+                  doctorId={doctor.id}
+                  consultationId={selectedConsultation.id}
                 />
               </div>
 

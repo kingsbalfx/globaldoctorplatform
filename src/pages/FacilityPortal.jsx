@@ -363,6 +363,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
   const savePatientEdit = async (event) => {
     event.preventDefault()
     if (!facility?.id || !editingPatient?.id) return
+    const nextPatientPin = String(editingPatient.portalPin || editingPatient.portal_pin || '').trim()
     setLoading(true)
     setError('')
     try {
@@ -373,7 +374,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
           pin: pin.trim(),
           name: editingPatient.name,
           phone: editingPatient.phone,
-          patientPin: editingPatient.portalPin,
+          ...(nextPatientPin ? { patientPin: nextPatientPin } : {}),
         }),
       })
       const data = await response.json().catch(() => ({}))
@@ -970,7 +971,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                         />
                         <input
                           inputMode="numeric"
-                          value={editingPatient.portalPin}
+                          value={editingPatient.portalPin || ''}
                           onChange={(e) => setEditingPatient((prev) => ({ ...prev, portalPin: e.target.value }))}
                           className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500"
                           placeholder="New 6-digit PIN (optional)"

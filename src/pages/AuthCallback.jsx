@@ -131,6 +131,10 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
               specialty: metadata.specialty || '',
               location: metadata.location || '',
               licenseNumber: metadata.license_number || '',
+              licenseIssuer: metadata.license_issuer || '',
+              licenseExpiry: metadata.license_expiry || '',
+              signatureDataUrl: metadata.signature_data_url || '',
+              passportDataUrl: metadata.passport_data_url || '',
             }),
           })
         } catch (networkError) {
@@ -139,7 +143,12 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
           )
         }
         const data = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(data.error || 'Failed to initialize local session.')
+        if (response.status === 403 && data?.pendingApproval && role === 'doctor') {
+          setStatus(data.message || data.error || 'Your doctor account is pending platform admin approval.')
+          setError('')
+          return
+        }
+        if (!response.ok) throw new Error(data.error || data.message || 'Failed to initialize local session.')
 
         if (cancelled) return
 

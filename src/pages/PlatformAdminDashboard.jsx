@@ -36,6 +36,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const [facilities, setFacilities] = useState([])
   const [facilityFilter, setFacilityFilter] = useState('')
   const [facilityForm, setFacilityForm] = useState({
+    id: '',
     type: 'phc',
     name: '',
     state: '',
@@ -163,7 +164,37 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     }
   }
 
-  const createFacility = async (event) => {
+  const resetFacilityForm = () => {
+    setFacilityForm({
+      id: '',
+      type: 'phc',
+      name: '',
+      state: '',
+      lga: '',
+      address: '',
+      phone: '',
+      email: '',
+      referral_payout_ngn: 0,
+      pin: '',
+    })
+  }
+
+  const editFacility = (facility) => {
+    setFacilityForm({
+      id: facility.id || '',
+      type: facility.type || 'phc',
+      name: facility.name || '',
+      state: facility.state || '',
+      lga: facility.lga || '',
+      address: facility.address || '',
+      phone: facility.phone || '',
+      email: facility.email || '',
+      referral_payout_ngn: facility.referral_payout_ngn || 0,
+      pin: facility.pin || '',
+    })
+  }
+
+  const saveFacility = async (event) => {
     event.preventDefault()
     if (!headers) return
     if (!facilityForm.name.trim()) {
@@ -173,30 +204,22 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
     setLoading(true)
     try {
-      const response = await apiFetch(`/api/facilities`, {
-        method: 'POST',
+      const editing = Boolean(facilityForm.id)
+      const response = await apiFetch(editing ? `/api/admin/facilities/${encodeURIComponent(facilityForm.id)}` : `/api/facilities`, {
+        method: editing ? 'PATCH' : 'POST',
         headers,
         body: JSON.stringify({
           ...facilityForm,
+          id: undefined,
           name: facilityForm.name.trim(),
           referral_payout_ngn: Number(facilityForm.referral_payout_ngn) || 0,
         }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to create facility')
-      setFacilityForm((prev) => ({
-        ...prev,
-        name: '',
-        state: '',
-        lga: '',
-        address: '',
-        phone: '',
-        email: '',
-        referral_payout_ngn: 0,
-        pin: '',
-      }))
+      resetFacilityForm()
       await loadFacilities()
-      addError(`Facility created. PIN: ${data.facility?.pin || '(hidden)'}`, 'success')
+      addError(editing ? 'Facility updated.' : `Facility created. PIN: ${data.facility?.pin || '(hidden)'}`, 'success')
     } catch (err) {
       addError(err.message, 'error')
     } finally {
@@ -470,10 +493,10 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       {activeSection === 'facilities' && (
         <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
           <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
-            <h2 className="text-2xl font-bold text-slate-900">Create facility</h2>
-            <p className="mt-2 text-sm text-slate-600">Add PHCs, private clinics, and labs (in-memory for now).</p>
+            <h2 className="text-2xl font-bold text-slate-900">{facilityForm.id ? 'Edit facility' : 'Create facility'}</h2>
+            <p className="mt-2 text-sm text-slate-600">Add or update PHCs, private clinics, and labs.</p>
 
-            <form onSubmit={createFacility} className="mt-6 grid gap-4">
+            <form onSubmit={saveFacility} className="mt-6 grid gap-4">
               <label className="text-sm font-semibold text-slate-700">
                 Type
                 <select
@@ -519,6 +542,38 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
               </div>
 
               <label className="text-sm font-semibold text-slate-700">
+                Address
+                <input
+                  value={facilityForm.address}
+                  onChange={(e) => setFacilityForm((p) => ({ ...p, address: e.target.value }))}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                  placeholder="Facility address"
+                />
+              </label>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-semibold text-slate-700">
+                  Phone
+                  <input
+                    value={facilityForm.phone}
+                    onChange={(e) => setFacilityForm((p) => ({ ...p, phone: e.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                    placeholder="Facility phone"
+                  />
+                </label>
+                <label className="text-sm font-semibold text-slate-700">
+                  Email
+                  <input
+                    type="email"
+                    value={facilityForm.email}
+                    onChange={(e) => setFacilityForm((p) => ({ ...p, email: e.target.value }))}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                    placeholder="facility@example.com"
+                  />
+                </label>
+              </div>
+
+              <label className="text-sm font-semibold text-slate-700">
                 Referral payout (NGN)
                 <input
                   type="number"
@@ -546,8 +601,17 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                 disabled={loading}
                 className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
               >
-                {loading ? 'Creating…' : 'Create facility'}
+                {loading ? 'Saving...' : facilityForm.id ? 'Save facility' : 'Create facility'}
               </button>
+              {facilityForm.id && (
+                <button
+                  type="button"
+                  onClick={resetFacilityForm}
+                  className="w-full rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                >
+                  Cancel edit
+                </button>
+              )}
             </form>
           </div>
 
@@ -587,6 +651,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                         <th className="px-4 py-3">Type</th>
                         <th className="px-4 py-3">Wallet</th>
                         <th className="px-4 py-3">PIN</th>
+                        <th className="px-4 py-3">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
@@ -596,6 +661,15 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                           <td className="px-4 py-3 text-slate-700">{String(f.type || '').replace(/_/g, ' ')}</td>
                           <td className="px-4 py-3 font-semibold text-slate-900">₦{f.wallet_balance_ngn ?? 0}</td>
                           <td className="px-4 py-3 font-mono text-xs text-slate-700">{f.pin || '—'}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => editFacility(f)}
+                              className="rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                            >
+                              Edit
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
