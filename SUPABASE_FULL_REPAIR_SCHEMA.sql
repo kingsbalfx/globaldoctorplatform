@@ -95,23 +95,6 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   updated_at timestamptz DEFAULT now()
 );
 
-INSERT INTO public.doctors (
-  id, email, name, specialty, location, languages, verified, license_verified, is_online, fee, consultation_fee, price
-) VALUES (
-  'system-doctor',
-  'system-doctor@globaldoc.local',
-  'GlobalDoc System Doctor',
-  'General Practitioner',
-  'GlobalDoc',
-  ARRAY['English'],
-  true,
-  true,
-  false,
-  0,
-  0,
-  '{"basic":0,"premium":0}'::jsonb
-) ON CONFLICT (id) DO NOTHING;
-
 CREATE TABLE IF NOT EXISTS public.patients (
   id text PRIMARY KEY,
   email text UNIQUE,
@@ -480,6 +463,26 @@ ALTER TABLE public.doctors ALTER COLUMN consultation_fee SET DEFAULT 35;
 ALTER TABLE public.doctors ALTER COLUMN consultation_fee DROP NOT NULL;
 ALTER TABLE public.doctors ALTER COLUMN availability SET DEFAULT 'Available upon request';
 ALTER TABLE public.doctors ALTER COLUMN availability DROP NOT NULL;
+
+INSERT INTO public.doctors (
+  id, email, name, specialty, location, languages, verified, license_verified, is_online, fee, consultation_fee, price
+) VALUES (
+  'system-doctor',
+  'system-doctor@globaldoc.local',
+  'GlobalDoc System Doctor',
+  'General Practitioner',
+  'GlobalDoc',
+  ARRAY['English'],
+  true,
+  true,
+  false,
+  0,
+  0,
+  '{"basic":0,"premium":0}'::jsonb
+) ON CONFLICT (id) DO UPDATE SET
+  email = COALESCE(public.doctors.email, EXCLUDED.email),
+  verified = true,
+  license_verified = true;
 
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS password text DEFAULT '';
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS specialty text DEFAULT 'General Practitioner';

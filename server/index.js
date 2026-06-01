@@ -117,10 +117,27 @@ function buildKoraTokenCharge(amountUSD) {
   return { amount, currency, exchangeRate }
 }
 
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())
+}
+
+function buildKoraCustomerEmail(email, patientId) {
+  const normalized = String(email || '').trim().toLowerCase()
+  if (isValidEmail(normalized)) return normalized
+  const safeId = String(patientId || 'patient').replace(/[^a-zA-Z0-9]/g, '').slice(0, 40) || 'patient'
+  return `no-reply+${safeId}@globaldoctorplatform.vercel.app`
+}
+
+function buildKoraCustomerName(name) {
+  const normalized = String(name || '').trim().replace(/\s+/g, ' ')
+  return normalized || 'GlobalDoc Patient'
+}
+
 function getKoraErrorMessage(error) {
   const data = error?.response?.data
   if (!data) return error?.message || 'Unknown Kora error'
-  return data.message || data.error || data.data?.message || JSON.stringify(data)
+  const fieldErrors = data.data && typeof data.data === 'object' ? JSON.stringify(data.data) : ''
+  return [data.message || data.error || data.data?.message, fieldErrors].filter(Boolean).join(': ') || JSON.stringify(data)
 }
 
 function normalizeKoraStatus(payload) {
@@ -1012,8 +1029,8 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     })
   }
   const savedPatientId = patientProfile.id
-  const patientEmail = patientProfile.email || requestedEmail || 'patient@globaldoc.com'
-  const patientName = patientProfile.name || req.body.name || 'Patient'
+  const patientEmail = buildKoraCustomerEmail(patientProfile.email || requestedEmail, savedPatientId)
+  const patientName = buildKoraCustomerName(patientProfile.name || req.body.name)
 
   const { error: paymentInsertError } = await insertPaymentRecord({
     id: reference,
@@ -1048,27 +1065,22 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   }
 
   try {
+    const koraPayload = {
+      amount: Number(koraCharge.amount),
+      currency: String(koraCharge.currency || 'NGN').toUpperCase(),
+      reference,
+      redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
+      notification_url: `${origin}/api/webhooks/kora`,
+      narration: `GlobalDoc token purchase ${tokensExpected} tokens`,
+      customer: {
+        email: patientEmail,
+        name: patientName,
+      },
+      merchant_bears_cost: true,
+    }
     const { data: response } = await axios.post(
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
-      {
-        amount: koraCharge.amount,
-        currency: koraCharge.currency,
-        reference,
-        redirect_url: `${origin}/payment-success?reference=${encodeURIComponent(reference)}`,
-        notification_url: `${origin}/api/webhooks/kora`,
-        narration: `GlobalDoc token purchase (${tokensExpected} tokens)`,
-        customer: {
-          email: patientEmail,
-          name: patientName
-        },
-        metadata: {
-          purpose: 'tokens',
-          patientId,
-          amountUSD,
-          tokens: tokensExpected,
-          rate,
-        }
-      },
+      koraPayload,
       { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
     )
 
@@ -1095,6 +1107,8 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
       kora: {
         amount: koraCharge.amount,
         currency: koraCharge.currency,
+        customerEmail: patientEmail,
+        origin,
       }
     })
   }
