@@ -44,23 +44,46 @@ function parseBluetoothSFloat(dataView, offset) {
 function estimateBpm(samples, seconds) {
   if (samples.length < 80) return null
   const mean = samples.reduce((total, value) => total + value, 0) / samples.length
-  const normalized = samples.map((value) => value - mean)
-  const threshold = Math.max(...normalized) * 0.55
+  const smoothed = samples.map((value, index) => {
+    const start = Math.max(0, index - 2)
+    const end = Math.min(samples.length, index + 3)
+    const slice = samples.slice(start, end)
+    return slice.reduce((total, item) => total + item, 0) / slice.length
+  })
+  const normalized = smoothed.map((value) => value - mean)
+  const max = Math.max(...normalized)
+  const min = Math.min(...normalized)
+  const amplitude = max - min
+  if (amplitude < Math.max(1, mean * 0.002)) return null
+  const threshold = min + amplitude * 0.62
   let peaks = 0
-  let lastPeak = -20
+  let lastPeak = -16
   for (let index = 1; index < normalized.length - 1; index += 1) {
     if (
       normalized[index] > threshold &&
       normalized[index] > normalized[index - 1] &&
       normalized[index] > normalized[index + 1] &&
-      index - lastPeak > 10
+      index - lastPeak > 8
     ) {
       peaks += 1
       lastPeak = index
     }
   }
   const bpm = Math.round((peaks / seconds) * 60)
-  return bpm >= 40 && bpm <= 200 ? bpm : null
+  if (bpm >= 40 && bpm <= 200) return bpm
+
+  const crossings = []
+  for (let index = 1; index < normalized.length; index += 1) {
+    if (normalized[index - 1] <= 0 && normalized[index] > 0) crossings.push(index)
+  }
+  if (crossings.length >= 2) {
+    const intervals = crossings.slice(1).map((value, index) => value - crossings[index])
+    const averageInterval = intervals.reduce((total, item) => total + item, 0) / intervals.length
+    const framesPerSecond = samples.length / seconds
+    const crossingBpm = Math.round((framesPerSecond / averageInterval) * 60)
+    if (crossingBpm >= 40 && crossingBpm <= 200) return crossingBpm
+  }
+  return null
 }
 
 function VitalParametersMonitor({ consultationId, patientId, doctorId, userType }) {
@@ -77,6 +100,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   const [wearableSource, setWearableSource] = useState('manual')
   const [measuring, setMeasuring] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [captureHint, setCaptureHint] = useState('')
 
   const speak = (text) => {
     if (!('speechSynthesis' in window)) return
@@ -206,6 +230,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     if (videoRef.current) videoRef.current.srcObject = null
     setMeasuring(false)
     setProgress(0)
+    setCaptureHint('')
     window.dispatchEvent(new CustomEvent('globaldoc:vital-camera-finished'))
   }
 
@@ -215,6 +240,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     const vital = getVital(request.parameter_name)
     setMeasuring(true)
     setProgress(0)
+    setCaptureHint('Cover the camera lens fully with one fingertip and keep still.')
     speak(request.instructions || vital.guide)
 
     try {
@@ -225,7 +251,10 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         audio: false,
       })
       streamRef.current = mediaStream
-      if (videoRef.current) videoRef.current.srcObject = mediaStream
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream
+        await videoRef.current.play?.().catch(() => null)
+      }
       const videoTrack = mediaStream.getVideoTracks()[0]
       try {
         const capabilities = videoTrack.getCapabilities?.() || {}
@@ -249,8 +278,22 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         context.drawImage(video, 0, 0, canvas.width, canvas.height)
         const data = context.getImageData(0, 0, canvas.width, canvas.height).data
         let red = 0
+        let green = 0
+        let blue = 0
         for (let index = 0; index < data.length; index += 4) red += data[index]
-        samples.push(red / (data.length / 4))
+        for (let index = 1; index < data.length; index += 4) green += data[index]
+        for (let index = 2; index < data.length; index += 4) blue += data[index]
+        const pixels = data.length / 4
+        const redAvg = red / pixels
+        const greenAvg = green / pixels
+        const blueAvg = blue / pixels
+        const hasFingerContact = redAvg >= 28 && redAvg >= Math.max(greenAvg, blueAvg) * 0.9
+        if (!hasFingerContact) {
+          setCaptureHint('Press your fingertip gently over the camera until the preview looks red and steady.')
+        } else {
+          setCaptureHint('Good contact. Keep your finger still while the reading completes.')
+          samples.push(redAvg)
+        }
         frames += 1
         setProgress(Math.min(100, Math.round((frames / maxFrames) * 100)))
 
@@ -262,6 +305,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
             : bpm
           if (!value) {
             addError('Could not detect a stable pulse. Ask the patient to cover the camera fully and try again.', 'warning')
+            setManualValue('')
+            setActiveRequest(request)
             await markRequestStatus(request, 'pending').catch(() => null)
             return
           }
@@ -439,6 +484,11 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
           {getVital(activeRequest.parameter_name).method === 'camera' ? (
             <div className="mt-4 space-y-4">
               <video ref={videoRef} autoPlay playsInline muted className="aspect-video w-full rounded-2xl bg-slate-950 object-cover" />
+              {captureHint && (
+                <p className="rounded-2xl border border-brand-200 bg-white px-4 py-3 text-sm font-semibold text-brand-800">
+                  {captureHint}
+                </p>
+              )}
               {measuring && <div className="h-3 overflow-hidden rounded-full bg-white"><div className="h-full bg-brand-700" style={{ width: `${progress}%` }} /></div>}
               <div className="flex flex-wrap gap-3">
                 <button type="button" onClick={startCameraMeasurement} disabled={measuring} className="rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50">
@@ -446,6 +496,16 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
                 </button>
                 {measuring && <button type="button" onClick={stopCamera} className="rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white">Stop</button>}
               </div>
+              <form onSubmit={submitManual} className="grid gap-3 border-t border-brand-200 pt-4 sm:grid-cols-[1fr_180px_auto]">
+                <input value={manualValue} onChange={(event) => setManualValue(event.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500" placeholder={`Enter ${getVital(activeRequest.parameter_name).label} from device`} />
+                <select value={wearableSource} onChange={(event) => setWearableSource(event.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500">
+                  <option value="manual">Manual device</option>
+                  <option value="google_fit">Google Fit</option>
+                  <option value="apple_health">Apple Health</option>
+                  <option value="wearable">Other wearable</option>
+                </select>
+                <button type="submit" className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">Save</button>
+              </form>
             </div>
           ) : (
             <form onSubmit={submitManual} className="mt-4 grid gap-3 sm:grid-cols-[1fr_180px_auto]">

@@ -5,6 +5,14 @@ import { useError } from './ErrorHandler'
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 const CALLER_TYPES = new Set(['patient', 'facility', 'admin'])
+const CLEAN_AUDIO_CONSTRAINTS = {
+  echoCancellation: { ideal: true },
+  noiseSuppression: { ideal: true },
+  autoGainControl: { ideal: true },
+  channelCount: { ideal: 1 },
+  sampleRate: { ideal: 48000 },
+  sampleSize: { ideal: 16 },
+}
 
 function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId, autoStart = false }) {
   const { addError } = useError()
@@ -85,13 +93,10 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
         height: { ideal: 720 },
         frameRate: { ideal: 24, max: 30 },
       },
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        sampleRate: 48000,
-      },
+      audio: CLEAN_AUDIO_CONSTRAINTS,
+    })
+    stream.getAudioTracks().forEach((track) => {
+      track.applyConstraints?.(CLEAN_AUDIO_CONSTRAINTS).catch(() => null)
     })
     streamRef.current = stream
     if (localVideoRef.current) localVideoRef.current.srcObject = stream
