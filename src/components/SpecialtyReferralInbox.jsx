@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 
-function SpecialtyReferralInbox({ doctor }) {
+function SpecialtyReferralInbox({ doctor, onAcceptReferral }) {
   const [referrals, setReferrals] = useState([])
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [accepting, setAccepting] = useState(false)
   const [error, setError] = useState('')
 
   const loadReferrals = async () => {
@@ -33,12 +35,42 @@ function SpecialtyReferralInbox({ doctor }) {
 
   const record = selected?.record_snapshot || {}
   const patient = selected?.patient_snapshot || record.patient || {}
+  const specialtyInfo = getSpecialtyInfo(doctor?.specialty || selected?.to_specialty || 'General Practitioner')
+
+  const acceptReferral = async () => {
+    if (!selected?.id || !doctor?.id) return
+    setAccepting(true)
+    setError('')
+    try {
+      const response = await apiFetch(`/api/referrals/specialty/${encodeURIComponent(selected.id)}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doctorId: doctor.id }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to accept referral')
+      setSelected(data.referral || selected)
+      setReferrals((rows) => rows.map((row) => row.id === selected.id ? (data.referral || row) : row))
+      onAcceptReferral?.({
+        patient: data.patient || patient,
+        consultation: data.consultation,
+        referral: data.referral || selected,
+      })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setAccepting(false)
+    }
+  }
 
   return (
     <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Specialty Referral Inbox</h2>
+          <p className="text-xs font-black uppercase tracking-[0.18em]" style={{ color: specialtyInfo.color }}>
+            {doctor?.specialty || 'Specialty'} referrals
+          </p>
+          <h2 className="mt-1 text-2xl font-bold text-slate-900">Specialty Referral Inbox</h2>
           <p className="mt-2 text-sm text-slate-600">
             Referrals sent to {doctor?.specialty || 'your specialty'} arrive here with the patient record attached.
           </p>
@@ -88,6 +120,16 @@ function SpecialtyReferralInbox({ doctor }) {
                 <h3 className="mt-1 text-2xl font-bold text-slate-900">{patient.name || selected.patient_id}</h3>
                 <p className="mt-1 text-sm text-slate-500">{selected.patient_id}</p>
               </div>
+
+              <button
+                type="button"
+                onClick={acceptReferral}
+                disabled={accepting || selected.status === 'accepted'}
+                className="w-full rounded-2xl px-5 py-3 text-sm font-bold text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ backgroundColor: specialtyInfo.color }}
+              >
+                {selected.status === 'accepted' ? 'Referral accepted' : accepting ? 'Opening consultation...' : 'Accept referral and open consultation'}
+              </button>
 
               <div className="rounded-2xl bg-brand-50 p-4">
                 <p className="text-sm font-bold text-slate-900">Referral reason</p>

@@ -2116,9 +2116,13 @@ app.get('/api/video-signal', async (req, res) => {
   if (type) query = query.eq('type', type)
   const { data, error } = await withTimeout(query, 2500, { data: null, error: new Error('video signal query timeout') })
 
-  const signals = error
-    ? getVideoSignalRoom(roomId).filter((message) => message.seq > since && message.sender_id !== senderId && (!type || message.type === type)).slice(-100)
-    : data || []
+  const memorySignals = getVideoSignalRoom(roomId)
+    .filter((message) => message.seq > since && message.sender_id !== senderId && (!type || message.type === type))
+  const merged = new Map()
+  ;[...(data || []), ...memorySignals].forEach((message) => {
+    if (message?.id) merged.set(message.id, message)
+  })
+  const signals = [...merged.values()].sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).slice(-100)
   res.json({ signals })
 })
 
@@ -2652,6 +2656,71 @@ app.get('/api/referrals/specialty', async (req, res) => {
   const { data, error } = await query.limit(100)
   if (error) return res.status(500).json({ error: error.message })
   res.json({ referrals: data || [] })
+})
+
+app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
+  const referralId = String(req.params.referralId || '').trim()
+  const doctorId = String(req.body?.doctorId || '').trim()
+  if (!referralId || !doctorId) return res.status(400).json({ error: 'referralId and doctorId required' })
+
+  const { data: referral, error: referralError } = await supabase
+    .from('specialty_referrals')
+    .select('*')
+    .eq('id', referralId)
+    .maybeSingle()
+  if (referralError) return res.status(500).json({ error: referralError.message })
+  if (!referral) return res.status(404).json({ error: 'Referral not found' })
+
+  const doctor = await getDoctorProfile(doctorId)
+  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+  if (String(referral.to_specialty || '').toLowerCase() !== String(doctor.specialty || '').toLowerCase()) {
+    return res.status(403).json({ error: 'This referral belongs to a different specialty' })
+  }
+
+  const patient = await findPatientByIdentifier(referral.patient_id)
+  if (!patient) return res.status(404).json({ error: 'Patient not found' })
+
+  const consultation = {
+    id: generateId('cng-ref'),
+    patient_id: patient.id,
+    doctor_id: doctorId,
+    facility_id: patient.facility_id || null,
+    channel: 'specialty_referral',
+    track: doctor.specialty || referral.to_specialty || 'specialty',
+    duration_min: 15,
+    blocks: 1,
+    total_ngn: 0,
+    status: 'in_progress',
+    created_at: new Date().toISOString(),
+  }
+  const { data: insertedConsultation, error: consultationError } = await supabase
+    .from('consultations_ng')
+    .insert(consultation)
+    .select('*')
+    .maybeSingle()
+  if (consultationError) return res.status(500).json({ error: consultationError.message })
+
+  const acceptedAt = new Date().toISOString()
+  const { data: updatedReferral, error: updateError } = await supabase
+    .from('specialty_referrals')
+    .update({
+      status: 'accepted',
+      accepted_by_doctor_id: doctorId,
+      accepted_at: acceptedAt,
+      consultation_id: insertedConsultation?.id || consultation.id,
+    })
+    .eq('id', referralId)
+    .select('*')
+    .maybeSingle()
+  if (updateError) return res.status(500).json({ error: updateError.message })
+
+  res.json({
+    referral: updatedReferral || referral,
+    patient: sanitizePatientForResponse(patient),
+    consultation: insertedConsultation || consultation,
+    doctor: sanitizeDoctorForResponse(doctor),
+    message: 'Referral accepted and consultation room opened',
+  })
 })
 
 app.post('/api/patients/referrals', async (req, res) => {

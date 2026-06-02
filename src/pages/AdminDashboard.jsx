@@ -161,6 +161,19 @@ function AdminDashboard({ doctor, onLogout }) {
     setActiveConsultTool(panel === 'video' || panel === 'patients' ? 'chat' : panel)
   }
 
+  const openAcceptedReferralWorkspace = ({ patient, consultation }) => {
+    if (!patient?.id || !consultation?.id) return
+    setSelectedConsultationPatient({
+      ...patient,
+      latest_consultation: consultation,
+      source: 'specialty_referral',
+      video_waiting: true,
+    })
+    setWorkspacePanel('')
+    setActiveConsultTool('chat')
+    setActiveTab('patients')
+  }
+
   const handleSavePayoutDetails = async () => {
     setSavingPayoutDetails(true)
     try {
@@ -553,7 +566,7 @@ function AdminDashboard({ doctor, onLogout }) {
       {/* Referrals Tab */}
       {activeTab === 'referrals' && (
         <div className="space-y-8">
-          <SpecialtyReferralInbox doctor={doctor} />
+          <SpecialtyReferralInbox doctor={doctor} onAcceptReferral={openAcceptedReferralWorkspace} />
           <FacilityReferralManager doctor={doctor} />
         </div>
       )}
@@ -610,38 +623,10 @@ function AdminDashboard({ doctor, onLogout }) {
                       {selectedConsultation.status || 'in_progress'}
                     </div>
                   </div>
-                  <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {[
-                      ['patients', 'Show patients'],
-                      ['video', 'Accept video room'],
-                      ['chat', 'Open chat'],
-                      ['vitals', 'Request vitals'],
-                      ['notes', 'Clinical notes'],
-                      ['prescription', 'Prescription'],
-                      ['labs', 'Lab request'],
-                      ['record', 'Full record'],
-                      ['referral', 'Refer specialty'],
-                    ].map(([panel, label]) => (
-                      <button
-                        key={panel}
-                        type="button"
-                        onClick={() => {
-                          if (panel === 'patients') {
-                            setWorkspacePanel('patients')
-                            return
-                          }
-                          setWorkspacePanel('')
-                          if (panel !== 'video') setActiveConsultTool(panel)
-                        }}
-                        className={`rounded-2xl bg-white px-4 py-3 text-sm font-semibold ring-1 hover:ring-brand-300 ${
-                          panel !== 'patients' && panel !== 'video' && activeConsultTool === panel
-                            ? 'text-brand-800 ring-brand-300'
-                            : 'text-slate-800 ring-slate-200'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <span className="rounded-2xl bg-white/70 px-5 py-3 text-sm font-semibold text-slate-600 ring-1 ring-brand-100">
+                      Video stays open below. Use the consultation tools under the video.
+                    </span>
                   </div>
                 </>
               ) : (

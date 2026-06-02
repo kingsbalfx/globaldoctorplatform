@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import VitalParametersMonitor from './VitalParametersMonitor'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
 
@@ -24,16 +23,25 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const pendingIceRef = useRef([])
   const lastSignalSeqRef = useRef(0)
   const processedSignalsRef = useRef(new Set())
+  const makingOfferRef = useRef(false)
+  const ignoreOfferRef = useRef(false)
+  const callStartedRef = useRef(false)
+  const remoteAudioMutedRef = useRef(true)
   const [callStarted, setCallStarted] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [audioMuted, setAudioMuted] = useState(false)
+  const [remoteAudioMuted, setRemoteAudioMuted] = useState(true)
   const [videoMuted, setVideoMuted] = useState(false)
   const [status, setStatus] = useState('Ready')
+  const [connectionState, setConnectionState] = useState('new')
+  const [iceState, setIceState] = useState('new')
+  const [remoteSeen, setRemoteSeen] = useState(false)
   const [joinRequests, setJoinRequests] = useState([])
 
   const roomId = String(consultationId || '').trim()
   const participantId = String(userId || doctorId || patientId || userType || '').trim()
   const shouldCreateOffer = CALLER_TYPES.has(String(userType || '').toLowerCase())
+  const politePeer = !shouldCreateOffer
 
   const isClosedPeer = (peer) => {
     return !peer || peer.signalingState === 'closed' || peer.connectionState === 'closed'
@@ -44,7 +52,34 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     peerRef.current = null
     pendingIceRef.current = []
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+    setConnectionState('new')
+    setIceState('new')
+    setRemoteSeen(false)
   }
+
+  const normalizeSignalPayload = (payload) => {
+    if (!payload) return {}
+    if (typeof payload.toJSON === 'function') return payload.toJSON()
+    if (typeof RTCSessionDescription !== 'undefined' && payload instanceof RTCSessionDescription) {
+      return { type: payload.type, sdp: payload.sdp }
+    }
+    if (typeof RTCIceCandidate !== 'undefined' && payload instanceof RTCIceCandidate) {
+      return payload.toJSON()
+    }
+    return typeof payload === 'object' ? { ...payload } : { value: payload }
+  }
+
+  const cleanSessionDescription = (payload) => ({
+    type: payload?.type,
+    sdp: payload?.sdp,
+  })
+
+  const cleanIceCandidate = (payload) => ({
+    candidate: payload?.candidate,
+    sdpMid: payload?.sdpMid ?? null,
+    sdpMLineIndex: payload?.sdpMLineIndex ?? null,
+    usernameFragment: payload?.usernameFragment,
+  })
 
   const flushPendingIce = async (peer) => {
     if (!peer?.remoteDescription) return
@@ -60,10 +95,22 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
 
   const sendSignal = async (type, payload) => {
     if (!roomId || !participantId) return
+    const signalPayload = normalizeSignalPayload(payload)
     await apiFetch('/api/video-signal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId, senderId: participantId, senderType: userType, type, payload }),
+      body: JSON.stringify({
+        roomId,
+        senderId: participantId,
+        senderType: userType,
+        type,
+        payload: {
+          ...signalPayload,
+          roomId,
+          senderId: participantId,
+          sentAt: new Date().toISOString(),
+        },
+      }),
     })
   }
 
@@ -184,21 +231,44 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     peerRef.current = peer
 
     peer.onicecandidate = (event) => {
-      if (event.candidate) void sendSignal('ice', event.candidate)
+      if (event.candidate) void sendSignal('ice', event.candidate.toJSON?.() || event.candidate)
+    }
+    peer.onnegotiationneeded = async () => {
+      if (!callStartedRef.current || !shouldCreateOffer) return
+      await createOffer()
     }
     peer.ontrack = (event) => {
       const [remoteStream] = event.streams
       if (remoteVideoRef.current && remoteStream) {
         remoteVideoRef.current.srcObject = remoteStream
-        remoteVideoRef.current.volume = 0.85
+        remoteVideoRef.current.muted = remoteAudioMutedRef.current
+        remoteVideoRef.current.volume = remoteAudioMutedRef.current ? 0 : 0.82
+        setRemoteSeen(true)
         setStatus('Connected')
       }
     }
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState
+      setConnectionState(state || 'unknown')
       if (state === 'connected') setStatus('Connected')
-      if (state === 'failed' || state === 'disconnected') setStatus('Reconnecting')
+      if (state === 'failed' || state === 'disconnected') {
+        setStatus('Reconnecting')
+        window.setTimeout(() => {
+          if (callStartedRef.current && shouldCreateOffer && peerRef.current?.connectionState !== 'connected') {
+            resetPeerOnly()
+            void createOffer().catch(() => setStatus('Reconnect failed'))
+          }
+        }, 900)
+      }
       if (state === 'closed') setStatus('Closed')
+    }
+    peer.oniceconnectionstatechange = () => {
+      setIceState(peer.iceConnectionState || 'unknown')
+      if (peer.iceConnectionState === 'failed') {
+        setStatus('Repairing connection')
+        peer.restartIce?.()
+        if (shouldCreateOffer) void createOffer().catch(() => setStatus('Reconnect failed'))
+      }
     }
 
     const stream = await attachLocalStream()
@@ -211,13 +281,19 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const createOffer = async () => {
     const peer = await createPeer()
     if (isClosedPeer(peer)) return
-    if (peer.signalingState !== 'stable') {
-      await peer.setLocalDescription({ type: 'rollback' }).catch(() => null)
+    if (makingOfferRef.current) return
+    try {
+      makingOfferRef.current = true
+      if (peer.signalingState !== 'stable') {
+        await peer.setLocalDescription({ type: 'rollback' }).catch(() => null)
+      }
+      const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+      await peer.setLocalDescription(offer)
+      await sendSignal('offer', peer.localDescription || offer)
+      setStatus('Waiting for other participant')
+    } finally {
+      makingOfferRef.current = false
     }
-    const offer = await peer.createOffer()
-    await peer.setLocalDescription(offer)
-    await sendSignal('offer', offer)
-    setStatus('Waiting for other participant')
   }
 
   const handleSignal = async (signal) => {
@@ -237,34 +313,41 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (isClosedPeer(peer)) return
 
     if (signal.type === 'offer') {
-      if (peer.signalingState !== 'stable') {
+      const offerCollision = makingOfferRef.current || peer.signalingState !== 'stable'
+      ignoreOfferRef.current = !politePeer && offerCollision
+      if (ignoreOfferRef.current) return
+
+      if (offerCollision) {
         await peer.setLocalDescription({ type: 'rollback' }).catch(() => null)
       }
-      await peer.setRemoteDescription(new RTCSessionDescription(signal.payload))
+      await peer.setRemoteDescription(new RTCSessionDescription(cleanSessionDescription(signal.payload)))
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
-      await sendSignal('answer', answer)
+      await sendSignal('answer', peer.localDescription || answer)
       await flushPendingIce(peer)
       setStatus('Answer sent')
       return
     }
 
     if (signal.type === 'answer' && peer.signalingState === 'have-local-offer') {
-      await peer.setRemoteDescription(new RTCSessionDescription(signal.payload))
+      await peer.setRemoteDescription(new RTCSessionDescription(cleanSessionDescription(signal.payload)))
       await flushPendingIce(peer)
       setStatus('Connected')
       return
     }
 
     if (signal.type === 'ice') {
+      if (!signal.payload?.candidate) return
       if (!peer.remoteDescription) {
-        pendingIceRef.current.push(signal.payload)
+        pendingIceRef.current.push(cleanIceCandidate(signal.payload))
         return
       }
       try {
-        await peer.addIceCandidate(new RTCIceCandidate(signal.payload))
+        await peer.addIceCandidate(new RTCIceCandidate(cleanIceCandidate(signal.payload)))
       } catch {
-        // Candidate may belong to an already-closed negotiation attempt.
+        if (!ignoreOfferRef.current) {
+          // Candidate may belong to an already-closed negotiation attempt.
+        }
       }
     }
   }
@@ -303,20 +386,22 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     setConnecting(true)
     try {
       await createPeer()
+      callStartedRef.current = true
       setCallStarted(true)
+      await sendSignal('ready', {
+        readyAt: new Date().toISOString(),
+        doctorId,
+        patientId,
+      })
       setStatus(shouldCreateOffer ? 'Creating room' : 'Waiting for patient or facility')
       if (shouldCreateOffer) {
         await announceJoin()
         await createOffer()
-      } else {
-        await sendSignal('ready', {
-          readyAt: new Date().toISOString(),
-          doctorId,
-          patientId,
-        })
       }
       addError('Secure video room opened. Allow camera and microphone access when prompted.', 'success')
     } catch (error) {
+      callStartedRef.current = false
+      setCallStarted(false)
       addError(error.message || 'Unable to start the video call.', 'error')
       setStatus('Could not start')
     } finally {
@@ -336,7 +421,10 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (localVideoRef.current) localVideoRef.current.srcObject = null
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
     setCallStarted(false)
+    callStartedRef.current = false
     setAudioMuted(false)
+    setRemoteAudioMuted(true)
+    remoteAudioMutedRef.current = true
     setVideoMuted(false)
     setStatus('Closed')
   }
@@ -346,6 +434,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     processedSignalsRef.current = new Set()
     if (peerRef.current) {
       resetPeerOnly()
+      callStartedRef.current = false
       setCallStarted(false)
       setStatus('Ready')
     }
@@ -366,6 +455,16 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       track.enabled = !next
     })
     setVideoMuted(next)
+  }
+
+  const toggleRemoteAudio = () => {
+    const next = !remoteAudioMuted
+    remoteAudioMutedRef.current = next
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = next
+      remoteVideoRef.current.volume = next ? 0 : 0.82
+    }
+    setRemoteAudioMuted(next)
   }
 
   useEffect(() => {
@@ -408,13 +507,18 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl bg-white p-6 shadow-lg shadow-slate-200/40">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">Embedded Video Consultation</h2>
-            <p className="text-sm text-slate-500">Native browser video, audio, and voice call for this consultation room.</p>
-            <p className="mt-2 text-xs font-semibold text-slate-500">Room: {roomId || 'No consultation selected'} | Status: {status}</p>
-            <p className="mt-1 text-xs text-slate-500">Audio uses echo cancellation and noise suppression. Use headphones if doctor and patient are in the same room.</p>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Secure browser video room</p>
+            <h2 className="mt-1 text-2xl font-bold text-slate-900">Video and audio consultation</h2>
+            <p className="mt-2 text-sm text-slate-500">Remote sound starts muted to prevent feedback. Enable sound only when you are ready.</p>
+            <div className="mt-4 grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+              <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">Room: {roomId || 'None'}</span>
+              <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">Status: {status}</span>
+              <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">Peer: {connectionState}</span>
+              <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">ICE: {iceState}</span>
+            </div>
           </div>
           <div className="flex flex-wrap gap-3">
             {!shouldCreateOffer && !callStarted && joinRequests.length > 0 && (
@@ -443,6 +547,9 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
                 <button type="button" onClick={toggleVideo} className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
                   {videoMuted ? 'Camera on' : 'Camera off'}
                 </button>
+                <button type="button" onClick={toggleRemoteAudio} className="rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-200">
+                  {remoteAudioMuted ? 'Enable sound' : 'Mute sound'}
+                </button>
                 <button type="button" onClick={endCall} className="rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white hover:bg-red-700">
                   End Call
                 </button>
@@ -457,23 +564,21 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-3xl bg-slate-950 shadow-lg shadow-slate-200/40">
-          <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold text-white">Remote participant</div>
-          <video ref={remoteVideoRef} autoPlay playsInline className="aspect-video w-full bg-slate-950 object-cover" />
+      <div className="grid gap-4 lg:grid-cols-[1.35fr_0.65fr]">
+        <div className="overflow-hidden rounded-3xl bg-slate-950 shadow-xl shadow-slate-200/50 ring-1 ring-slate-800">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 text-sm font-semibold text-white">
+            <span>Remote participant</span>
+            <span className={`rounded-full px-3 py-1 text-xs ${remoteSeen ? 'bg-emerald-500/20 text-emerald-200' : 'bg-amber-500/20 text-amber-100'}`}>
+              {remoteSeen ? 'Remote connected' : 'Waiting for remote'}
+            </span>
+          </div>
+          <video ref={remoteVideoRef} autoPlay playsInline muted={remoteAudioMuted} className="aspect-video w-full bg-slate-950 object-cover" />
         </div>
-        <div className="overflow-hidden rounded-3xl bg-slate-950 shadow-lg shadow-slate-200/40">
+        <div className="overflow-hidden rounded-3xl bg-slate-950 shadow-xl shadow-slate-200/50 ring-1 ring-slate-800">
           <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold text-white">You</div>
           <video ref={localVideoRef} autoPlay playsInline muted className="aspect-video w-full bg-slate-950 object-cover" />
         </div>
       </div>
-
-      <VitalParametersMonitor
-        consultationId={consultationId}
-        patientId={patientId}
-        doctorId={doctorId}
-        userType={userType}
-      />
     </div>
   )
 }
