@@ -233,6 +233,30 @@ function AdminDashboard({ doctor, onLogout }) {
     }
   }
 
+  const waitingConsultationPatients = consultationPatients.filter((patient) => patient.video_waiting)
+  const facilityConsultationPatients = consultationPatients.filter((patient) => patient.source === 'facility' && !patient.video_waiting)
+  const referredConsultationPatients = consultationPatients.filter((patient) => patient.source === 'specialty_referral' && !patient.video_waiting)
+  const directConsultationPatients = consultationPatients.filter((patient) => patient.source === 'direct_patient' && !patient.video_waiting)
+  const consultationPatientSections = [
+    { title: 'Waiting now', subtitle: 'Patients already trying to enter the video room.', patients: waitingConsultationPatients },
+    { title: 'Facility patients', subtitle: 'Patients sent from PHC or private clinic workflows.', patients: facilityConsultationPatients },
+    { title: 'Specialty referrals', subtitle: 'Patients transferred from another doctor.', patients: referredConsultationPatients },
+    { title: 'Direct patients', subtitle: 'Patients who started from their own portal.', patients: directConsultationPatients },
+  ].filter((section) => section.patients.length > 0)
+
+  const getPatientSourceLabel = (patient, index) => {
+    if (patient.video_waiting) return 'Waiting for video'
+    if (patient.source === 'facility') return patient.facility_name || patient.facility_type || `Facility queue #${index + 1}`
+    if (patient.source === 'specialty_referral') return 'Specialty referral'
+    return 'Direct patient'
+  }
+
+  const getPatientChannelLabel = (patient) => {
+    const channel = patient.latest_consultation?.channel || 'Consultation'
+    if (patient.source === 'facility' && patient.facility_name) return `${patient.facility_name} | ${channel.replace(/_/g, ' ')}`
+    return channel.replace(/_/g, ' ')
+  }
+
   if (!doctor) {
     return (
       <section className="mx-auto mt-16 max-w-7xl px-6 pb-20 sm:px-8">
@@ -673,32 +697,57 @@ function AdminDashboard({ doctor, onLogout }) {
                   {loadingConsultationPatients ? 'Loading...' : 'Refresh'}
                 </button>
               </div>
-              <div className="mt-5 grid gap-3">
+              <div className="mt-5 space-y-5">
                 {consultationPatients.length === 0 ? (
                   <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-600">No active consultation patients yet.</div>
                 ) : (
-                  consultationPatients.map((patient, index) => (
-                    <button
-                      key={patient.latest_consultation?.id || patient.id}
-                      type="button"
-                      onClick={() => openPatientWorkspace(patient, 'video')}
-                      className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-left hover:border-brand-200"
-                    >
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  consultationPatientSections.map((section) => (
+                    <div key={section.title}>
+                      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                         <div>
-                          <p className="text-sm font-black uppercase tracking-[0.18em]" style={{ color: adminSpecialtyInfo.color }}>
-                            {patient.source === 'direct_patient' ? 'Direct patient' : `Queue #${index + 1}`}
-                          </p>
-                          <h4 className="mt-1 text-lg font-bold text-slate-900">{patient.name || 'Unnamed patient'}</h4>
-                          <p className="mt-1 text-xs font-semibold text-slate-500">ID: {patient.id}</p>
+                          <h4 className="text-sm font-black uppercase tracking-[0.18em] text-slate-900">{section.title}</h4>
+                          <p className="text-xs font-semibold text-slate-500">{section.subtitle}</p>
                         </div>
-                        <div className="text-sm text-slate-600 lg:text-right">
-                          <p className="font-semibold text-slate-900">{patient.latest_consultation?.channel?.replace(/_/g, ' ') || 'Consultation'}</p>
-                          <p className="mt-1 font-bold text-emerald-700">{patient.latest_consultation?.status || 'in_progress'}</p>
-                          {patient.video_waiting && <p className="mt-2 text-xs font-black text-emerald-700">Patient waiting to join</p>}
-                        </div>
+                        <span className="text-xs font-bold text-slate-500">{section.patients.length} patient{section.patients.length === 1 ? '' : 's'}</span>
                       </div>
-                    </button>
+                      <div className="grid gap-3">
+                        {section.patients.map((patient, index) => (
+                          <button
+                            key={patient.latest_consultation?.id || patient.id}
+                            type="button"
+                            onClick={() => openPatientWorkspace(patient, 'video')}
+                            className={`rounded-3xl border p-5 text-left transition hover:border-brand-200 ${
+                              patient.video_waiting
+                                ? 'border-emerald-200 bg-emerald-50'
+                                : patient.source === 'facility'
+                                  ? 'border-sky-200 bg-sky-50'
+                                  : 'border-slate-200 bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                              <div>
+                                <p className="text-sm font-black uppercase tracking-[0.18em]" style={{ color: adminSpecialtyInfo.color }}>
+                                  {getPatientSourceLabel(patient, index)}
+                                </p>
+                                <h4 className="mt-1 text-lg font-bold text-slate-900">{patient.name || 'Unnamed patient'}</h4>
+                                <p className="mt-1 text-xs font-semibold text-slate-500">ID: {patient.id}</p>
+                                {patient.facility_id && (
+                                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                                    Facility: {patient.facility_name || patient.facility_id}
+                                    {patient.facility_type ? ` (${patient.facility_type.replace(/_/g, ' ')})` : ''}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="text-sm text-slate-600 lg:text-right">
+                                <p className="font-semibold text-slate-900">{getPatientChannelLabel(patient)}</p>
+                                <p className="mt-1 font-bold text-emerald-700">{patient.latest_consultation?.status || 'in_progress'}</p>
+                                {patient.video_waiting && <p className="mt-2 text-xs font-black text-emerald-700">Ready to accept video room</p>}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   ))
                 )}
               </div>

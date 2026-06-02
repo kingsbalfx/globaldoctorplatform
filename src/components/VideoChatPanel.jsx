@@ -5,12 +5,14 @@ import { useError } from './ErrorHandler'
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 const CALLER_TYPES = new Set(['patient', 'facility', 'admin'])
 const CLEAN_AUDIO_CONSTRAINTS = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: false,
+  echoCancellation: { ideal: true },
+  noiseSuppression: { ideal: true },
+  autoGainControl: { ideal: true },
   channelCount: { ideal: 1, max: 1 },
   sampleRate: { ideal: 48000 },
 }
+
+const REMOTE_SPEAKER_VOLUME = 0.72
 
 function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId, autoStart = false }) {
   const { addError } = useError()
@@ -19,6 +21,10 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const peerRef = useRef(null)
   const streamRef = useRef(null)
   const audioContextRef = useRef(null)
+  const remoteAudioContextRef = useRef(null)
+  const remoteAudioSourceRef = useRef(null)
+  const remoteAudioGainRef = useRef(null)
+  const remoteStreamRef = useRef(null)
   const rawAudioTracksRef = useRef([])
   const pendingIceRef = useRef([])
   const lastSignalSeqRef = useRef(0)
@@ -36,6 +42,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const [connectionState, setConnectionState] = useState('new')
   const [iceState, setIceState] = useState('new')
   const [remoteSeen, setRemoteSeen] = useState(false)
+  const [remoteAudioEnhanced, setRemoteAudioEnhanced] = useState(false)
   const [joinRequests, setJoinRequests] = useState([])
 
   const roomId = String(consultationId || '').trim()
@@ -52,9 +59,19 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     peerRef.current = null
     pendingIceRef.current = []
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+    closeRemoteAudio()
+    remoteStreamRef.current = null
     setConnectionState('new')
     setIceState('new')
     setRemoteSeen(false)
+  }
+
+  const closeRemoteAudio = () => {
+    remoteAudioGainRef.current = null
+    remoteAudioSourceRef.current = null
+    remoteAudioContextRef.current?.close?.().catch(() => null)
+    remoteAudioContextRef.current = null
+    setRemoteAudioEnhanced(false)
   }
 
   const normalizeSignalPayload = (payload) => {
@@ -143,21 +160,33 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       const source = audioContext.createMediaStreamSource(new MediaStream([rawAudioTrack]))
       const highPass = audioContext.createBiquadFilter()
       highPass.type = 'highpass'
-      highPass.frequency.value = 120
+      highPass.frequency.value = 90
+
+      const presence = audioContext.createBiquadFilter()
+      presence.type = 'peaking'
+      presence.frequency.value = 2800
+      presence.Q.value = 0.8
+      presence.gain.value = 2.2
+
+      const lowPass = audioContext.createBiquadFilter()
+      lowPass.type = 'lowpass'
+      lowPass.frequency.value = 7600
 
       const compressor = audioContext.createDynamicsCompressor()
-      compressor.threshold.value = -36
-      compressor.knee.value = 18
-      compressor.ratio.value = 8
-      compressor.attack.value = 0.006
-      compressor.release.value = 0.2
+      compressor.threshold.value = -30
+      compressor.knee.value = 20
+      compressor.ratio.value = 4
+      compressor.attack.value = 0.008
+      compressor.release.value = 0.18
 
       const gain = audioContext.createGain()
-      gain.gain.value = 0.82
+      gain.gain.value = 0.9
 
       const destination = audioContext.createMediaStreamDestination()
       source.connect(highPass)
-      highPass.connect(compressor)
+      highPass.connect(presence)
+      presence.connect(lowPass)
+      lowPass.connect(compressor)
       compressor.connect(gain)
       gain.connect(destination)
       audioContextRef.current = audioContext
@@ -190,6 +219,63 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     streamRef.current = managedStream
     if (localVideoRef.current) localVideoRef.current.srcObject = managedStream
     return managedStream
+  }
+
+  const prepareRemoteAudio = (remoteStream) => {
+    if (!remoteStream || remoteStreamRef.current === remoteStream) return
+    closeRemoteAudio()
+    remoteStreamRef.current = remoteStream
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextCtor) {
+      setRemoteAudioEnhanced(false)
+      return
+    }
+
+    try {
+      const audioContext = new AudioContextCtor()
+      const source = audioContext.createMediaStreamSource(remoteStream)
+      const highPass = audioContext.createBiquadFilter()
+      highPass.type = 'highpass'
+      highPass.frequency.value = 85
+
+      const voicePresence = audioContext.createBiquadFilter()
+      voicePresence.type = 'peaking'
+      voicePresence.frequency.value = 2600
+      voicePresence.Q.value = 0.9
+      voicePresence.gain.value = 2.6
+
+      const lowPass = audioContext.createBiquadFilter()
+      lowPass.type = 'lowpass'
+      lowPass.frequency.value = 7200
+
+      const compressor = audioContext.createDynamicsCompressor()
+      compressor.threshold.value = -28
+      compressor.knee.value = 18
+      compressor.ratio.value = 3.4
+      compressor.attack.value = 0.01
+      compressor.release.value = 0.18
+
+      const gain = audioContext.createGain()
+      gain.gain.value = remoteAudioMutedRef.current ? 0 : REMOTE_SPEAKER_VOLUME
+
+      source.connect(highPass)
+      highPass.connect(voicePresence)
+      voicePresence.connect(lowPass)
+      lowPass.connect(compressor)
+      compressor.connect(gain)
+      gain.connect(audioContext.destination)
+
+      remoteAudioContextRef.current = audioContext
+      remoteAudioSourceRef.current = source
+      remoteAudioGainRef.current = gain
+      setRemoteAudioEnhanced(true)
+      if (remoteAudioMutedRef.current) audioContext.suspend?.().catch(() => null)
+    } catch {
+      remoteAudioContextRef.current = null
+      remoteAudioSourceRef.current = null
+      remoteAudioGainRef.current = null
+      setRemoteAudioEnhanced(false)
+    }
   }
 
   const refreshFrontCamera = async () => {
@@ -241,8 +327,9 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       const [remoteStream] = event.streams
       if (remoteVideoRef.current && remoteStream) {
         remoteVideoRef.current.srcObject = remoteStream
-        remoteVideoRef.current.muted = remoteAudioMutedRef.current
-        remoteVideoRef.current.volume = remoteAudioMutedRef.current ? 0 : 0.82
+        remoteVideoRef.current.muted = true
+        remoteVideoRef.current.volume = 0
+        prepareRemoteAudio(remoteStream)
         setRemoteSeen(true)
         setStatus('Connected')
       }
@@ -418,6 +505,8 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     rawAudioTracksRef.current = []
     audioContextRef.current?.close?.().catch(() => null)
     audioContextRef.current = null
+    closeRemoteAudio()
+    remoteStreamRef.current = null
     if (localVideoRef.current) localVideoRef.current.srcObject = null
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
     setCallStarted(false)
@@ -460,9 +549,14 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const toggleRemoteAudio = () => {
     const next = !remoteAudioMuted
     remoteAudioMutedRef.current = next
+    if (remoteAudioGainRef.current) remoteAudioGainRef.current.gain.value = next ? 0 : REMOTE_SPEAKER_VOLUME
+    if (remoteAudioContextRef.current) {
+      if (next) remoteAudioContextRef.current.suspend?.().catch(() => null)
+      else remoteAudioContextRef.current.resume?.().catch(() => null)
+    }
     if (remoteVideoRef.current) {
-      remoteVideoRef.current.muted = next
-      remoteVideoRef.current.volume = next ? 0 : 0.82
+      remoteVideoRef.current.muted = remoteAudioEnhanced || next
+      remoteVideoRef.current.volume = remoteAudioEnhanced || next ? 0 : REMOTE_SPEAKER_VOLUME
     }
     setRemoteAudioMuted(next)
   }
@@ -512,7 +606,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Secure browser video room</p>
             <h2 className="mt-1 text-2xl font-bold text-slate-900">Video and audio consultation</h2>
-            <p className="mt-2 text-sm text-slate-500">Remote sound starts muted to prevent feedback. Enable sound only when you are ready.</p>
+            <p className="mt-2 text-sm text-slate-500">Remote sound starts muted. Enable clear speaker when you are ready; voice is filtered for lower feedback and cleaner speech.</p>
             <div className="mt-4 grid gap-2 text-xs font-semibold text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
               <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">Room: {roomId || 'None'}</span>
               <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">Status: {status}</span>
@@ -548,7 +642,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
                   {videoMuted ? 'Camera on' : 'Camera off'}
                 </button>
                 <button type="button" onClick={toggleRemoteAudio} className="rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-200">
-                  {remoteAudioMuted ? 'Enable sound' : 'Mute sound'}
+                  {remoteAudioMuted ? 'Enable clear speaker' : 'Mute speaker'}
                 </button>
                 <button type="button" onClick={endCall} className="rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white hover:bg-red-700">
                   End Call
@@ -572,7 +666,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
               {remoteSeen ? 'Remote connected' : 'Waiting for remote'}
             </span>
           </div>
-          <video ref={remoteVideoRef} autoPlay playsInline muted={remoteAudioMuted} className="aspect-video w-full bg-slate-950 object-cover" />
+          <video ref={remoteVideoRef} autoPlay playsInline muted={remoteAudioEnhanced || remoteAudioMuted} className="aspect-video w-full bg-slate-950 object-cover" />
         </div>
         <div className="overflow-hidden rounded-3xl bg-slate-950 shadow-xl shadow-slate-200/50 ring-1 ring-slate-800">
           <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold text-white">You</div>

@@ -2984,6 +2984,15 @@ app.get('/api/doctors/:doctorId/facility-patients', async (req, res) => {
   const { data: patients, error: patientError } = await supabase.from('patients').select('*').in('id', patientIds)
   if (patientError) return res.status(500).json({ error: patientError.message })
 
+  const facilityIds = [...new Set([
+    ...(consultations || []).map((item) => item.facility_id),
+    ...(patients || []).map((item) => item.facility_id),
+  ].filter(Boolean))]
+  const { data: facilities } = facilityIds.length
+    ? await supabase.from('facilities').select('id, type, name, state, lga').in('id', facilityIds)
+    : { data: [] }
+  const facilityById = new Map((facilities || []).map((facility) => [String(facility.id), facility]))
+
   const consultationByPatient = new Map()
   for (const item of consultations || []) {
     if (!consultationByPatient.has(item.patient_id)) consultationByPatient.set(item.patient_id, item)
@@ -2996,6 +3005,9 @@ app.get('/api/doctors/:doctorId/facility-patients', async (req, res) => {
       latest_consultation: latestConsultation || null,
       assigned_at: latestConsultation?.created_at || patient.created_at,
       facility_id: latestConsultation?.facility_id || patient.facility_id,
+      facility: facilityById.get(String(latestConsultation?.facility_id || patient.facility_id || '')) || null,
+      facility_name: facilityById.get(String(latestConsultation?.facility_id || patient.facility_id || ''))?.name || '',
+      facility_type: facilityById.get(String(latestConsultation?.facility_id || patient.facility_id || ''))?.type || patient.facility_type || '',
     }
   })
 
@@ -3038,6 +3050,15 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
   const { data: patients, error: patientError } = await supabase.from('patients').select('*').in('id', patientIds)
   if (patientError) return res.status(500).json({ error: patientError.message })
 
+  const facilityIds = [...new Set([
+    ...(consultations || []).map((item) => item.facility_id),
+    ...(patients || []).map((item) => item.facility_id),
+  ].filter(Boolean))]
+  const { data: facilities } = facilityIds.length
+    ? await supabase.from('facilities').select('id, type, name, state, lga').in('id', facilityIds)
+    : { data: [] }
+  const facilityById = new Map((facilities || []).map((facility) => [String(facility.id), facility]))
+
   const consultationIds = (consultations || []).map((item) => item.id).filter(Boolean)
   const { data: videoJoinSignals } = consultationIds.length
     ? await supabase
@@ -3057,12 +3078,23 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
   let rows = (consultations || []).map((consultation) => {
     const patient = patientById.get(consultation.patient_id) || { id: consultation.patient_id, name: 'Patient' }
     const latestVideoSignal = latestVideoSignalByRoom.get(consultation.id)
+    const facilityId = consultation.facility_id || patient.facility_id || null
+    const facility = facilityById.get(String(facilityId || '')) || null
+    const channel = String(consultation.channel || '')
+    const source = channel === 'direct_home'
+      ? 'direct_patient'
+      : channel === 'specialty_referral'
+        ? 'specialty_referral'
+        : 'facility'
     return {
       ...sanitizePatientForResponse(patient),
       latest_consultation: consultation,
       assigned_at: consultation.created_at,
-      facility_id: consultation.facility_id || patient.facility_id || null,
-      source: consultation.channel === 'direct_home' ? 'direct_patient' : 'facility',
+      facility_id: facilityId,
+      facility,
+      facility_name: facility?.name || '',
+      facility_type: facility?.type || patient.facility_type || '',
+      source,
       video_waiting: latestVideoSignal?.type === 'join_request',
       video_waiting_at: latestVideoSignal?.type === 'join_request' ? latestVideoSignal.created_at : null,
     }
@@ -3070,13 +3102,22 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
 
   if (search) {
     rows = rows.filter((patient) => {
-      const haystack = [patient.id, patient.name, patient.phone, patient.email, patient.facility_id, patient.latest_consultation?.channel]
+      const haystack = [patient.id, patient.name, patient.phone, patient.email, patient.facility_id, patient.facility_name, patient.facility_type, patient.latest_consultation?.channel]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
       return haystack.includes(search)
     })
   }
+
+  rows.sort((a, b) => {
+    const waitingDelta = Number(Boolean(b.video_waiting)) - Number(Boolean(a.video_waiting))
+    if (waitingDelta) return waitingDelta
+    const sourceWeight = (patient) => patient.source === 'facility' ? 2 : patient.source === 'specialty_referral' ? 1 : 0
+    const sourceDelta = sourceWeight(b) - sourceWeight(a)
+    if (sourceDelta) return sourceDelta
+    return new Date(b.assigned_at || 0) - new Date(a.assigned_at || 0)
+  })
 
   res.json({
     patients: rows.slice(offset, offset + limit),
