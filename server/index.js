@@ -1336,13 +1336,23 @@ app.post('/api/patients/facility/register', async (req, res) => {
 
   const id = generateReadablePatientId(getPatientIdPrefixForFacilityType(facility.type))
   const newPatient = {
-    id, email: null, password: null, portal_pin: patientPin,
+    id, email: null, password: patientPin, portal_pin: patientPin,
     name: fullName, date_of_birth: null, phone, country: 'NG', language: 'English',
     tokens: 0, is_online: false, registered_via: 'facility', facility_id: facilityId,
     facility_type: facility.type, created_at: new Date().toISOString()
   }
-  await supabase.from('patients').insert(newPatient)
-  await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+  const { data: savedPatient, error: insertError } = await supabase
+    .from('patients')
+    .insert(newPatient)
+    .select('*')
+    .maybeSingle()
+  if (insertError) return res.status(500).json({ error: insertError.message })
+
+  const { error: tokenError } = await supabase
+    .from('patient_tokens')
+    .upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+  if (tokenError) console.error('Failed to create patient token row:', tokenError.message)
+
   await recordAuditLog(req, {
     userId: facilityId,
     userType: 'facility',
@@ -1353,7 +1363,7 @@ app.post('/api/patients/facility/register', async (req, res) => {
   })
 
   res.status(201).json({
-    patient: sanitizePatientForResponse(newPatient),
+    patient: sanitizePatientForResponse(savedPatient || newPatient),
     login: { patientId: id, pin: patientPin },
     message: 'Patient registered via facility'
   })

@@ -618,6 +618,15 @@ ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS facility_type text;
 ALTER TABLE public.patients ALTER COLUMN email DROP NOT NULL;
 ALTER TABLE public.patients ALTER COLUMN date_of_birth DROP NOT NULL;
 
+-- Facility-created patients sign in with PID plus their 6-digit portal PIN.
+-- Backfill older facility rows that saved the PIN but left password empty.
+UPDATE public.patients
+SET password = portal_pin
+WHERE portal_pin IS NOT NULL
+  AND portal_pin <> ''
+  AND (password IS NULL OR password = '')
+  AND COALESCE(registered_via, '') = 'facility';
+
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS signature_data_url text;

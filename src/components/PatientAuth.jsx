@@ -33,11 +33,6 @@ function PatientAuth({ onAuth }) {
   // NEW – forgot password mode
   const [forgotActive, setForgotActive] = useState(false)
 
-  // If forgot password is active, show that component
-  if (forgotActive) {
-    return <ForgotPassword userType="patient" onBack={() => setForgotActive(false)} />
-  }
-
   useEffect(() => {
     try {
       const pending = JSON.parse(window.localStorage.getItem('gd_pending_patient_profile') || 'null')
@@ -55,6 +50,11 @@ function PatientAuth({ onAuth }) {
       // ignore
     }
   }, [])
+
+  // If forgot password is active, show that component after all hooks have run.
+  if (forgotActive) {
+    return <ForgotPassword userType="patient" onBack={() => setForgotActive(false)} />
+  }
 
   const isPatientProfileComplete = (user) => {
     const data = user?.user_metadata || {}

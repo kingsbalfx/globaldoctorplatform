@@ -82,11 +82,6 @@ function DoctorAuth({ onAuth }) {
   // NEW – forgot password mode
   const [forgotActive, setForgotActive] = useState(false)
 
-  // If forgot password is active, show that component
-  if (forgotActive) {
-    return <ForgotPassword userType="doctor" onBack={() => setForgotActive(false)} />
-  }
-
   // Restore pending profile after OAuth (if any)
   useEffect(() => {
     try {
@@ -106,6 +101,11 @@ function DoctorAuth({ onAuth }) {
   }, [])
 
   // ========== GOOGLE SIGN‑IN (doctors only, not admin) ==========
+  // If forgot password is active, show that component after all hooks have run.
+  if (forgotActive) {
+    return <ForgotPassword userType="doctor" onBack={() => setForgotActive(false)} />
+  }
+
   const handleGoogleSignIn = async () => {
     if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
       addError(t('errors.server'), 'error')
