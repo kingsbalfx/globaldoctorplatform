@@ -73,6 +73,7 @@ function AdminDashboard({ doctor, onLogout }) {
   const [loadingConsultationPatients, setLoadingConsultationPatients] = useState(false)
   const [selectedConsultationPatient, setSelectedConsultationPatient] = useState(null)
   const [workspacePanel, setWorkspacePanel] = useState('')
+  const [activeConsultTool, setActiveConsultTool] = useState('chat')
   const [financials, setFinancials] = useState(null)
   const earningsTokens = Number(financials?.earningsTokens ?? doctor?.earningsTokens ?? doctor?.earnings_tokens ?? 0) || 0
   const estimatedUsd = financials?.estimatedUsd ?? (earningsTokens / 10)
@@ -156,7 +157,8 @@ function AdminDashboard({ doctor, onLogout }) {
 
   const openPatientWorkspace = (patient, panel = 'video') => {
     setSelectedConsultationPatient(patient)
-    setWorkspacePanel(panel)
+    setWorkspacePanel('')
+    setActiveConsultTool(panel === 'video' || panel === 'patients' ? 'chat' : panel)
   }
 
   const handleSavePayoutDetails = async () => {
@@ -623,8 +625,19 @@ function AdminDashboard({ doctor, onLogout }) {
                       <button
                         key={panel}
                         type="button"
-                        onClick={() => setWorkspacePanel(panel)}
-                        className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 hover:ring-brand-300"
+                        onClick={() => {
+                          if (panel === 'patients') {
+                            setWorkspacePanel('patients')
+                            return
+                          }
+                          setWorkspacePanel('')
+                          if (panel !== 'video') setActiveConsultTool(panel)
+                        }}
+                        className={`rounded-2xl bg-white px-4 py-3 text-sm font-semibold ring-1 hover:ring-brand-300 ${
+                          panel !== 'patients' && panel !== 'video' && activeConsultTool === panel
+                            ? 'text-brand-800 ring-brand-300'
+                            : 'text-slate-800 ring-slate-200'
+                        }`}
                       >
                         {label}
                       </button>
@@ -707,59 +720,89 @@ function AdminDashboard({ doctor, onLogout }) {
             </WorkspaceModal>
           )}
 
-          {selectedConsultationPatient && selectedConsultation && workspacePanel === 'video' && (
-            <WorkspaceModal title="Video Room" subtitle={`${selectedConsultationPatient.name || selectedConsultationPatient.id} | ${selectedConsultation.id}`} onClose={() => setWorkspacePanel('')} size="max-w-6xl">
-              <VideoChatPanel
-                key={selectedConsultation.id}
-                consultationId={selectedConsultation.id}
-                userId={doctor.id}
-                userType="doctor"
-                patientId={selectedConsultationPatient.id}
-                doctorId={doctor.id}
-              />
-            </WorkspaceModal>
-          )}
+          {selectedConsultationPatient && selectedConsultation && (
+            <div className="space-y-6">
+              <div className="rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/50">
+                <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-900">Live Video Consultation</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {selectedConsultationPatient.name || selectedConsultationPatient.id} | {selectedConsultation.id}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWorkspacePanel('patients')}
+                    className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+                  >
+                    Change patient
+                  </button>
+                </div>
+                <VideoChatPanel
+                  key={selectedConsultation.id}
+                  consultationId={selectedConsultation.id}
+                  userId={doctor.id}
+                  userType="doctor"
+                  patientId={selectedConsultationPatient.id}
+                  doctorId={doctor.id}
+                />
+              </div>
 
-          {selectedConsultationPatient && selectedConsultation && workspacePanel === 'chat' && (
-            <WorkspaceModal title="Patient Chat" subtitle={selectedConsultationPatient.name || selectedConsultationPatient.id} onClose={() => setWorkspacePanel('')}>
-              <ChatPanel consultationId={selectedConsultation.id} userId={doctor.id} userType="doctor" recipientId={selectedConsultationPatient.id} recipientType="patient" patientId={selectedConsultationPatient.id} doctorId={doctor.id} />
-            </WorkspaceModal>
-          )}
+              <div className="rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/50">
+                <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-900">Consultation Tools</h3>
+                    <p className="mt-1 text-sm text-slate-500">Use these while the video remains open above.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      ['chat', 'Chat'],
+                      ['vitals', 'Vitals'],
+                      ['notes', 'Notes'],
+                      ['prescription', 'Prescription'],
+                      ['labs', 'Lab request'],
+                      ['record', 'Full record'],
+                      ['referral', 'Refer specialty'],
+                    ].map(([panel, label]) => (
+                      <button
+                        key={panel}
+                        type="button"
+                        onClick={() => setActiveConsultTool(panel)}
+                        className={`rounded-2xl px-4 py-2 text-sm font-semibold ring-1 ${
+                          activeConsultTool === panel
+                            ? 'bg-brand-700 text-white ring-brand-700'
+                            : 'bg-slate-50 text-slate-700 ring-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-          {selectedConsultationPatient && selectedConsultation && workspacePanel === 'vitals' && (
-            <WorkspaceModal title="Vital Sign Requests" subtitle="Request and review patient vital signs." onClose={() => setWorkspacePanel('')} size="max-w-5xl">
-              <VitalParametersMonitor consultationId={selectedConsultation.id} patientId={selectedConsultationPatient.id} doctorId={doctor.id} userType="doctor" />
-            </WorkspaceModal>
-          )}
-
-          {selectedConsultationPatient && selectedConsultation && workspacePanel === 'notes' && (
-            <WorkspaceModal title="Clinical Notes" subtitle={selectedConsultationPatient.name || selectedConsultationPatient.id} onClose={() => setWorkspacePanel('')}>
-              <DoctorPatientNotes patientId={selectedConsultationPatient.id} doctorId={doctor.id} consultationId={selectedConsultation.id} />
-            </WorkspaceModal>
-          )}
-
-          {selectedConsultationPatient && selectedConsultation && workspacePanel === 'prescription' && (
-            <WorkspaceModal title="Prescription" subtitle={selectedConsultationPatient.name || selectedConsultationPatient.id} onClose={() => setWorkspacePanel('')}>
-              <PrescriptionManager mode="doctor" consultationId={selectedConsultation.id} patientId={selectedConsultationPatient.id} patientName={selectedConsultationPatient.name} doctor={doctor} facilityId={selectedConsultation.facility_id} />
-            </WorkspaceModal>
-          )}
-
-          {selectedConsultationPatient && selectedConsultation && workspacePanel === 'labs' && (
-            <WorkspaceModal title="Lab Request" subtitle={selectedConsultationPatient.name || selectedConsultationPatient.id} onClose={() => setWorkspacePanel('')}>
-              <LabRequestManager mode="doctor" consultationId={selectedConsultation.id} patientId={selectedConsultationPatient.id} patientName={selectedConsultationPatient.name} doctor={doctor} />
-            </WorkspaceModal>
-          )}
-
-          {selectedConsultationPatient && selectedConsultation && workspacePanel === 'referral' && (
-            <WorkspaceModal title="Refer to Specialty" subtitle="Carry the full patient record to another specialty." onClose={() => setWorkspacePanel('')}>
-              <DoctorSpecialtyReferralPanel doctor={doctor} patient={selectedConsultationPatient} consultationId={selectedConsultation.id} />
-            </WorkspaceModal>
-          )}
-
-          {selectedConsultationPatient && workspacePanel === 'record' && (
-            <WorkspaceModal title="Full Patient Record" subtitle={selectedConsultationPatient.name || selectedConsultationPatient.id} onClose={() => setWorkspacePanel('')} size="max-w-6xl">
-              <PatientRecordReview initialPatientId={selectedConsultationPatient.id} autoLoad />
-            </WorkspaceModal>
+                {activeConsultTool === 'chat' && (
+                  <ChatPanel consultationId={selectedConsultation.id} userId={doctor.id} userType="doctor" recipientId={selectedConsultationPatient.id} recipientType="patient" patientId={selectedConsultationPatient.id} doctorId={doctor.id} />
+                )}
+                {activeConsultTool === 'vitals' && (
+                  <VitalParametersMonitor consultationId={selectedConsultation.id} patientId={selectedConsultationPatient.id} doctorId={doctor.id} userType="doctor" />
+                )}
+                {activeConsultTool === 'notes' && (
+                  <DoctorPatientNotes patientId={selectedConsultationPatient.id} doctorId={doctor.id} consultationId={selectedConsultation.id} />
+                )}
+                {activeConsultTool === 'prescription' && (
+                  <PrescriptionManager mode="doctor" consultationId={selectedConsultation.id} patientId={selectedConsultationPatient.id} patientName={selectedConsultationPatient.name} doctor={doctor} facilityId={selectedConsultation.facility_id} />
+                )}
+                {activeConsultTool === 'labs' && (
+                  <LabRequestManager mode="doctor" consultationId={selectedConsultation.id} patientId={selectedConsultationPatient.id} patientName={selectedConsultationPatient.name} doctor={doctor} />
+                )}
+                {activeConsultTool === 'referral' && (
+                  <DoctorSpecialtyReferralPanel doctor={doctor} patient={selectedConsultationPatient} consultationId={selectedConsultation.id} />
+                )}
+                {activeConsultTool === 'record' && (
+                  <PatientRecordReview initialPatientId={selectedConsultationPatient.id} autoLoad />
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}
