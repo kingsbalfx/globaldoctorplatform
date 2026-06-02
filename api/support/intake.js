@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 
 const AGENT_EMAIL = 'globaldoctorconnect@gmail.com'
+const SUPPORT_BUCKET = process.env.SUPPORT_BUCKET || 'support-documents'
 const MAX_FILES = 5
 const MAX_FILE_BYTES = 2 * 1024 * 1024
 
@@ -51,9 +52,31 @@ function parseFile(file) {
   return { filename: name, contentType: type, content: buffer, size: buffer.length }
 }
 
+function storagePath(caseId, filename) {
+  const cleaned = String(filename || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 140)
+  return `${caseId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${cleaned}`
+}
+
+async function uploadSupportFile(supabase, caseId, file) {
+  if (!supabase) return { status: 'email_attachment_only', path: null, url: null }
+  const path = storagePath(caseId, file.filename)
+  const upload = await supabase.storage.from(SUPPORT_BUCKET).upload(path, file.content, {
+    contentType: file.contentType,
+    upsert: false,
+  })
+  if (upload.error) return { status: `storage_failed: ${upload.error.message}`, path: null, url: null }
+
+  const signed = await supabase.storage.from(SUPPORT_BUCKET).createSignedUrl(path, 60 * 60 * 24 * 14)
+  return {
+    status: signed.error ? 'stored_no_signed_url' : 'stored',
+    path,
+    url: signed.data?.signedUrl || null,
+  }
+}
+
 async function maybeStoreTicket(ticket, files) {
   const supabase = getSupabaseClient()
-  if (!supabase) return { stored: false, reason: 'Supabase not configured' }
+  if (!supabase) return { stored: false, reason: 'Supabase not configured', fileRows: [] }
 
   const { error: ticketError } = await supabase.from('support_tickets').insert({
     id: ticket.caseId,
@@ -68,23 +91,43 @@ async function maybeStoreTicket(ticket, files) {
     source: 'ai_assistant',
     agent_email: AGENT_EMAIL,
     created_at: ticket.createdAt,
+    updated_at: ticket.createdAt,
   })
 
-  if (ticketError) return { stored: false, reason: ticketError.message }
+  if (ticketError) return { stored: false, reason: ticketError.message, fileRows: [] }
 
-  if (files.length > 0) {
-    await supabase.from('support_files').insert(files.map((file) => ({
+  const fileRows = []
+  for (const file of files) {
+    const uploaded = await uploadSupportFile(supabase, ticket.caseId, file)
+    fileRows.push({
       id: `${ticket.caseId}-${Math.random().toString(36).slice(2, 8)}`,
       ticket_id: ticket.caseId,
       file_name: file.filename,
       file_type: file.contentType,
       file_size: file.size,
-      storage_status: 'emailed_attachment',
+      file_url: uploaded.url,
+      file_path: uploaded.path,
+      storage_bucket: SUPPORT_BUCKET,
+      storage_status: uploaded.status,
       created_at: ticket.createdAt,
-    }))).catch(() => null)
+    })
   }
 
-  return { stored: true }
+  if (fileRows.length > 0) {
+    const { error: filesError } = await supabase.from('support_files').insert(fileRows)
+    if (filesError) return { stored: true, reason: `Ticket stored, file metadata failed: ${filesError.message}`, fileRows }
+  }
+
+  await supabase.from('support_notifications').insert({
+    id: `${ticket.caseId}-notif-${Math.random().toString(36).slice(2, 8)}`,
+    ticket_id: ticket.caseId,
+    notification_type: 'new_support_request',
+    recipient_email: AGENT_EMAIL,
+    is_read: false,
+    created_at: ticket.createdAt,
+  }).catch(() => null)
+
+  return { stored: true, fileRows }
 }
 
 export default async function handler(req, res) {
@@ -115,7 +158,11 @@ export default async function handler(req, res) {
     const storageResult = await maybeStoreTicket(ticket, attachments)
 
     const fileSummary = attachments.length
-      ? attachments.map((file, index) => `${index + 1}. ${file.filename} (${file.contentType}, ${Math.ceil(file.size / 1024)}KB)`).join('\n')
+      ? attachments.map((file, index) => {
+          const row = storageResult.fileRows?.[index]
+          const urlLine = row?.file_url ? `\n   Link: ${row.file_url}` : ''
+          return `${index + 1}. ${file.filename} (${file.contentType}, ${Math.ceil(file.size / 1024)}KB)${urlLine}`
+        }).join('\n')
       : 'No files attached.'
 
     const text = [
