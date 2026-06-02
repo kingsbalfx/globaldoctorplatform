@@ -227,11 +227,11 @@ function App() {
 
   return (
     <ErrorProvider>
-      <div className="min-h-screen bg-slate-50 text-slate-900">
-      <nav className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-6 sm:px-8">
+      <div className="min-h-screen text-slate-900">
+      <nav className="mx-auto mt-4 flex max-w-7xl flex-wrap items-center justify-between gap-4 rounded-3xl border border-white/80 bg-white/90 px-6 py-4 shadow-sm backdrop-blur sm:px-8">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="GlobalDoc Connect logo" className="h-10 w-10 rounded-full shadow-sm object-cover" />
-          <span className="text-lg font-semibold text-brand-700">GlobalDoc Connect</span>
+          <span className="text-lg font-bold text-brand-700">GlobalDoc Connect</span>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600">
           {!activePortal && (

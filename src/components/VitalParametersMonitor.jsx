@@ -92,7 +92,7 @@ function estimateBpm(samples, seconds) {
   return null
 }
 
-function VitalParametersMonitor({ consultationId, patientId, doctorId, userType }) {
+function VitalParametersMonitor({ consultationId, patientId, doctorId, userType, compact = false }) {
   const { addError } = useError()
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
@@ -192,12 +192,12 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   }
 
   const saveVital = async ({ request, value, unit, source, confidence, metadata }) => {
-    const resolvedConsultationId = request?.consultation_id || activeRequest?.consultation_id || consultationId
+    const resolvedConsultationId = request?.consultation_id || activeRequest?.consultation_id || consultationId || null
     const resolvedPatientId = request?.patient_id || activeRequest?.patient_id || patientId
     const resolvedDoctorId = request?.doctor_id || activeRequest?.doctor_id || doctorId
     const resolvedParameterName = request?.parameter_name || activeRequest?.parameter_name
-    if (!resolvedConsultationId || !resolvedPatientId || !resolvedParameterName) {
-      addError('The vital request is missing consultation or patient details. Refresh the room and try again.', 'warning')
+    if (!resolvedPatientId || !resolvedParameterName) {
+      addError('The vital request is missing patient details. Refresh the dashboard and try again.', 'warning')
       return
     }
     const response = await apiFetch('/api/vital-parameters', {
@@ -454,7 +454,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
   const measuringRequests = requests.filter((request) => request.status === 'measuring')
 
   return (
-    <div className="space-y-6">
+    <div className={compact ? 'space-y-4' : 'space-y-6'}>
       {userType === 'doctor' && (
         <div className="rounded-3xl bg-white p-6 shadow-lg">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -493,13 +493,14 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         <div className="rounded-3xl bg-white p-6 shadow-lg">
           <h3 className="text-lg font-semibold text-slate-900">Doctor Vital Requests</h3>
           <p className="mt-1 text-sm text-slate-500">Accept this request before the capture panel opens.</p>
-          <div className="mt-4 rounded-2xl border border-brand-200 bg-brand-50 p-4">
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 shrink-0" dangerouslySetInnerHTML={{ __html: getVital(currentPatientRequest.parameter_name).icon }} />
+          <div className="mt-4 rounded-3xl border border-brand-200 bg-brand-50 p-5">
+            <div className="flex items-start gap-4">
+              <div className="h-20 w-20 shrink-0 rounded-3xl bg-white p-3 shadow-sm ring-1 ring-brand-100" dangerouslySetInnerHTML={{ __html: getVital(currentPatientRequest.parameter_name).icon }} />
               <div>
-                <p className="font-bold text-slate-900">{getVital(currentPatientRequest.parameter_name).label}</p>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-700">Doctor prompt</p>
+                <p className="mt-1 text-xl font-black text-slate-900">{getVital(currentPatientRequest.parameter_name).label}</p>
                 {currentPatientRequest.status === 'measuring' && <p className="mt-1 text-xs font-black text-emerald-700">Measuring now</p>}
-                <p className="mt-1 text-xs text-slate-600">{currentPatientRequest.instructions || getVital(currentPatientRequest.parameter_name).guide}</p>
+                <p className="mt-2 text-sm text-slate-600">{currentPatientRequest.instructions || getVital(currentPatientRequest.parameter_name).guide}</p>
               </div>
             </div>
             <button
@@ -520,9 +521,12 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
       {userType !== 'doctor' && activeRequest && acceptedRequestId === activeRequest.id && (
         <div className="rounded-3xl border border-brand-200 bg-brand-50 p-6 shadow-lg">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
+            <div className="flex items-start gap-4">
+              <div className="h-20 w-20 shrink-0 rounded-3xl bg-white p-3 shadow-sm ring-1 ring-brand-100" dangerouslySetInnerHTML={{ __html: getVital(activeRequest.parameter_name).icon }} />
+              <div>
               <h3 className="text-lg font-semibold text-slate-900">{getVital(activeRequest.parameter_name).label} requested</h3>
               <p className="mt-2 text-sm text-slate-700">{activeRequest.instructions || getVital(activeRequest.parameter_name).guide}</p>
+              </div>
             </div>
             <button
               type="button"
@@ -578,7 +582,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
         </div>
       )}
 
-      <div className="rounded-3xl bg-white p-6 shadow-lg">
+      {!compact && <div className="rounded-3xl bg-white p-6 shadow-lg">
         <h3 className="text-lg font-semibold text-slate-900">Saved Vital Signs</h3>
         {vitals.length === 0 ? (
           <p className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">No vital readings saved yet.</p>
@@ -600,7 +604,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
       <canvas ref={canvasRef} className="hidden" />
     </div>

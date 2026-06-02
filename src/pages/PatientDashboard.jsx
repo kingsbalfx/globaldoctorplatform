@@ -16,6 +16,9 @@ import AccessibilityPanel from '../components/AccessibilityPanel'
 import LanguageSelector from '../components/LanguageSelector'
 import PrescriptionManager from '../components/PrescriptionManager'
 import LabRequestManager from '../components/LabRequestManager'
+import LiveDocumentAlerts from '../components/LiveDocumentAlerts'
+import ProfileAvatar, { getGenderLabel } from '../components/ProfileAvatar'
+import { PortalArtBanner } from '../components/TelehealthArt'
 import PatientClinicalSummaryDownload from '../components/PatientClinicalSummaryDownload'
 import VitalParametersMonitor from '../components/VitalParametersMonitor'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
@@ -336,6 +339,12 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     <section className="relative mx-auto mt-16 max-w-7xl overflow-hidden rounded-[2rem] px-6 pb-20 pt-1 sm:px-8" style={patientDashboardStyle}>
       <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-white/70 blur-xl opacity-70" />
       <AnnouncementBanner audience="patient" />
+      <PortalArtBanner
+        theme="patient"
+        title="A calmer patient journey"
+        body="Book a doctor, keep live video open, receive clinical prompts, and download prescriptions or lab requests without losing your place."
+        className="mb-8"
+      />
       <div className="rounded-3xl border border-white/70 bg-white/95 px-8 py-10 shadow-xl shadow-slate-200/40 mb-8 relative overflow-hidden">
         <div className="absolute inset-y-0 right-0 w-2/5 opacity-15" style={{ background: specialtyInfo.color }} />
         <div className="relative grid gap-6 lg:grid-cols-[1.8fr_1fr] lg:items-center">
@@ -349,7 +358,13 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
             <p className="mt-3 max-w-2xl text-lg leading-8 text-slate-600">Upload medical records, schedule appointments, chat with your doctor, and receive reminders 24 hours and 1 hour before your visit.</p>
             <div className="mt-6 grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] items-center">
               <div className="rounded-3xl border p-4" style={{ borderColor: `${specialtyInfo.color}35`, backgroundColor: `${specialtyInfo.bgColor}90` }}>
-                <p className="text-xs uppercase tracking-[0.24em]" style={{ color: specialtyInfo.color }}>Patient guide</p>
+                <div className="flex items-center gap-3">
+                  <ProfileAvatar person={patient} role="patient" size="md" />
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.24em]" style={{ color: specialtyInfo.color }}>Patient guide</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-800">{patient?.name || 'Patient'} | {getGenderLabel(patient)}</p>
+                  </div>
+                </div>
                 <p className="mt-2 text-sm text-slate-700">Your preferred language: <strong>{patient?.language || 'English'}</strong></p>
                 <p className="mt-2 text-sm text-slate-600">{specialtyInfo.description}. Your dashboard adapts to the specialist you selected, the referral path, or the doctor currently consulting.</p>
               </div>
@@ -405,6 +420,18 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
           </button>
         ))}
       </div>
+
+      {activeTab !== 'overview' && activeTab !== 'video' && (
+        <div className="mb-8">
+          <VitalParametersMonitor
+            consultationId=""
+            patientId={patient.id}
+            doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+            userType="patient"
+            compact
+          />
+        </div>
+      )}
 
       {activeTab === 'overview' && (
         <div className="space-y-8">
@@ -552,11 +579,18 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
             patientId={patient.id}
             doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
           />
+          <LiveDocumentAlerts
+            consultationId={selectedConsultationId}
+            patientId={patient.id}
+            patientName={patient.name}
+            doctor={selectedDoctor}
+          />
           <VitalParametersMonitor
             consultationId=""
             patientId={patient.id}
             doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
             userType="patient"
+            compact
           />
         </div>
       )}

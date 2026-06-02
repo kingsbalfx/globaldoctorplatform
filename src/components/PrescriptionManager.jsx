@@ -13,7 +13,7 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;')
 }
 
-function buildPrescriptionHtml(prescription) {
+export function buildPrescriptionHtml(prescription) {
   const issued = prescription.issued_at || prescription.created_at || new Date().toISOString()
   return `<!doctype html>
 <html>
@@ -81,7 +81,7 @@ function buildPrescriptionHtml(prescription) {
 </html>`
 }
 
-function downloadPrescription(prescription) {
+export function downloadPrescription(prescription) {
   const html = buildPrescriptionHtml(prescription)
   const blob = new Blob([html], { type: 'text/html' })
   const url = URL.createObjectURL(blob)

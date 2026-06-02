@@ -3,6 +3,7 @@ import { apiFetch } from '../lib/apiFetch'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import DoctorManagement from '../components/DoctorManagement'
 import { useError } from '../components/ErrorHandler'
+import { PortalArtBanner } from '../components/TelehealthArt'
 
 const AUDIENCES = [
   { id: 'landing', label: 'Landing Page' },
@@ -300,6 +301,12 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
   return (
     <section className="mx-auto mt-16 max-w-7xl px-6 pb-20 sm:px-8">
+      <PortalArtBanner
+        theme="admin"
+        title="Platform governance with clinical trust"
+        body="Review doctors, publish announcements, manage facilities, inspect audit trails, and keep operations readable for a growing telehealth network."
+        className="mb-8"
+      />
       <div className="rounded-3xl bg-slate-900 px-8 py-10 text-white shadow-xl shadow-slate-900/20 mb-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>

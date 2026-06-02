@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
 import ForgotPassword from '../pages/ForgotPassword'   // ← new import
 import GoogleSignInButton from './GoogleSignInButton'
+import { TelehealthHeroArt } from './TelehealthArt'
 
 // ===== COUNTRY LIST (extend as needed) =====
 export const COUNTRIES = [
@@ -73,6 +74,8 @@ function DoctorAuth({ onAuth }) {
     payoutMethod: 'bank_account',
     mobileMoneyOperator: '',
     mobileMoneyNumber: '',
+    gender: '',
+    profilePhotoUrl: '',
     signatureDataUrl: '',
     passportDataUrl: '',
   })
@@ -94,6 +97,8 @@ function DoctorAuth({ onAuth }) {
         ...prev,
         email: pending.email,
         name: pending.name || prev.name,
+        gender: pending.gender || prev.gender,
+        profilePhotoUrl: pending.profilePhotoUrl || prev.profilePhotoUrl,
       }))
       window.localStorage.removeItem('gd_pending_doctor_profile')
     } catch {
@@ -170,6 +175,8 @@ function DoctorAuth({ onAuth }) {
             license_number: formData.licenseNumber,
             license_issuer: formData.licenseIssuer,
             license_expiry: formData.licenseExpiry,
+            gender: formData.gender,
+            profile_photo_url: formData.profilePhotoUrl,
             signature_data_url: formData.signatureDataUrl,
             passport_data_url: formData.passportDataUrl,
           },
@@ -191,6 +198,8 @@ function DoctorAuth({ onAuth }) {
           payoutMethod: formData.payoutMethod,
           mobileMoneyOperator: formData.mobileMoneyOperator,
           mobileMoneyNumber: formData.mobileMoneyNumber,
+          gender: formData.gender,
+          profilePhotoUrl: formData.profilePhotoUrl,
           signatureDataUrl: formData.signatureDataUrl,
           passportDataUrl: formData.passportDataUrl,
         })
@@ -223,6 +232,8 @@ function DoctorAuth({ onAuth }) {
             payoutMethod: formData.payoutMethod,
             mobileMoneyOperator: formData.mobileMoneyOperator,
             mobileMoneyNumber: formData.mobileMoneyNumber,
+            gender: formData.gender,
+            profilePhotoUrl: formData.profilePhotoUrl,
             signatureDataUrl: formData.signatureDataUrl,
             passportDataUrl: formData.passportDataUrl,
           }
@@ -315,11 +326,28 @@ function DoctorAuth({ onAuth }) {
     reader.readAsDataURL(file)
   }
 
+  const handleProfilePhotoUpload = (file) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      addError('Upload a profile image file.', 'warning')
+      return
+    }
+    if (file.size > 500 * 1024) {
+      addError('Profile image must be 500KB or less.', 'warning')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => handleChange('profilePhotoUrl', String(reader.result || ''))
+    reader.onerror = () => addError('Could not read profile image.', 'error')
+    reader.readAsDataURL(file)
+  }
+
   return forgotActive ? (
     <ForgotPassword userType="doctor" onBack={() => setForgotActive(false)} />
   ) : (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
+        <TelehealthHeroArt theme="doctor" className="mb-8" />
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900">GlobalDoc Connect</h1>
           <p className="text-slate-600 mt-2">Doctor Portal</p>
@@ -399,6 +427,32 @@ function DoctorAuth({ onAuth }) {
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Sex</label>
+                  <select
+                    value={formData.gender}
+                    onChange={(e) => handleChange('gender', e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                  >
+                    <option value="">Prefer not to say</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-sky-50 to-rose-50 p-4">
+                  <label className="block text-sm font-medium text-slate-700">Public Profile Picture</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => handleProfilePhotoUpload(e.target.files?.[0])}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Optional. This appears on booking cards. Max 500KB.</p>
+                  {formData.profilePhotoUrl && (
+                    <img src={formData.profilePhotoUrl} alt="Profile preview" className="mt-3 h-20 w-20 rounded-2xl object-cover ring-2 ring-white shadow" />
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700">

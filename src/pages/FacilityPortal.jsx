@@ -3,7 +3,10 @@ import { apiFetch } from '../lib/apiFetch'
 import VideoChatPanel from '../components/VideoChatPanel'
 import PrescriptionManager from '../components/PrescriptionManager'
 import LabRequestManager from '../components/LabRequestManager'
+import LiveDocumentAlerts from '../components/LiveDocumentAlerts'
 import { useError } from '../components/ErrorHandler'
+import ProfileAvatar, { getGenderLabel } from '../components/ProfileAvatar'
+import { PortalArtBanner, TelehealthHeroArt } from '../components/TelehealthArt'
 
 const FACILITY_TYPES = [
   { id: 'phc', label: 'Primary Health Care (PHC)' },
@@ -61,9 +64,11 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
   const [doctors, setDoctors] = useState([])
   const [doctorLoading, setDoctorLoading] = useState(false)
   const [selectedDoctorId, setSelectedDoctorId] = useState('')
+  const selectedDoctor = useMemo(() => doctors.find((doctor) => String(doctor.id) === String(selectedDoctorId)) || null, [doctors, selectedDoctorId])
 
   const [patientName, setPatientName] = useState('')
   const [patientPhone, setPatientPhone] = useState('')
+  const [patientGender, setPatientGender] = useState('')
   const [patientPin, setPatientPin] = useState('')
   const [createdPatient, setCreatedPatient] = useState(null)
   const [facilityPatients, setFacilityPatients] = useState([])
@@ -325,6 +330,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
           facilityPin: pin.trim(),
           name: patientName.trim(),
           phone: patientPhone.trim(),
+          gender: patientGender,
           patientPin: patientPin.trim(),
         }),
       })
@@ -335,6 +341,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
       setPatientRecord(data.patient ? { patient: data.patient, files: [], referrals: { specialty: [], facility: [] }, appointments: [], consultations_ng: [], labs: { orders: [], payments: [] } } : null)
       setPatientName('')
       setPatientPhone('')
+      setPatientGender('')
       setPatientPin('')
       addError(`Patient registered. ID: ${data.patient?.id || 'created'}`, 'success', 9000)
       await loadFacilityPatients(patientListLimit, patientSearch)
@@ -511,6 +518,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
   if (step === 'login') {
     return (
       <section className="mx-auto mt-16 max-w-3xl px-6 pb-20 sm:px-8">
+        <TelehealthHeroArt theme="facility" className="mb-8" />
         <div className="rounded-3xl bg-white p-10 shadow-xl shadow-slate-200/50">
           <h1 className="text-3xl font-bold text-slate-900">Facility Portal</h1>
           <p className="mt-2 text-slate-600">
@@ -579,6 +587,12 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
 
   return (
     <section className="mx-auto mt-16 max-w-6xl px-6 pb-20 sm:px-8">
+      <PortalArtBanner
+        theme="facility"
+        title="Facility-assisted telehealth"
+        body="Register walk-in patients, identify online doctors, start consultations, and keep live prescriptions or lab requests visible for the care team."
+        className="mb-8"
+      />
       <div className="rounded-3xl bg-white p-10 shadow-xl shadow-slate-200/50">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -709,6 +723,20 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                       />
                     </label>
 
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Sex
+                      <select
+                        value={patientGender}
+                        onChange={(e) => setPatientGender(e.target.value)}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500"
+                      >
+                        <option value="">Prefer not to say</option>
+                        <option value="female">Female</option>
+                        <option value="male">Male</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </label>
+
                     <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                       <label className="block text-sm font-semibold text-slate-700">
                         6-digit patient PIN
@@ -815,9 +843,13 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                                 }`}
                               >
                                 <div className="flex items-center justify-between gap-3">
-                                  <div>
+                                  <div className="flex items-center gap-3">
+                                    <ProfileAvatar person={doc} role="doctor" size="sm" />
+                                    <div>
                                     <p className="text-sm font-semibold text-slate-900">{doc.name}</p>
                                     <p className="text-xs text-slate-600">{doc.specialty}</p>
+                                      <p className="text-xs font-medium text-slate-500">{getGenderLabel(doc)}</p>
+                                    </div>
                                   </div>
                                   <div className="flex items-center gap-3">
                                     <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -924,11 +956,14 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                           }`}
                         >
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="text-sm font-bold text-slate-900">
-                                {index + 1}. {item.name || 'Unnamed patient'}
-                              </p>
-                              <p className="mt-1 text-xs font-semibold text-slate-500">ID: {item.id}</p>
+                            <div className="flex items-center gap-3">
+                              <ProfileAvatar person={item} role="patient" size="sm" />
+                              <div>
+                                <p className="text-sm font-bold text-slate-900">
+                                  {index + 1}. {item.name || 'Unnamed patient'}
+                                </p>
+                                <p className="mt-1 text-xs font-semibold text-slate-500">ID: {item.id} | {getGenderLabel(item)}</p>
+                              </div>
                             </div>
                             <div className="text-xs text-slate-500 sm:text-right">
                               <p>{item.phone || 'No phone'}</p>
@@ -1016,6 +1051,15 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                   patientId={selectedPatientId.trim()}
                   doctorId={selectedDoctorId}
                 />
+                <div className="mt-4">
+                  <LiveDocumentAlerts
+                    consultationId={consultation.id}
+                    patientId={selectedPatientId.trim()}
+                    patientName={patientRecord?.patient?.name || patientName}
+                    doctor={selectedDoctor}
+                    facilityId={facility?.id}
+                  />
+                </div>
               </div>
             )}
           </div>

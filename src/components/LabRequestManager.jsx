@@ -8,7 +8,7 @@ function escapeHtml(value) {
   return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
 }
 
-function buildLabRequestHtml(order, fallback = {}) {
+export function buildLabRequestHtml(order, fallback = {}) {
   const tests = Array.isArray(order.tests) ? order.tests : []
   return `<!doctype html>
 <html><head><meta charset="utf-8" /><title>Lab Request - ${escapeHtml(order.patient_name || fallback.patientName)}</title>
@@ -30,7 +30,7 @@ body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0}.pag
 </main></body></html>`
 }
 
-function downloadLabRequest(order, fallback) {
+export function downloadLabRequest(order, fallback) {
   const blob = new Blob([buildLabRequestHtml(order, fallback)], { type: 'text/html' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
 import ForgotPassword from '../pages/ForgotPassword'  // ← new import
 import GoogleSignInButton from './GoogleSignInButton'
+import { TelehealthHeroArt } from './TelehealthArt'
 
 function PatientAuth({ onAuth }) {
   const { t } = useTranslation()
@@ -21,6 +22,8 @@ function PatientAuth({ onAuth }) {
     phone: '',
     country: '',
     language: 'English',
+    gender: '',
+    profilePhotoUrl: '',
   })
   const [facilityLogin, setFacilityLogin] = useState({
     patientId: '',
@@ -45,6 +48,8 @@ function PatientAuth({ onAuth }) {
         ...prev,
         email: pending.email,
         name: pending.name || prev.name,
+        gender: pending.gender || prev.gender,
+        profilePhotoUrl: pending.profilePhotoUrl || prev.profilePhotoUrl,
       }))
       window.localStorage.removeItem('gd_pending_patient_profile')
     } catch {
@@ -160,6 +165,8 @@ function PatientAuth({ onAuth }) {
             phone: supabaseUser.user_metadata?.phone,
             country: supabaseUser.user_metadata?.country,
             language: supabaseUser.user_metadata?.preferred_language,
+            gender: supabaseUser.user_metadata?.gender,
+            profilePhotoUrl: supabaseUser.user_metadata?.profile_photo_url,
           })
           onAuth({ type: 'login', patient })
           return
@@ -174,6 +181,8 @@ function PatientAuth({ onAuth }) {
           phone: supabaseUser?.user_metadata?.phone || prev.phone,
           country: supabaseUser?.user_metadata?.country || prev.country,
           language: supabaseUser?.user_metadata?.preferred_language || prev.language,
+          gender: supabaseUser?.user_metadata?.gender || prev.gender,
+          profilePhotoUrl: supabaseUser?.user_metadata?.profile_photo_url || prev.profilePhotoUrl,
         }))
         addError('Complete your patient profile before entering the portal.', 'warning', 8000)
         return
@@ -186,6 +195,8 @@ function PatientAuth({ onAuth }) {
               phone: formData.phone,
               country: formData.country,
               preferred_language: formData.language,
+              gender: formData.gender,
+              profile_photo_url: formData.profilePhotoUrl,
             },
           })
           if (updateError) throw updateError
@@ -197,6 +208,8 @@ function PatientAuth({ onAuth }) {
             phone: formData.phone,
             country: formData.country,
             language: formData.language,
+            gender: formData.gender,
+            profilePhotoUrl: formData.profilePhotoUrl,
           })
           onAuth({ type: 'login', patient })
           return
@@ -211,6 +224,8 @@ function PatientAuth({ onAuth }) {
                 phone: formData.phone,
                 country: formData.country,
                 preferred_language: formData.language,
+                gender: formData.gender,
+                profile_photo_url: formData.profilePhotoUrl,
               },
             },
           })
@@ -255,11 +270,28 @@ function PatientAuth({ onAuth }) {
     setFormData({ ...formData, [field]: value })
   }
 
+  const handleProfilePhotoUpload = (file) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      addError('Upload a profile image file.', 'warning')
+      return
+    }
+    if (file.size > 500 * 1024) {
+      addError('Profile image must be 500KB or less.', 'warning')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => handleChange('profilePhotoUrl', String(reader.result || ''))
+    reader.onerror = () => addError('Could not read profile image.', 'error')
+    reader.readAsDataURL(file)
+  }
+
   return forgotActive ? (
     <ForgotPassword userType="patient" onBack={() => setForgotActive(false)} />
   ) : (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
+        <TelehealthHeroArt theme="patient" className="mb-8" />
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900">GlobalDoc Connect</h1>
           <p className="text-slate-600 mt-2">Patient Portal</p>
@@ -333,6 +365,32 @@ function PatientAuth({ onAuth }) {
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
                     required
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Sex</label>
+                  <select
+                    value={formData.gender}
+                    onChange={(e) => handleChange('gender', e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                  >
+                    <option value="">Prefer not to say</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-emerald-50 to-violet-50 p-4">
+                  <label className="block text-sm font-medium text-slate-700">Profile Picture</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => handleProfilePhotoUpload(e.target.files?.[0])}
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Optional. Upload a clear face photo. Max 500KB.</p>
+                  {formData.profilePhotoUrl && (
+                    <img src={formData.profilePhotoUrl} alt="Profile preview" className="mt-3 h-20 w-20 rounded-2xl object-cover ring-2 ring-white shadow" />
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700">Phone Number</label>

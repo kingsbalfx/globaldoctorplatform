@@ -13,6 +13,7 @@ import VitalParametersMonitor from '../components/VitalParametersMonitor'
 import DoctorSpecialtyReferralPanel from '../components/DoctorSpecialtyReferralPanel'
 import SpecialtyReferralInbox from '../components/SpecialtyReferralInbox'
 import DoctorPatientNotes from '../components/DoctorPatientNotes'
+import { PortalArtBanner } from '../components/TelehealthArt'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
@@ -270,6 +271,12 @@ function AdminDashboard({ doctor, onLogout }) {
 
   return (
     <section className="mx-auto mt-16 max-w-7xl px-6 pb-20 sm:px-8">
+      <PortalArtBanner
+        theme="doctor"
+        title="Doctor clinical workspace"
+        body="Keep the consultation video alive while you review patient records, request vitals, chat, prescribe, order labs, and refer to another specialty."
+        className="mb-8"
+      />
       <AnnouncementBanner audience="doctor" />
       {/* Header */}
       <div className="rounded-3xl px-8 py-10 text-white shadow-xl shadow-brand-700/20 mb-8" style={adminHeaderStyle}>

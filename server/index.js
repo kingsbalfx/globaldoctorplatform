@@ -357,6 +357,45 @@ async function insertAdaptive(table, rowOrRows) {
   return { error: lastError }
 }
 
+async function updateAdaptive(table, updates, applyFilter, options = {}) {
+  let candidate = { ...updates }
+  let lastError = null
+  const select = options.select === undefined ? '*' : options.select
+  const maybeSingle = options.maybeSingle !== false
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    let query = applyFilter(supabase.from(table).update(candidate))
+    if (select) query = query.select(select)
+    if (maybeSingle) query = query.maybeSingle()
+    const { data, error } = await query
+    if (!error) return { data, error: null }
+    lastError = error
+    if (!isMissingColumnError(error)) break
+    const missingColumn = getMissingColumnName(error)
+    if (!missingColumn || !(missingColumn in candidate)) break
+    const { [missingColumn]: _removed, ...nextCandidate } = candidate
+    candidate = nextCandidate
+  }
+
+  return { data: null, error: lastError }
+}
+
+async function insertOneReturningAdaptive(table, row) {
+  let candidate = { ...row }
+  let lastError = null
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { data, error } = await supabase.from(table).insert(candidate).select('*').maybeSingle()
+    if (!error) return { data, error: null }
+    lastError = error
+    if (!isMissingColumnError(error)) break
+    const missingColumn = getMissingColumnName(error)
+    if (!missingColumn || !(missingColumn in candidate)) break
+    const { [missingColumn]: _removed, ...nextCandidate } = candidate
+    candidate = nextCandidate
+  }
+  return { data: null, error: lastError }
+}
+
 function isIntegerSyntaxError(error) {
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase()
   return text.includes('22p02') || text.includes('invalid input syntax for type integer')
@@ -410,6 +449,8 @@ function withoutOptionalDoctorPayoutColumns(row) {
     mobile_money_number,
     license_issuer,
     license_expiry,
+    gender,
+    profile_photo_url,
     ...safeRow
   } = row
   return safeRow
@@ -418,7 +459,15 @@ function withoutOptionalDoctorPayoutColumns(row) {
 function sanitizePatientForResponse(patient) {
   if (!patient) return null
   const { password, portal_pin, ...rest } = patient
-  return rest
+  const gender = patient.gender || patient.sex || ''
+  const profilePhotoUrl = patient.profilePhotoUrl || patient.profile_photo_url || patient.avatar_url || ''
+  return {
+    ...rest,
+    gender,
+    sex: gender,
+    profilePhotoUrl,
+    profile_photo_url: profilePhotoUrl,
+  }
 }
 
 function sanitizeDoctorForResponse(doctor) {
@@ -426,10 +475,16 @@ function sanitizeDoctorForResponse(doctor) {
   const { password, doctors, ...rest } = doctor
   const isOnline = Boolean(doctor.isOnline || doctor.is_online || doctors?.is_online)
   const earningsTokens = Number(doctor.earningsTokens ?? doctor.earnings_tokens ?? doctors?.earnings_tokens ?? 0) || 0
+  const gender = doctor.gender || doctor.sex || doctors?.gender || ''
+  const profilePhotoUrl = doctor.profilePhotoUrl || doctor.profile_photo_url || doctors?.profile_photo_url || doctor.passportDataUrl || doctor.passport_data_url || doctors?.passport_data_url || ''
   return {
     ...rest,
     earningsTokens,
     earnings_tokens: earningsTokens,
+    gender,
+    sex: gender,
+    profilePhotoUrl,
+    profile_photo_url: profilePhotoUrl,
     bankCode: doctor.bankCode ?? doctor.bank_code ?? doctors?.bank_code ?? '',
     bankAccount: doctor.bankAccount ?? doctor.bank_account ?? doctors?.bank_account ?? '',
     payoutMethod: doctor.payoutMethod ?? doctor.payout_method ?? doctors?.payout_method ?? 'bank_account',
@@ -501,6 +556,8 @@ function normalizeDoctorPayload(body = {}) {
     licenseNumber: String(body.licenseNumber || body.license_number || '').trim(),
     licenseIssuer: String(body.licenseIssuer || body.license_issuer || '').trim(),
     licenseExpiry: body.licenseExpiry || body.license_expiry || null,
+    gender: String(body.gender || body.sex || '').trim(),
+    profilePhotoUrl: String(body.profilePhotoUrl || body.profile_photo_url || '').trim(),
     signatureDataUrl: String(body.signatureDataUrl || body.signature_data_url || '').trim(),
     passportDataUrl: String(body.passportDataUrl || body.passport_data_url || '').trim(),
     bankCode: String(body.bankCode || body.bank_code || '').trim(),
@@ -1006,13 +1063,11 @@ app.post('/api/doctors/register', async (req, res) => {
     license_number: payload.licenseNumber,
     signature_data_url: payload.signatureDataUrl || null,
     passport_data_url: payload.passportDataUrl || null,
+    gender: payload.gender || null,
+    profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
     verified: false, created_at: new Date().toISOString()
   }
-  const { data: authRow, error: authInsertError } = await supabase
-    .from('doctors_auth')
-    .insert(newDoctor)
-    .select('*')
-    .maybeSingle()
+  const { data: authRow, error: authInsertError } = await insertOneReturningAdaptive('doctors_auth', newDoctor)
   if (authInsertError) return res.status(500).json({ error: authInsertError.message })
 
   const profileId = String(authRow.id)
@@ -1034,6 +1089,8 @@ app.post('/api/doctors/register', async (req, res) => {
     mobile_money_number: payload.mobileMoneyNumber || null,
     signature_data_url: payload.signatureDataUrl || null,
     passport_data_url: payload.passportDataUrl || null,
+    gender: payload.gender || null,
+    profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
     created_at: new Date().toISOString()
   }
   const { error: profileInsertError } = await insertAdaptive('doctors', profile)
@@ -1056,6 +1113,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
     phone,
     country,
     language,
+    gender,
+    profilePhotoUrl,
     specialty,
     location,
     licenseNumber,
@@ -1073,6 +1132,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         phone: phone || '',
         country: country || 'NG',
         language: language || 'English',
+        gender: gender || req.body.sex || '',
+        profile_photo_url: profilePhotoUrl || req.body.profile_photo_url || '',
         is_online: true,
       }
       let { data: patient, error: patientLookupError } = await supabase.from('patients').select('*').eq('email', patientEmail).maybeSingle()
@@ -1085,7 +1146,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           tokens: 0,
           created_at: new Date().toISOString()
         }
-        const { error: insertErr } = await supabase.from('patients').insert(newPatient)
+        const { error: insertErr } = await insertAdaptive('patients', newPatient)
         if (insertErr) return res.status(500).json({ error: 'Failed to create patient: ' + insertErr.message })
         await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
         await recordAuditLog(req, {
@@ -1098,12 +1159,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         })
         return res.json({ patient: sanitizePatientForResponse(newPatient), message: 'Patient session ready' })
       }
-      const { data: updatedPatient, error: updateErr } = await supabase
-        .from('patients')
-        .update(patientProfile)
-        .eq('id', patient.id)
-        .select('*')
-        .maybeSingle()
+      const { data: updatedPatient, error: updateErr } = await updateAdaptive('patients', patientProfile, (query) => query.eq('id', patient.id))
       if (updateErr) return res.status(500).json({ error: 'Failed to update patient: ' + updateErr.message })
       await supabase.from('patient_tokens').upsert({ patient_id: patient.id, balance: 0 }, { onConflict: 'patient_id', ignoreDuplicates: true })
       await recordAuditLog(req, {
@@ -1121,6 +1177,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
     const doctorEmail = email.toLowerCase()
     const signatureDataUrl = req.body.signatureDataUrl || req.body.signature_data_url || ''
     const passportDataUrl = req.body.passportDataUrl || req.body.passport_data_url || ''
+    const doctorGender = req.body.gender || req.body.sex || ''
+    const doctorProfilePhotoUrl = req.body.profilePhotoUrl || req.body.profile_photo_url || passportDataUrl || ''
     const hasDoctorProfileDetails = Boolean(specialty && location && licenseNumber && signatureDataUrl && passportDataUrl)
     const doctorProfile = {
       email: doctorEmail,
@@ -1133,6 +1191,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       license_expiry: req.body.licenseExpiry || req.body.license_expiry || null,
       signature_data_url: signatureDataUrl || null,
       passport_data_url: passportDataUrl || null,
+      gender: doctorGender || null,
+      profile_photo_url: doctorProfilePhotoUrl || null,
     }
     let { data: doctor, error: doctorLookupError } = await supabase.from('doctors_auth').select('*').eq('email', doctorEmail).maybeSingle()
     if (doctorLookupError) return res.status(500).json({ error: 'Failed to load doctor: ' + doctorLookupError.message })
@@ -1144,15 +1204,11 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         })
       }
       const newDoc = { ...doctorProfile, verified: false, created_at: new Date().toISOString() }
-      const { data: insertedDoctor, error: insertDocErr } = await supabase
-        .from('doctors_auth')
-        .insert(newDoc)
-        .select('*')
-        .maybeSingle()
+      const { data: insertedDoctor, error: insertDocErr } = await insertOneReturningAdaptive('doctors_auth', newDoc)
       if (insertDocErr) return res.status(500).json({ error: 'Failed to create doctor auth: ' + insertDocErr.message })
       const profileId = String(insertedDoctor.id)
 
-      const { error: insertProfErr } = await supabase.from('doctors').insert({
+      const { error: insertProfErr } = await insertAdaptive('doctors', {
         id: profileId,
         name: insertedDoctor.name,
         specialty: insertedDoctor.specialty,
@@ -1169,6 +1225,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         license_expiry: doctorProfile.license_expiry,
         signature_data_url: insertedDoctor.signature_data_url || null,
         passport_data_url: insertedDoctor.passport_data_url || null,
+        gender: doctorProfile.gender || null,
+        profile_photo_url: doctorProfile.profile_photo_url || insertedDoctor.passport_data_url || null,
         created_at: new Date().toISOString()
       })
       if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
@@ -1197,16 +1255,11 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       }
       const doctorAuthUpdates = { ...doctorProfile }
       delete doctorAuthUpdates.password
-      const { data: updatedDoctor, error: updateDocErr } = await supabase
-        .from('doctors_auth')
-        .update(doctorAuthUpdates)
-        .eq('id', doctor.id)
-        .select('*')
-        .maybeSingle()
+      const { data: updatedDoctor, error: updateDocErr } = await updateAdaptive('doctors_auth', doctorAuthUpdates, (query) => query.eq('id', doctor.id))
       if (updateDocErr) return res.status(500).json({ error: 'Failed to update doctor auth: ' + updateDocErr.message })
       const { data: existingDoctorProfile } = await supabase.from('doctors').select('id').eq('id', profileId).maybeSingle()
       if (existingDoctorProfile) {
-        await supabase.from('doctors').update({
+        await updateAdaptive('doctors', {
           name: doctorProfile.name,
           specialty: doctorProfile.specialty,
           location: doctorProfile.location,
@@ -1216,9 +1269,11 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           license_expiry: doctorProfile.license_expiry,
           signature_data_url: doctorProfile.signature_data_url,
           passport_data_url: doctorProfile.passport_data_url,
-        }).eq('id', profileId)
+          gender: doctorProfile.gender || null,
+          profile_photo_url: doctorProfile.profile_photo_url || doctorProfile.passport_data_url || null,
+        }, (query) => query.eq('id', profileId), { select: null, maybeSingle: false })
       } else {
-        await supabase.from('doctors').insert({
+        await insertAdaptive('doctors', {
           id: profileId,
           name: doctorProfile.name,
           specialty: doctorProfile.specialty,
@@ -1235,6 +1290,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           license_expiry: doctorProfile.license_expiry,
           signature_data_url: doctorProfile.signature_data_url,
           passport_data_url: doctorProfile.passport_data_url,
+          gender: doctorProfile.gender || null,
+          profile_photo_url: doctorProfile.profile_photo_url || doctorProfile.passport_data_url || null,
           created_at: new Date().toISOString(),
         })
       }
@@ -1262,6 +1319,8 @@ app.post('/api/patients/register', async (req, res) => {
   const phone = String(req.body.phone || '')
   const country = String(req.body.country || '')
   const language = String(req.body.language || 'English')
+  const gender = String(req.body.gender || req.body.sex || '').trim()
+  const profilePhotoUrl = String(req.body.profilePhotoUrl || req.body.profile_photo_url || '').trim()
 
   if (!email || !password || !name || !dateOfBirth || !phone || !country) {
     return res.status(400).json({ error: 'All required fields must be provided' })
@@ -1278,22 +1337,21 @@ app.post('/api/patients/register', async (req, res) => {
       phone,
       country,
       language: language || existing.language || 'English',
+      gender,
+      profile_photo_url: profilePhotoUrl,
       is_online: true,
     }
-    const { data: savedPatient, error: updateError } = await supabase
-      .from('patients')
-      .update({
+    const { data: savedPatient, error: updateError } = await updateAdaptive('patients', {
         password,
         name,
         date_of_birth: dateOfBirth,
         phone,
         country,
         language: updatedPatient.language,
+        gender,
+        profile_photo_url: profilePhotoUrl,
         is_online: true,
-      })
-      .eq('id', existing.id)
-      .select('*')
-      .maybeSingle()
+      }, (query) => query.eq('id', existing.id))
     if (updateError) return res.status(500).json({ error: updateError.message })
     const { data: existingTokenRow } = await supabase
       .from('patient_tokens')
@@ -1321,9 +1379,11 @@ app.post('/api/patients/register', async (req, res) => {
   const newPatient = {
     id, email, password, name, date_of_birth: dateOfBirth,
     phone, country, language: language || 'English',
+    gender, profile_photo_url: profilePhotoUrl,
     tokens: 0, is_online: true, created_at: new Date().toISOString()
   }
-  await supabase.from('patients').insert(newPatient)
+  const { error: patientInsertError } = await insertAdaptive('patients', newPatient)
+  if (patientInsertError) return res.status(500).json({ error: patientInsertError.message })
   await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
   await recordAuditLog(req, {
     userId: id,
@@ -1379,6 +1439,8 @@ app.post('/api/patients/facility/register', async (req, res) => {
   const fullName = String(req.body?.name || '').trim()
   const patientPin = String(req.body?.patientPin || req.body?.portalPin || '').trim()
   const phone = String(req.body?.phone || '').trim()
+  const gender = String(req.body?.gender || req.body?.sex || '').trim()
+  const profilePhotoUrl = String(req.body?.profilePhotoUrl || req.body?.profile_photo_url || '').trim()
 
   if (!facilityId || !facilityPin || !fullName || !/^\d{6}$/.test(patientPin)) {
     return res.status(400).json({ error: 'Facility ID, facility PIN, name, and 6-digit patient PIN required' })
@@ -1394,14 +1456,12 @@ app.post('/api/patients/facility/register', async (req, res) => {
   const newPatient = {
     id, email: null, password: patientPin, portal_pin: patientPin,
     name: fullName, date_of_birth: null, phone, country: 'NG', language: 'English',
+    gender, profile_photo_url: profilePhotoUrl,
     tokens: 0, is_online: false, registered_via: 'facility', facility_id: facilityId,
     facility_type: facility.type, created_at: new Date().toISOString()
   }
-  const { data: savedPatient, error: insertError } = await supabase
-    .from('patients')
-    .insert(newPatient)
-    .select('*')
-    .maybeSingle()
+  const { error: insertError } = await insertAdaptive('patients', newPatient)
+  const { data: savedPatient } = insertError ? { data: null } : await supabase.from('patients').select('*').eq('id', id).maybeSingle()
   if (insertError) return res.status(500).json({ error: insertError.message })
 
   const { error: tokenError } = await supabase
@@ -2376,14 +2436,12 @@ app.post('/api/admin/doctors', async (req, res) => {
     license_number: payload.licenseNumber,
     signature_data_url: payload.signatureDataUrl || null,
     passport_data_url: payload.passportDataUrl || null,
+    gender: payload.gender || null,
+    profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
     verified: true,
     created_at: new Date().toISOString(),
   }
-  const { data: insertedAuthRow, error: authInsertError } = await supabase
-    .from('doctors_auth')
-    .insert(authRow)
-    .select('*')
-    .maybeSingle()
+  const { data: insertedAuthRow, error: authInsertError } = await insertOneReturningAdaptive('doctors_auth', authRow)
   if (authInsertError) return res.status(500).json({ error: authInsertError.message })
   const profileId = String(insertedAuthRow.id)
 
@@ -2396,14 +2454,12 @@ app.post('/api/admin/doctors', async (req, res) => {
     mobile_money_operator: payload.mobileMoneyOperator || null, mobile_money_number: payload.mobileMoneyNumber || null,
     signature_data_url: payload.signatureDataUrl || null,
     passport_data_url: payload.passportDataUrl || null,
+    gender: payload.gender || null,
+    profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
     license_verified: true,
     created_at: new Date().toISOString()
   }
-  let { error: profileInsertError } = await supabase.from('doctors').insert(doctor)
-  if (profileInsertError && isMissingColumnError(profileInsertError)) {
-    const retry = await supabase.from('doctors').insert(withoutOptionalDoctorPayoutColumns(doctor))
-    profileInsertError = retry.error
-  }
+  let { error: profileInsertError } = await insertAdaptive('doctors', doctor)
   if (profileInsertError) return res.status(500).json({ error: profileInsertError.message })
   const emailResult = await sendDoctorApprovalEmail(insertedAuthRow).catch((error) => ({ sent: false, reason: error.message }))
   await recordAuditLog(req, {
@@ -2443,6 +2499,8 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
   if (payload.password) authUpdates.password = payload.password
   if (payload.signatureDataUrl) authUpdates.signature_data_url = payload.signatureDataUrl
   if (payload.passportDataUrl) authUpdates.passport_data_url = payload.passportDataUrl
+  if (payload.gender) authUpdates.gender = payload.gender
+  if (payload.profilePhotoUrl) authUpdates.profile_photo_url = payload.profilePhotoUrl
   const profileUpdates = {
     name: payload.name,
     specialty: payload.specialty,
@@ -2458,22 +2516,14 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
     payout_method: payload.payoutMethod,
     mobile_money_operator: payload.mobileMoneyOperator || null,
     mobile_money_number: payload.mobileMoneyNumber || null,
+    gender: payload.gender || null,
+    profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
   }
   if (payload.signatureDataUrl) profileUpdates.signature_data_url = payload.signatureDataUrl
   if (payload.passportDataUrl) profileUpdates.passport_data_url = payload.passportDataUrl
-  const { data: authRow, error: authError } = await supabase.from('doctors_auth').update(authUpdates).eq('id', req.params.doctorId).select('*').maybeSingle()
+  const { data: authRow, error: authError } = await updateAdaptive('doctors_auth', authUpdates, (query) => query.eq('id', req.params.doctorId))
   if (authError) return res.status(500).json({ error: authError.message })
-  let { data: profile, error: profileError } = await supabase.from('doctors').update(profileUpdates).eq('id', String(req.params.doctorId)).select('*').maybeSingle()
-  if (profileError && isMissingColumnError(profileError)) {
-    const retry = await supabase
-      .from('doctors')
-      .update(withoutOptionalDoctorPayoutColumns(profileUpdates))
-      .eq('id', String(req.params.doctorId))
-      .select('*')
-      .maybeSingle()
-    profile = retry.data
-    profileError = retry.error
-  }
+  let { data: profile, error: profileError } = await updateAdaptive('doctors', profileUpdates, (query) => query.eq('id', String(req.params.doctorId)))
   if (profileError) return res.status(500).json({ error: profileError.message })
   await recordAuditLog(req, {
     action: 'doctor.update',
@@ -2952,14 +3002,18 @@ app.patch('/api/facilities/:facilityId/patients/:patientId', async (req, res) =>
   const updates = {}
   if (req.body?.name !== undefined) updates.name = String(req.body.name || '').trim()
   if (req.body?.phone !== undefined) updates.phone = String(req.body.phone || '').trim()
+  if (req.body?.gender !== undefined || req.body?.sex !== undefined) updates.gender = String(req.body.gender || req.body.sex || '').trim()
+  if (req.body?.profilePhotoUrl !== undefined || req.body?.profile_photo_url !== undefined) {
+    updates.profile_photo_url = String(req.body.profilePhotoUrl || req.body.profile_photo_url || '').trim()
+  }
   if (req.body?.patientPin !== undefined || req.body?.portalPin !== undefined) {
     const nextPin = String(req.body.patientPin || req.body.portalPin || '').trim()
     if (nextPin && !/^\d{6}$/.test(nextPin)) return res.status(400).json({ error: 'Patient PIN must be 6 digits' })
     if (nextPin) updates.portal_pin = nextPin
   }
-  if (!updates.name && !updates.phone && !updates.portal_pin) return res.status(400).json({ error: 'No patient changes supplied' })
+  if (!updates.name && !updates.phone && !updates.portal_pin && updates.gender === undefined && updates.profile_photo_url === undefined) return res.status(400).json({ error: 'No patient changes supplied' })
 
-  const { data, error } = await supabase.from('patients').update(updates).eq('id', patient.id).select('*').maybeSingle()
+  const { data, error } = await updateAdaptive('patients', updates, (query) => query.eq('id', patient.id))
   if (error) return res.status(500).json({ error: error.message })
   res.json({ patient: sanitizePatientForResponse(data || { ...patient, ...updates }), message: 'Patient updated' })
 })
@@ -3836,7 +3890,7 @@ app.get('/api/vital-parameters', async (req, res) => {
 })
 
 app.post('/api/vital-parameters', async (req, res) => {
-  const {
+  let {
     consultation_id,
     patient_id,
     doctor_id,
@@ -3849,13 +3903,29 @@ app.post('/api/vital-parameters', async (req, res) => {
     measured_at,
     metadata,
   } = req.body || {}
-  if (!consultation_id || !patient_id || !parameter_name || parameter_value === undefined || parameter_value === null) {
-    return res.status(400).json({ error: 'consultation_id, patient_id, parameter_name, and parameter_value are required' })
+
+  if (request_id && (!consultation_id || !patient_id || !doctor_id || !parameter_name)) {
+    const { data: requestRow, error: requestError } = await supabase
+      .from('vital_parameter_requests')
+      .select('*')
+      .eq('id', request_id)
+      .maybeSingle()
+    if (requestError) return res.status(500).json({ error: requestError.message })
+    if (requestRow) {
+      consultation_id = consultation_id || requestRow.consultation_id
+      patient_id = patient_id || requestRow.patient_id
+      doctor_id = doctor_id || requestRow.doctor_id
+      parameter_name = parameter_name || requestRow.parameter_name
+    }
+  }
+
+  if (!patient_id || !parameter_name || parameter_value === undefined || parameter_value === null) {
+    return res.status(400).json({ error: 'patient_id, parameter_name, and parameter_value are required' })
   }
 
   const vital = {
     id: generateId('vital'),
-    consultation_id,
+    consultation_id: consultation_id || null,
     patient_id,
     doctor_id: doctor_id || null,
     request_id: request_id || null,

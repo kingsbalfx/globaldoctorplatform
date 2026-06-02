@@ -4,6 +4,10 @@ import { useError } from './ErrorHandler'
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 const CALLER_TYPES = new Set(['patient', 'facility', 'admin'])
+const RECONNECT_WINDOW_MS = 360 * 1000
+const RECONNECT_INTERVAL_MS = 3000
+const VIDEO_MAX_BITRATE = 2_500_000
+const AUDIO_MAX_BITRATE = 72 * 1000
 const CLEAN_AUDIO_CONSTRAINTS = {
   echoCancellation: { ideal: true },
   noiseSuppression: { ideal: true },
@@ -19,6 +23,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
   const peerRef = useRef(null)
+  const videoSenderRef = useRef(null)
   const streamRef = useRef(null)
   const audioContextRef = useRef(null)
   const remoteAudioContextRef = useRef(null)
@@ -27,6 +32,9 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const remoteStreamRef = useRef(null)
   const rawAudioTracksRef = useRef([])
   const pendingIceRef = useRef([])
+  const reconnectTimerRef = useRef(null)
+  const reconnectStartedAtRef = useRef(null)
+  const reconnectAttemptRef = useRef(0)
   const lastSignalSeqRef = useRef(0)
   const processedSignalsRef = useRef(new Set())
   const makingOfferRef = useRef(false)
@@ -43,6 +51,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const [iceState, setIceState] = useState('new')
   const [remoteSeen, setRemoteSeen] = useState(false)
   const [remoteAudioEnhanced, setRemoteAudioEnhanced] = useState(false)
+  const [recoverySeconds, setRecoverySeconds] = useState(0)
   const [joinRequests, setJoinRequests] = useState([])
 
   const roomId = String(consultationId || '').trim()
@@ -57,6 +66,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const resetPeerOnly = () => {
     peerRef.current?.close()
     peerRef.current = null
+    videoSenderRef.current = null
     pendingIceRef.current = []
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
     closeRemoteAudio()
@@ -72,6 +82,14 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     remoteAudioContextRef.current?.close?.().catch(() => null)
     remoteAudioContextRef.current = null
     setRemoteAudioEnhanced(false)
+  }
+
+  const clearReconnectTimer = () => {
+    window.clearTimeout(reconnectTimerRef.current)
+    reconnectTimerRef.current = null
+    reconnectStartedAtRef.current = null
+    reconnectAttemptRef.current = 0
+    setRecoverySeconds(0)
   }
 
   const normalizeSignalPayload = (payload) => {
@@ -129,6 +147,28 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
         },
       }),
     })
+  }
+
+  const tuneSenderQuality = async (sender, track) => {
+    if (!sender || !track) return
+    try {
+      const parameters = sender.getParameters()
+      parameters.encodings = parameters.encodings || [{}]
+      const [encoding] = parameters.encodings
+      if (track.kind === 'video') {
+        encoding.maxBitrate = VIDEO_MAX_BITRATE
+        encoding.maxFramerate = 30
+        encoding.scaleResolutionDownBy = 1
+        parameters.degradationPreference = 'maintain-framerate'
+      }
+      if (track.kind === 'audio') {
+        encoding.maxBitrate = AUDIO_MAX_BITRATE
+        parameters.degradationPreference = 'maintain-framerate'
+      }
+      await sender.setParameters(parameters)
+    } catch {
+      // Some browsers do not allow sender parameter changes after negotiation.
+    }
   }
 
   const announceJoin = async () => {
@@ -221,6 +261,23 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     return managedStream
   }
 
+  const pauseLocalVideoForVitalCamera = async () => {
+    const peer = peerRef.current
+    const sender = videoSenderRef.current || peer?.getSenders?.().find((item) => item.track?.kind === 'video')
+    try {
+      await sender?.replaceTrack?.(null)
+    } catch {
+      // ignore if browser does not allow replacing with null
+    }
+    const oldVideoTracks = streamRef.current?.getVideoTracks?.() || []
+    oldVideoTracks.forEach((track) => track.stop())
+    const audioTracks = streamRef.current?.getAudioTracks?.() || []
+    streamRef.current = audioTracks.length ? new MediaStream(audioTracks) : null
+    if (localVideoRef.current) localVideoRef.current.srcObject = streamRef.current
+    setVideoMuted(true)
+    setStatus('Video paused for vital capture')
+  }
+
   const prepareRemoteAudio = (remoteStream) => {
     if (!remoteStream || remoteStreamRef.current === remoteStream) return
     closeRemoteAudio()
@@ -295,8 +352,12 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
 
       const oldVideoTracks = streamRef.current?.getVideoTracks?.() || []
       const peer = peerRef.current
-      const sender = peer?.getSenders?.().find((item) => item.track?.kind === 'video')
-      if (sender) await sender.replaceTrack(nextVideoTrack)
+      const sender = videoSenderRef.current || peer?.getSenders?.().find((item) => item.track?.kind === 'video')
+      if (sender) {
+        await sender.replaceTrack(nextVideoTrack)
+        videoSenderRef.current = sender
+        await tuneSenderQuality(sender, nextVideoTrack)
+      }
 
       const audioTracks = streamRef.current?.getAudioTracks?.() || []
       const combinedStream = new MediaStream([...audioTracks, nextVideoTrack])
@@ -337,32 +398,85 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState
       setConnectionState(state || 'unknown')
-      if (state === 'connected') setStatus('Connected')
+      if (state === 'connected') {
+        clearReconnectTimer()
+        setStatus('Connected')
+      }
       if (state === 'failed' || state === 'disconnected') {
-        setStatus('Reconnecting')
-        window.setTimeout(() => {
-          if (callStartedRef.current && shouldCreateOffer && peerRef.current?.connectionState !== 'connected') {
-            resetPeerOnly()
-            void createOffer().catch(() => setStatus('Reconnect failed'))
-          }
-        }, 900)
+        scheduleReconnect()
       }
       if (state === 'closed') setStatus('Closed')
     }
     peer.oniceconnectionstatechange = () => {
       setIceState(peer.iceConnectionState || 'unknown')
-      if (peer.iceConnectionState === 'failed') {
-        setStatus('Repairing connection')
-        peer.restartIce?.()
-        if (shouldCreateOffer) void createOffer().catch(() => setStatus('Reconnect failed'))
+      if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+        clearReconnectTimer()
+      }
+      if (peer.iceConnectionState === 'failed' || peer.iceConnectionState === 'disconnected') {
+        scheduleReconnect()
       }
     }
 
     const stream = await attachLocalStream()
     stream.getTracks().forEach((track) => {
-      if (!isClosedPeer(peer)) peer.addTrack(track, stream)
+      if (!isClosedPeer(peer)) {
+        const sender = peer.addTrack(track, stream)
+        if (track.kind === 'video') videoSenderRef.current = sender
+        void tuneSenderQuality(sender, track)
+      }
     })
     return peer
+  }
+
+  const sendReconnectSignals = async () => {
+    await sendSignal('ready', {
+      readyAt: new Date().toISOString(),
+      doctorId,
+      patientId,
+      reconnect: true,
+    })
+    if (shouldCreateOffer) {
+      await announceJoin()
+      await createOffer()
+    }
+  }
+
+  const scheduleReconnect = () => {
+    if (!callStartedRef.current) return
+    if (!reconnectStartedAtRef.current) reconnectStartedAtRef.current = Date.now()
+    const elapsedMs = Date.now() - reconnectStartedAtRef.current
+    const secondsLeft = Math.max(0, Math.ceil((RECONNECT_WINDOW_MS - elapsedMs) / 1000))
+    setRecoverySeconds(secondsLeft)
+    setStatus(`Reconnecting (${secondsLeft}s left)`)
+    if (elapsedMs > RECONNECT_WINDOW_MS) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+      setStatus('Reconnect window expired. Reopen room if network is back.')
+      return
+    }
+    if (reconnectTimerRef.current) return
+    reconnectTimerRef.current = window.setTimeout(async () => {
+      reconnectTimerRef.current = null
+      if (!callStartedRef.current) return
+      if (Date.now() - reconnectStartedAtRef.current > RECONNECT_WINDOW_MS) {
+        setStatus('Reconnect window expired. Reopen room if network is back.')
+        return
+      }
+      reconnectAttemptRef.current += 1
+      setRecoverySeconds(Math.max(0, Math.ceil((RECONNECT_WINDOW_MS - (Date.now() - reconnectStartedAtRef.current)) / 1000)))
+      try {
+        const peer = peerRef.current
+        peer?.restartIce?.()
+        if (peer?.connectionState === 'failed') {
+          resetPeerOnly()
+          await createPeer()
+        }
+        await sendReconnectSignals()
+        scheduleReconnect()
+      } catch {
+        scheduleReconnect()
+      }
+    }, RECONNECT_INTERVAL_MS)
   }
 
   const createOffer = async () => {
@@ -472,6 +586,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
 
     setConnecting(true)
     try {
+      clearReconnectTimer()
       await createPeer()
       callStartedRef.current = true
       setCallStarted(true)
@@ -497,8 +612,10 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   }
 
   const endCall = () => {
+    clearReconnectTimer()
     peerRef.current?.close()
     peerRef.current = null
+    videoSenderRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     rawAudioTracksRef.current.forEach((track) => track.stop())
@@ -571,9 +688,9 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   useEffect(() => {
     if (!callStarted) return undefined
     const interval = window.setInterval(() => {
-      void pollSignals().catch(() => null)
+      void pollSignals().catch(() => scheduleReconnect())
     }, 1200)
-    void pollSignals().catch(() => null)
+    void pollSignals().catch(() => scheduleReconnect())
     return () => window.clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callStarted, roomId, participantId])
@@ -591,13 +708,39 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   useEffect(() => () => endCall(), [])
 
   useEffect(() => {
+    const handleVitalCameraStarted = () => {
+      void pauseLocalVideoForVitalCamera()
+    }
     const handleVitalCameraFinished = () => {
       void refreshFrontCamera()
     }
+    window.addEventListener('globaldoc:vital-camera-started', handleVitalCameraStarted)
     window.addEventListener('globaldoc:vital-camera-finished', handleVitalCameraFinished)
-    return () => window.removeEventListener('globaldoc:vital-camera-finished', handleVitalCameraFinished)
+    return () => {
+      window.removeEventListener('globaldoc:vital-camera-started', handleVitalCameraStarted)
+      window.removeEventListener('globaldoc:vital-camera-finished', handleVitalCameraFinished)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callStarted])
+
+  useEffect(() => {
+    const handleOnline = () => {
+      if (callStartedRef.current) {
+        reconnectStartedAtRef.current = reconnectStartedAtRef.current || Date.now()
+        void sendReconnectSignals().catch(() => scheduleReconnect())
+      }
+    }
+    const handleOffline = () => {
+      if (callStartedRef.current) scheduleReconnect()
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -612,6 +755,11 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
               <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">Status: {status}</span>
               <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">Peer: {connectionState}</span>
               <span className="rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">ICE: {iceState}</span>
+              {recoverySeconds > 0 && (
+                <span className="rounded-2xl bg-amber-50 px-3 py-2 text-amber-800 ring-1 ring-amber-100">
+                  Auto reconnect: {recoverySeconds}s
+                </span>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap gap-3">

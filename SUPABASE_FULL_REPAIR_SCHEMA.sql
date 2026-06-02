@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS public.doctors_auth (
   license_number text,
   signature_data_url text,
   passport_data_url text,
+  gender text,
+  profile_photo_url text,
   verified boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -84,6 +86,8 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   license_number text,
   signature_data_url text,
   passport_data_url text,
+  gender text,
+  profile_photo_url text,
   license_issuer text,
   license_expiry date,
   fee numeric(12,2) DEFAULT 35,
@@ -111,6 +115,7 @@ CREATE TABLE IF NOT EXISTS public.patients (
   language text DEFAULT 'English',
   date_of_birth date,
   gender text,
+  profile_photo_url text,
   tokens integer DEFAULT 0,
   is_online boolean DEFAULT false,
   portal_pin text,
@@ -629,6 +634,8 @@ ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS country text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS language text DEFAULT 'English';
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS date_of_birth date;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS tokens integer DEFAULT 0;
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS gender text;
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS profile_photo_url text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS is_online boolean DEFAULT false;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS portal_pin text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS registered_via text DEFAULT 'patient';
@@ -650,6 +657,8 @@ ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS fee numeric(12,2) DEFAULT 35
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS signature_data_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS passport_data_url text;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS gender text;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS profile_photo_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS availability text DEFAULT 'Available upon request';
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS consultation_fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS price jsonb DEFAULT '{"basic":50,"premium":100}'::jsonb;
@@ -694,6 +703,8 @@ ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS location text DEFAULT '
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS license_number text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS signature_data_url text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS passport_data_url text;
+ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS gender text;
+ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS profile_photo_url text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS verified boolean DEFAULT false;
 
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS type text;

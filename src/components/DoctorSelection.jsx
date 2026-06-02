@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Search, Stethoscope, WalletCards } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
+import ProfileAvatar, { getGenderLabel } from './ProfileAvatar'
 
 const consultationTypes = [
   { id: 'basic', label: 'Basic', tokens: 50, description: 'Focused visit for common concerns.' },
@@ -34,6 +35,13 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
       if (!response.ok) throw new Error(data.error || 'Failed to load doctors')
       const sortedDoctors = (data.doctors || []).sort((a, b) => Number(Boolean(b.isOnline)) - Number(Boolean(a.isOnline)))
       setDoctors(sortedDoctors)
+      try {
+        const stored = JSON.parse(window.localStorage.getItem('gd_landing_selected_doctor') || 'null')
+        const selected = stored?.doctorId ? sortedDoctors.find((doctor) => String(doctor.id) === String(stored.doctorId)) : null
+        if (selected) setSelectedDoctor(selected)
+      } catch {
+        // ignore
+      }
     } catch (error) {
       console.error('Failed to fetch doctors:', error)
       setDoctors([])
@@ -311,13 +319,11 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex gap-3">
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-lg font-bold text-teal-700">
-                            {String(doctor.name || 'D').charAt(0)}
-                          </div>
+                          <ProfileAvatar person={doctor} role="doctor" size="md" />
                           <div>
                             <p className="font-semibold text-slate-900">{doctor.name}</p>
                             <p className="text-sm text-slate-600">{doctor.specialty}</p>
-                            <p className="mt-1 text-xs text-slate-500">{doctor.location || 'Virtual care'}</p>
+                            <p className="mt-1 text-xs text-slate-500">{doctor.location || 'Virtual care'} | {getGenderLabel(doctor)}</p>
                           </div>
                         </div>
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${doctor.isOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>

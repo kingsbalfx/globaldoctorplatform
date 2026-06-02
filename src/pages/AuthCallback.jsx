@@ -113,6 +113,8 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
                 licenseNumber: metadata.license_number || '',
                 licenseIssuer: metadata.license_issuer || '',
                 licenseExpiry: metadata.license_expiry || '',
+                gender: metadata.gender || '',
+                profilePhotoUrl: metadata.profile_photo_url || metadata.avatar_url || '',
                 signatureDataUrl: metadata.signature_data_url || '',
                 passportDataUrl: metadata.passport_data_url || '',
               }),
@@ -130,6 +132,8 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
               JSON.stringify({
                 email: user.email,
                 name: metadata.full_name || metadata.name || user.email.split('@')[0],
+                gender: metadata.gender || '',
+                profilePhotoUrl: metadata.profile_photo_url || metadata.avatar_url || '',
               })
             )
             setStatus(data.message || 'Complete your doctor profile before admin approval.')
@@ -162,6 +166,8 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
             JSON.stringify({
               email: user.email,
               name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0],
+              gender: user.user_metadata?.gender || '',
+              profilePhotoUrl: user.user_metadata?.profile_photo_url || user.user_metadata?.avatar_url || '',
             })
           )
           setStatus('Profile needs a few more details before the dashboard opens.')
@@ -191,6 +197,8 @@ function AuthCallback({ onNavigate, onDoctorAuth, onPatientNavigate }) {
               licenseNumber: metadata.license_number || '',
               licenseIssuer: metadata.license_issuer || '',
               licenseExpiry: metadata.license_expiry || '',
+              gender: metadata.gender || '',
+              profilePhotoUrl: metadata.profile_photo_url || metadata.avatar_url || '',
               signatureDataUrl: metadata.signature_data_url || '',
               passportDataUrl: metadata.passport_data_url || '',
             }),

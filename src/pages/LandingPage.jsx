@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Globe2, Languages } from 'lucide-react'
-import { fetchDoctors, submitReview, createPaymentSession } from '../lib/kiraApi'
+import { fetchDoctors } from '../lib/kiraApi'
 import AnnouncementBanner from '../components/AnnouncementBanner'
 import LanguageSelector from '../components/LanguageSelector'
+import ProfileAvatar, { getGenderLabel } from '../components/ProfileAvatar'
+import { LandingAdArt, TelehealthHeroArt } from '../components/TelehealthArt'
 
 const specialties = [
   'Cardiology',
@@ -133,20 +135,16 @@ function LandingPage() {
     if (!selectedDoctor) return
 
     try {
-      await submitReview({
+      window.localStorage.setItem('gd_landing_review_doctor', JSON.stringify({
         doctorId: selectedDoctor.id,
-        patientId: 'patient-demo',
+        doctorName: selectedDoctor.name,
         rating: reviewData.rating,
         comment: reviewData.comment,
-        verifiedPatient: true,
-      })
-
-      alert('Review submitted successfully!')
-      setShowReviewForm(false)
-      setReviewData({ rating: 5, comment: '' })
-      await loadDoctors()
+        savedAt: Date.now(),
+      }))
+      window.location.href = '/patient'
     } catch (error) {
-      alert('Failed to submit review: ' + error.message)
+      alert('Could not prepare review handoff: ' + error.message)
     }
   }
 
@@ -156,23 +154,41 @@ function LandingPage() {
 
     setProcessingPayment(true)
     try {
-      const result = await createPaymentSession({
-        patientId: 'patient-demo',
+      window.localStorage.setItem('gd_landing_selected_doctor', JSON.stringify({
         doctorId: selectedDoctor.id,
-        amount: selectedDoctor.fee,
-        type: paymentData.type,
-      })
-
-      if (result.checkout_url) {
-        window.location.href = result.checkout_url
-        setShowPaymentForm(false)
-        setPaymentData({ type: 'priority_access' })
-      }
+        doctorName: selectedDoctor.name,
+        specialty: selectedDoctor.specialty,
+        consultationType: paymentData.type,
+        savedAt: Date.now(),
+      }))
+      window.location.href = '/patient'
     } catch (error) {
-      alert('Payment failed: ' + error.message)
+      alert('Could not prepare booking handoff: ' + error.message)
     } finally {
       setProcessingPayment(false)
     }
+  }
+
+  const openBooking = (doctor) => {
+    setSelectedDoctor(doctor)
+    setShowPaymentForm(true)
+    setShowReviewForm(false)
+    try {
+      window.localStorage.setItem('gd_landing_selected_doctor', JSON.stringify({
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+        specialty: doctor.specialty,
+        savedAt: Date.now(),
+      }))
+    } catch {
+      // ignore storage restrictions
+    }
+  }
+
+  const openReview = (doctor) => {
+    setSelectedDoctor(doctor)
+    setShowReviewForm(true)
+    setShowPaymentForm(false)
   }
 
   const resetFilters = () => {
@@ -191,11 +207,7 @@ function LandingPage() {
         className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white px-6 py-10 shadow-xl shadow-slate-200/60 sm:px-10"
         style={heroBackgroundStyle}
       >
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute inset-0 bg-gradient-to-br from-white/95 via-white/85 to-white/70" />
-          <div className="absolute -left-16 top-6 h-52 w-52 rounded-full bg-brand-300/30 blur-3xl" />
-          <div className="absolute right-0 top-20 h-64 w-64 rounded-full bg-slate-300/25 blur-3xl" />
-        </div>
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/96 via-white/90 to-emerald-50/84" />
 
         <div className="relative z-10 grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
           <div className="space-y-6">
@@ -280,6 +292,7 @@ function LandingPage() {
                 </div>
               ))}
             </div>
+            <TelehealthHeroArt theme="landing" className="mt-6" />
           </div>
 
           <div className="rounded-3xl bg-white/70 p-4 shadow-inner shadow-slate-200/80 ring-1 ring-slate-200/60 backdrop-blur">
@@ -392,6 +405,8 @@ function LandingPage() {
           </div>
         </div>
       </section>
+
+      <LandingAdArt />
 
       <section className="mt-12 grid gap-8 lg:grid-cols-3">
         <article className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
@@ -530,11 +545,15 @@ function LandingPage() {
         {!loading && filteredDoctors.length > 0 && (
           <div className="mt-8 grid gap-6 xl:grid-cols-3">
             {filteredDoctors.map((doctor) => (
-              <div key={doctor.id} className="rounded-3xl bg-slate-950/80 p-6">
+              <div key={doctor.id} className="rounded-3xl bg-slate-950/80 p-6 ring-1 ring-white/10 transition hover:-translate-y-1 hover:bg-slate-900/90">
                 <div className="flex items-center justify-between gap-3">
-                  <div>
+                  <div className="flex items-center gap-3">
+                    <ProfileAvatar person={doctor} role="doctor" size="lg" />
+                    <div>
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-300">{doctor.specialty}</p>
                     <h3 className="mt-2 text-xl font-bold">{doctor.name}</h3>
+                      <p className="mt-1 text-xs font-semibold text-slate-400">{getGenderLabel(doctor)}</p>
+                    </div>
                   </div>
                   <span className="rounded-full bg-brand-100 px-3 py-1 text-sm font-semibold text-brand-900">
                     {doctor.verified ? 'Verified' : 'Pending'}
@@ -550,9 +569,7 @@ function LandingPage() {
                 <div className="mt-6 flex gap-3">
                   <button
                     onClick={() => {
-                      setSelectedDoctor(doctor)
-                      setShowReviewForm(true)
-                      setShowPaymentForm(false)
+                      openReview(doctor)
                     }}
                     className="flex-1 rounded-full bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
                   >
@@ -560,9 +577,7 @@ function LandingPage() {
                   </button>
                   <button
                     onClick={() => {
-                      setSelectedDoctor(doctor)
-                      setShowPaymentForm(true)
-                      setShowReviewForm(false)
+                      openBooking(doctor)
                     }}
                     className="flex-1 rounded-full bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600"
                   >
@@ -579,6 +594,7 @@ function LandingPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-3xl bg-white p-6">
             <h3 className="text-xl font-bold text-slate-900">Review {selectedDoctor.name}</h3>
+            <p className="mt-2 text-sm text-slate-600">Reviews are completed from the patient portal so they attach to a real patient record.</p>
             <form onSubmit={handleSubmitReview} className="mt-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700">Rating</label>
@@ -609,7 +625,7 @@ function LandingPage() {
                   type="submit"
                   className="flex-1 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600"
                 >
-                  Submit Review
+                  Continue to Patient Portal
                 </button>
                 <button
                   type="button"
@@ -627,11 +643,19 @@ function LandingPage() {
       {showPaymentForm && selectedDoctor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-3xl bg-white p-6">
-            <h3 className="text-xl font-bold text-slate-900">Book Consultation with {selectedDoctor.name}</h3>
-            <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+            <div className="flex items-center gap-3">
+              <ProfileAvatar person={selectedDoctor} role="doctor" size="lg" />
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Book Consultation</h3>
+                <p className="text-sm font-semibold text-slate-600">{selectedDoctor.name}</p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-2xl bg-gradient-to-br from-slate-50 via-white to-brand-50 p-4">
               <p className="text-sm text-slate-600">Specialty: {selectedDoctor.specialty}</p>
+              <p className="text-sm text-slate-600">Sex: {getGenderLabel(selectedDoctor)}</p>
               <p className="text-sm text-slate-600">Location: {selectedDoctor.location}</p>
               <p className="mt-2 text-lg font-semibold text-slate-900">${selectedDoctor.fee}</p>
+              <p className="mt-2 text-xs text-slate-500">Continue to the patient portal to sign in, confirm tokens, and complete the booking safely.</p>
             </div>
             <form onSubmit={handlePayment} className="mt-6 space-y-4">
               <div>
@@ -651,7 +675,7 @@ function LandingPage() {
                   disabled={processingPayment}
                   className="flex-1 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {processingPayment ? 'Processing…' : `Pay $${selectedDoctor.fee}`}
+                  {processingPayment ? 'Opening portal...' : 'Continue to Patient Portal'}
                 </button>
                 <button
                   type="button"
