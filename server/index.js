@@ -513,9 +513,11 @@ function normalizeDoctorPayload(body = {}) {
 }
 
 function getSmtpSettings() {
-  const user = process.env.SMTP_USER || process.env.EMAIL_USER || process.env.MAIL_USER || process.env.GMAIL_USER || ''
-  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.MAIL_PASS || process.env.GMAIL_APP_PASSWORD || ''
   const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || 'smtp.gmail.com'
+  const isGmailSmtp = String(host).toLowerCase().includes('gmail.com')
+  const user = process.env.SMTP_USER || process.env.EMAIL_USER || process.env.MAIL_USER || process.env.GMAIL_USER || ''
+  const rawPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.MAIL_PASS || process.env.GMAIL_APP_PASSWORD || ''
+  const pass = isGmailSmtp ? String(rawPass).replace(/\s+/g, '') : String(rawPass)
   const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 587)
   const secure = process.env.SMTP_SECURE !== undefined
     ? String(process.env.SMTP_SECURE).toLowerCase() === 'true'
@@ -523,6 +525,22 @@ function getSmtpSettings() {
   const from = process.env.SMTP_FROM || process.env.EMAIL_FROM || user
   const fromName = process.env.SMTP_FROM_NAME || 'GlobalDoc Connect'
   return { user, pass, host, port, secure, from, fromName }
+}
+
+function describeSmtpError(error) {
+  const message = String(error?.message || error || 'SMTP send failed')
+  const code = error?.code ? ` (${error.code})` : ''
+  const command = error?.command ? ` during ${error.command}` : ''
+  if (/Invalid login|Username and Password not accepted|535/i.test(message)) {
+    return `Gmail rejected the SMTP login${code}. Confirm the account has 2-Step Verification enabled and SMTP_PASS is a Gmail App Password.`
+  }
+  if (/self signed|certificate|tls/i.test(message)) {
+    return `SMTP TLS/certificate error${code}: ${message}`
+  }
+  if (/timeout|timed out|ETIMEDOUT|ESOCKET/i.test(message)) {
+    return `SMTP connection timed out${code}. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE, and network access.`
+  }
+  return `${message}${code}${command}`
 }
 
 async function sendSmtpEmail({ to, subject, text, html }) {
@@ -543,21 +561,36 @@ async function sendSmtpEmail({ to, subject, text, html }) {
     port: settings.port,
     secure: settings.secure,
     auth: { user: settings.user, pass: settings.pass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    tls: { servername: settings.host },
   })
 
-  await transporter.verify()
-  const info = await transporter.sendMail({
-    from: `"${settings.fromName}" <${settings.from}>`,
-    to,
-    subject,
-    text,
-    html,
-  })
-  const rejected = Array.isArray(info.rejected) ? info.rejected : []
-  if (rejected.length > 0) {
-    return { sent: false, reason: `SMTP rejected: ${rejected.join(', ')}`, messageId: info.messageId || null, accepted: info.accepted || [] }
+  try {
+    await transporter.verify()
+    const info = await transporter.sendMail({
+      from: `"${settings.fromName}" <${settings.from}>`,
+      to,
+      subject,
+      text,
+      html,
+    })
+    const rejected = Array.isArray(info.rejected) ? info.rejected : []
+    if (rejected.length > 0) {
+      return { sent: false, reason: `SMTP rejected: ${rejected.join(', ')}`, messageId: info.messageId || null, accepted: info.accepted || [] }
+    }
+    return { sent: true, messageId: info.messageId || null, accepted: info.accepted || [], response: info.response || null }
+  } catch (error) {
+    return {
+      sent: false,
+      reason: describeSmtpError(error),
+      host: settings.host,
+      port: settings.port,
+      secure: settings.secure,
+      configured: true,
+    }
   }
-  return { sent: true, messageId: info.messageId || null, accepted: info.accepted || [], response: info.response || null }
 }
 
 async function sendDoctorApprovalEmail(doctor) {

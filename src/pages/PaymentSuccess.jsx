@@ -21,7 +21,11 @@ function PaymentSuccess({ onNavigate }) {
 
   const reference = useMemo(() => {
     const url = new URL(window.location.href)
-    return url.searchParams.get('reference') || ''
+    return url.searchParams.get('reference')
+      || url.searchParams.get('transaction_reference')
+      || url.searchParams.get('payment_reference')
+      || url.searchParams.get('trxref')
+      || ''
   }, [])
 
   useEffect(() => {
@@ -39,15 +43,23 @@ function PaymentSuccess({ onNavigate }) {
         if (!response.ok) throw new Error(data.error || 'Payment verification failed')
 
         if (data.status === 'success') {
-          setTokens(data.tokens ?? null)
+          let nextTokens = data.tokens ?? null
           setStatus(data.credited ? 'Payment verified and tokens credited.' : 'Payment verified.')
           const metadata = readPaymentMetadata(data.payment)
           const patientId = data.payment?.patient_id || metadata.patientId || metadata.patient_id
           if (patientId) {
+            const balanceResponse = await apiFetch(`/api/patients/${encodeURIComponent(patientId)}/tokens`).catch(() => null)
+            if (balanceResponse?.ok) {
+              const balanceData = await balanceResponse.json().catch(() => ({}))
+              if (Number.isFinite(Number(balanceData.tokens))) nextTokens = Number(balanceData.tokens)
+            }
+          }
+          setTokens(nextTokens)
+          if (patientId) {
             try {
               const stored = JSON.parse(window.localStorage.getItem('gd_patient_session') || 'null')
               if (stored?.id === patientId) {
-                const nextPatient = { ...stored, tokens: data.tokens ?? stored.tokens ?? 0 }
+                const nextPatient = { ...stored, tokens: nextTokens ?? stored.tokens ?? 0 }
                 window.localStorage.setItem('gd_patient_session', JSON.stringify(nextPatient))
                 window.localStorage.setItem('gd_active_portal', 'patient')
                 window.localStorage.setItem('gd_patient_return_dashboard', '1')
