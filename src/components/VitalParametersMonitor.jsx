@@ -43,11 +43,17 @@ function parseBluetoothSFloat(dataView, offset) {
 
 function estimateBpm(samples, seconds) {
   if (samples.length < 80) return null
-  const mean = samples.reduce((total, value) => total + value, 0) / samples.length
-  const smoothed = samples.map((value, index) => {
+  const values = samples.map((sample) => (typeof sample === 'number' ? sample : Number(sample.value || 0))).filter((value) => Number.isFinite(value))
+  const timedSamples = samples.filter((sample) => sample && typeof sample === 'object' && Number.isFinite(sample.at))
+  const actualSeconds = timedSamples.length >= 2
+    ? Math.max(1, (timedSamples[timedSamples.length - 1].at - timedSamples[0].at) / 1000)
+    : seconds
+  if (values.length < 50) return null
+  const mean = values.reduce((total, value) => total + value, 0) / values.length
+  const smoothed = values.map((value, index) => {
     const start = Math.max(0, index - 2)
-    const end = Math.min(samples.length, index + 3)
-    const slice = samples.slice(start, end)
+    const end = Math.min(values.length, index + 3)
+    const slice = values.slice(start, end)
     return slice.reduce((total, item) => total + item, 0) / slice.length
   })
   const normalized = smoothed.map((value) => value - mean)
@@ -69,7 +75,7 @@ function estimateBpm(samples, seconds) {
       lastPeak = index
     }
   }
-  const bpm = Math.round((peaks / seconds) * 60)
+  const bpm = Math.round((peaks / actualSeconds) * 60)
   if (bpm >= 40 && bpm <= 200) return bpm
 
   const crossings = []
@@ -79,7 +85,7 @@ function estimateBpm(samples, seconds) {
   if (crossings.length >= 2) {
     const intervals = crossings.slice(1).map((value, index) => value - crossings[index])
     const averageInterval = intervals.reduce((total, item) => total + item, 0) / intervals.length
-    const framesPerSecond = samples.length / seconds
+    const framesPerSecond = values.length / actualSeconds
     const crossingBpm = Math.round((framesPerSecond / averageInterval) * 60)
     if (crossingBpm >= 40 && crossingBpm <= 200) return crossingBpm
   }
@@ -113,16 +119,10 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
 
   const loadRequests = async () => {
     if (!consultationId && !patientId && !doctorId) return
-    if (userType !== 'doctor' && !consultationId) {
-      setRequests([])
-      setAcceptedRequestId('')
-      setActiveRequest(null)
-      return
-    }
     const params = new URLSearchParams()
-    if (consultationId) params.set('consultationId', consultationId)
     if (patientId) params.set('patientId', patientId)
-    if (doctorId && userType === 'doctor') params.set('doctorId', doctorId)
+    if (userType === 'doctor' && consultationId) params.set('consultationId', consultationId)
+    if (userType === 'doctor' && doctorId) params.set('doctorId', doctorId)
     const response = await apiFetch(`/api/vital-requests?${params.toString()}`)
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || 'Failed to load vital requests')
@@ -256,13 +256,27 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
     try {
       await markRequestStatus(request, 'measuring')
       window.dispatchEvent(new CustomEvent('globaldoc:vital-camera-started'))
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      })
+      const cameraAttempts = [
+        { video: { facingMode: { exact: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, max: 30 } }, audio: false },
+        { video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } }, audio: false },
+        { video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } }, audio: false },
+      ]
+      let mediaStream = null
+      let lastCameraError = null
+      for (const constraints of cameraAttempts) {
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia(constraints)
+          break
+        } catch (error) {
+          lastCameraError = error
+        }
+      }
+      if (!mediaStream) throw lastCameraError || new Error('Camera permission is required')
       streamRef.current = mediaStream
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream
+        videoRef.current.setAttribute('playsinline', 'true')
+        videoRef.current.setAttribute('muted', 'true')
         await videoRef.current.play?.().catch(() => null)
       }
       const videoTrack = mediaStream.getVideoTracks()[0]
@@ -275,39 +289,52 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
 
       const samples = []
       const seconds = request.parameter_name === 'heart_rate' ? 15 : 12
-      const maxFrames = seconds * 20
+      const maxFrames = seconds * 18
       let frames = 0
-      intervalRef.current = window.setInterval(async () => {
+      let stopped = false
+      const sampleFrame = async () => {
+        if (stopped) return
         if (!videoRef.current || !canvasRef.current) return
         const video = videoRef.current
-        if (!video.videoWidth) return
+        if (!video.videoWidth) {
+          scheduleNextSample()
+          return
+        }
         const canvas = canvasRef.current
         const context = canvas.getContext('2d')
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        const sampleWidth = Math.min(180, video.videoWidth)
+        const sampleHeight = Math.min(140, video.videoHeight)
+        const sourceX = Math.max(0, Math.floor((video.videoWidth - sampleWidth) / 2))
+        const sourceY = Math.max(0, Math.floor((video.videoHeight - sampleHeight) / 2))
+        canvas.width = sampleWidth
+        canvas.height = sampleHeight
+        context.drawImage(video, sourceX, sourceY, sampleWidth, sampleHeight, 0, 0, sampleWidth, sampleHeight)
         const data = context.getImageData(0, 0, canvas.width, canvas.height).data
         let red = 0
         let green = 0
         let blue = 0
-        for (let index = 0; index < data.length; index += 4) red += data[index]
-        for (let index = 1; index < data.length; index += 4) green += data[index]
-        for (let index = 2; index < data.length; index += 4) blue += data[index]
+        for (let index = 0; index < data.length; index += 4) {
+          red += data[index]
+          green += data[index + 1]
+          blue += data[index + 2]
+        }
         const pixels = data.length / 4
         const redAvg = red / pixels
         const greenAvg = green / pixels
         const blueAvg = blue / pixels
-        const hasFingerContact = redAvg >= 28 && redAvg >= Math.max(greenAvg, blueAvg) * 0.9
+        const brightness = (redAvg + greenAvg + blueAvg) / 3
+        const hasFingerContact = redAvg >= 24 && brightness >= 18 && redAvg >= blueAvg * 1.05 && redAvg >= greenAvg * 0.82
         if (!hasFingerContact) {
-          setCaptureHint('Press your fingertip gently over the camera until the preview looks red and steady.')
+          setCaptureHint('Cover the back camera fully. If Android keeps the image dark, use a bright room or another phone light.')
         } else {
           setCaptureHint('Good contact. Keep your finger still while the reading completes.')
-          samples.push(redAvg)
+          samples.push({ value: redAvg, at: performance.now() })
         }
         frames += 1
         setProgress(Math.min(100, Math.round((frames / maxFrames) * 100)))
 
         if (frames >= maxFrames) {
+          stopped = true
           await stopCamera()
           const bpm = estimateBpm(samples, seconds)
           const value = request.parameter_name === 'oxygen_level'
@@ -333,8 +360,19 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType 
             await markRequestStatus(request, 'pending').catch(() => null)
             addError(error.message || 'Could not save the vital reading.', 'error')
           }
+        } else {
+          scheduleNextSample()
         }
-      }, 50)
+      }
+      const scheduleNextSample = () => {
+        if (stopped) return
+        if (videoRef.current?.requestVideoFrameCallback) {
+          videoRef.current.requestVideoFrameCallback(() => void sampleFrame())
+        } else {
+          intervalRef.current = window.setTimeout(() => void sampleFrame(), 70)
+        }
+      }
+      scheduleNextSample()
     } catch (error) {
       await stopCamera()
       addError(error.message || 'Camera permission is required for this measurement.', 'error')

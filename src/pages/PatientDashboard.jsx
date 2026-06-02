@@ -409,7 +409,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       {activeTab === 'overview' && (
         <div className="space-y-8">
           <VitalParametersMonitor
-            consultationId={selectedConsultationId || activeConsultation?.id || activeConsultation?.consultation_id}
+            consultationId=""
             patientId={patient.id}
             doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
             userType="patient"
@@ -544,13 +544,21 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       )}
 
       {activeTab === 'video' && (
-        <VideoChatPanel
-          consultationId={selectedConsultationId}
-          userId={patient.id}
-          userType="patient"
-          patientId={patient.id}
-          doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
-        />
+        <div className="space-y-6">
+          <VideoChatPanel
+            consultationId={selectedConsultationId}
+            userId={patient.id}
+            userType="patient"
+            patientId={patient.id}
+            doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+          />
+          <VitalParametersMonitor
+            consultationId=""
+            patientId={patient.id}
+            doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+            userType="patient"
+          />
+        </div>
       )}
 
       {activeTab === 'tokens' && <TokenManager patient={patient} onTokensUpdated={handleTokensUpdated} />}
