@@ -6,6 +6,7 @@ import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
 import ForgotPassword from '../pages/ForgotPassword'   // ← new import
+import GoogleSignInButton from './GoogleSignInButton'
 
 // ===== COUNTRY LIST (extend as needed) =====
 export const COUNTRIES = [
@@ -328,21 +329,6 @@ function DoctorAuth({ onAuth }) {
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl p-8">
-          {/* Google sign-in (for doctors only) */}
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            Continue with Google
-          </button>
-
-          <div className="my-6 flex items-center gap-3">
-            <div className="h-px flex-1 bg-slate-200" />
-            <span className="text-xs font-semibold text-slate-500">OR</span>
-            <div className="h-px flex-1 bg-slate-200" />
-          </div>
-
           {/* Login / Register toggle */}
           <div className="flex mb-6">
             <button
@@ -598,6 +584,16 @@ function DoctorAuth({ onAuth }) {
               {loading ? 'Processing...' : isLogin ? 'Login' : completingExistingUser ? 'Complete Profile' : 'Register'}
             </button>
           </form>
+
+          <div className="mt-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-slate-200" />
+            <span className="text-xs font-semibold text-slate-500">OR</span>
+            <div className="h-px flex-1 bg-slate-200" />
+          </div>
+
+          <div className="mt-5">
+            <GoogleSignInButton onClick={handleGoogleSignIn} />
+          </div>
 
           <div className="mt-6 text-center">
             <button
