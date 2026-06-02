@@ -102,11 +102,6 @@ function DoctorAuth({ onAuth }) {
   }, [])
 
   // ========== GOOGLE SIGN‑IN (doctors only, not admin) ==========
-  // If forgot password is active, show that component after all hooks have run.
-  if (forgotActive) {
-    return <ForgotPassword userType="doctor" onBack={() => setForgotActive(false)} />
-  }
-
   const handleGoogleSignIn = async () => {
     if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
       addError(t('errors.server'), 'error')
@@ -320,7 +315,9 @@ function DoctorAuth({ onAuth }) {
     reader.readAsDataURL(file)
   }
 
-  return (
+  return forgotActive ? (
+    <ForgotPassword userType="doctor" onBack={() => setForgotActive(false)} />
+  ) : (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">

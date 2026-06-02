@@ -52,11 +52,6 @@ function PatientAuth({ onAuth }) {
     }
   }, [])
 
-  // If forgot password is active, show that component after all hooks have run.
-  if (forgotActive) {
-    return <ForgotPassword userType="patient" onBack={() => setForgotActive(false)} />
-  }
-
   const isPatientProfileComplete = (user) => {
     const data = user?.user_metadata || {}
     return Boolean(data.full_name && data.date_of_birth && data.phone && data.country)
@@ -99,12 +94,6 @@ function PatientAuth({ onAuth }) {
     setLoading(true)
 
     try {
-      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
-        throw new Error(
-          'Supabase auth is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.'
-        )
-      }
-
       if (mode === 'facility') {
         const response = await apiFetch('/api/patients/facility/login', {
           method: 'POST',
@@ -124,6 +113,12 @@ function PatientAuth({ onAuth }) {
         const result = await response.json()
         onAuth({ type: 'login', patient: result.patient })
         return
+      }
+
+      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_KEY) {
+        throw new Error(
+          'Supabase auth is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.'
+        )
       }
 
       if (!formData.email || (isLogin && !formData.password)) {
@@ -260,7 +255,9 @@ function PatientAuth({ onAuth }) {
     setFormData({ ...formData, [field]: value })
   }
 
-  return (
+  return forgotActive ? (
+    <ForgotPassword userType="patient" onBack={() => setForgotActive(false)} />
+  ) : (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">

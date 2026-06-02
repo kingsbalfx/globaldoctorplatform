@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 
+function readPaymentMetadata(payment) {
+  const metadata = payment?.metadata
+  if (!metadata) return {}
+  if (typeof metadata === 'string') {
+    try {
+      return JSON.parse(metadata)
+    } catch {
+      return {}
+    }
+  }
+  return metadata
+}
+
 function PaymentSuccess({ onNavigate }) {
   const [status, setStatus] = useState('Verifying payment...')
   const [error, setError] = useState('')
@@ -12,6 +25,7 @@ function PaymentSuccess({ onNavigate }) {
   }, [])
 
   useEffect(() => {
+    let redirectTimer
     const verify = async () => {
       if (!reference) {
         setStatus('')
@@ -27,6 +41,24 @@ function PaymentSuccess({ onNavigate }) {
         if (data.status === 'success') {
           setTokens(data.tokens ?? null)
           setStatus(data.credited ? 'Payment verified and tokens credited.' : 'Payment verified.')
+          const metadata = readPaymentMetadata(data.payment)
+          const patientId = data.payment?.patient_id || metadata.patientId || metadata.patient_id
+          if (patientId) {
+            try {
+              const stored = JSON.parse(window.localStorage.getItem('gd_patient_session') || 'null')
+              if (stored?.id === patientId) {
+                const nextPatient = { ...stored, tokens: data.tokens ?? stored.tokens ?? 0 }
+                window.localStorage.setItem('gd_patient_session', JSON.stringify(nextPatient))
+                window.localStorage.setItem('gd_active_portal', 'patient')
+                window.localStorage.setItem('gd_patient_return_dashboard', '1')
+              }
+            } catch {
+              // ignore local session refresh failures
+            }
+          }
+          redirectTimer = window.setTimeout(() => {
+            onNavigate?.('patient')
+          }, 1600)
         } else {
           setStatus(`Payment status: ${data.status || 'pending'}. Please refresh in a moment.`)
         }
@@ -37,7 +69,10 @@ function PaymentSuccess({ onNavigate }) {
     }
 
     void verify()
-  }, [reference])
+    return () => {
+      if (redirectTimer) window.clearTimeout(redirectTimer)
+    }
+  }, [onNavigate, reference])
 
   return (
     <section className="mx-auto mt-16 max-w-2xl px-6 pb-20 sm:px-8">
@@ -45,6 +80,7 @@ function PaymentSuccess({ onNavigate }) {
         <h1 className="text-3xl font-bold text-slate-900">Payment return</h1>
         {status && <p className="mt-3 text-slate-600">{status}</p>}
         {tokens !== null && <p className="mt-3 text-lg font-bold text-brand-700">Current balance: {tokens} tokens</p>}
+        {tokens !== null && !error && <p className="mt-2 text-sm text-slate-500">Returning to your patient dashboard...</p>}
         {error && <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <button

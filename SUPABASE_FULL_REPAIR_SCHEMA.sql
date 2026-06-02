@@ -355,6 +355,25 @@ CREATE TABLE IF NOT EXISTS public.facility_referrals (
   created_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.specialty_referrals (
+  id text PRIMARY KEY,
+  patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
+  from_doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  from_doctor_name text,
+  from_specialty text,
+  to_specialty text NOT NULL,
+  consultation_id text,
+  reason text NOT NULL,
+  notes text,
+  patient_snapshot jsonb DEFAULT '{}'::jsonb,
+  record_snapshot jsonb DEFAULT '{}'::jsonb,
+  status text DEFAULT 'pending',
+  accepted_by_doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  accepted_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.lab_orders (
   id text PRIMARY KEY,
   consultation_id text,
@@ -690,6 +709,21 @@ ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT
 
 ALTER TABLE public.facility_referrals ADD COLUMN IF NOT EXISTS vitals_snapshot jsonb DEFAULT '[]'::jsonb;
 
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS patient_id text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS from_doctor_id text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS from_doctor_name text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS from_specialty text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS to_specialty text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS consultation_id text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS reason text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS patient_snapshot jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS record_snapshot jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending';
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS accepted_by_doctor_id text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS accepted_at timestamptz;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
 ALTER TABLE public.facility_wallets ADD COLUMN IF NOT EXISTS balance_ngn integer DEFAULT 0;
 ALTER TABLE public.facility_wallets ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
@@ -895,6 +929,9 @@ CREATE INDEX IF NOT EXISTS idx_consultations_ng_doctor ON public.consultations_n
 CREATE INDEX IF NOT EXISTS idx_consultations_ng_facility ON public.consultations_ng(facility_id);
 CREATE INDEX IF NOT EXISTS idx_facilities_type ON public.facilities(type);
 CREATE INDEX IF NOT EXISTS idx_facility_wallet_tx_facility ON public.facility_wallet_tx(facility_id);
+CREATE INDEX IF NOT EXISTS idx_specialty_referrals_patient ON public.specialty_referrals(patient_id);
+CREATE INDEX IF NOT EXISTS idx_specialty_referrals_to_specialty ON public.specialty_referrals(to_specialty, status);
+CREATE INDEX IF NOT EXISTS idx_specialty_referrals_from_doctor ON public.specialty_referrals(from_doctor_id);
 CREATE INDEX IF NOT EXISTS idx_payments_reference ON public.payments(reference);
 CREATE INDEX IF NOT EXISTS idx_payments_patient ON public.payments(patient_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_patient ON public.prescriptions(patient_id);

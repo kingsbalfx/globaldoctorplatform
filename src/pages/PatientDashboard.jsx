@@ -139,10 +139,13 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       if (!stored) return
       const parsed = JSON.parse(stored)
       // Only restore if the patient has an email – otherwise force login
-      if (parsed?.id && parsed?.email) {
+      if (parsed?.id) {
+        const returnToDashboard = window.localStorage.getItem('gd_patient_return_dashboard') === '1'
+        window.localStorage.removeItem('gd_patient_return_dashboard')
         setPatient(parsed)
         setTokens(parsed.tokens || 0)
-        setCurrentStep('doctor')
+        setCurrentStep(returnToDashboard ? 'dashboard' : 'doctor')
+        if (returnToDashboard) setActiveTab('tokens')
         onSessionChange?.('patient')
       } else {
         // Clear corrupted / incomplete session

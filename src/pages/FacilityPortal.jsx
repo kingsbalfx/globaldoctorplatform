@@ -192,11 +192,15 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
     try {
       const response = await apiFetch(`/api/doctors?online=true`)
       const data = await response.json().catch(() => ({}))
-      const list = Array.isArray(data.doctors) ? data.doctors : []
+      if (!response.ok) throw new Error(data.error || 'Failed to load online doctors')
+      const list = Array.isArray(data.doctors) ? data.doctors : Array.isArray(data) ? data : []
       setDoctors(list)
       if (!selectedDoctorId && list.length > 0) setSelectedDoctorId(list[0].id)
-    } catch {
+      if (list.length === 0) setSelectedDoctorId('')
+    } catch (err) {
       setDoctors([])
+      setSelectedDoctorId('')
+      setError(err.message)
     } finally {
       setDoctorLoading(false)
     }

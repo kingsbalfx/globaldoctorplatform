@@ -42,7 +42,7 @@ function TokenManager({ patient, onTokensUpdated }) {
         const historyRes = await apiFetch(`/api/patients/${patient.id}/tokens/history`).catch(() => null)
         if (historyRes?.ok) {
           const historyData = await historyRes.json()
-          setHasPurchasedBefore((historyData.transactions || []).some(t => t.type === 'purchase'))
+          setHasPurchasedBefore((historyData.transactions || []).some(t => (t.transaction_type || t.type) === 'purchase'))
         }
         onTokensUpdated?.(data.tokens || 0)
       }

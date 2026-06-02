@@ -449,6 +449,8 @@ async function findPatientByIdentifier(identifier) {
   if (!raw) return null
   const compact = raw.replace(/\s+/g, '')
   const normalized = compact.toUpperCase()
+  const normalizedLoose = normalized.replace(/[^A-Z0-9-]/g, '')
+  const noHyphen = normalizedLoose.replace(/-/g, '')
 
   const exact = await supabase.from('patients').select('*').eq('id', compact).maybeSingle()
   if (exact.data) return exact.data
@@ -458,7 +460,23 @@ async function findPatientByIdentifier(identifier) {
     if (upper.data) return upper.data
   }
 
-  const fuzzy = await supabase.from('patients').select('*').ilike('id', `%${compact}%`).limit(1).maybeSingle()
+  if (normalizedLoose && normalizedLoose !== compact && normalizedLoose !== normalized) {
+    const loose = await supabase.from('patients').select('*').eq('id', normalizedLoose).maybeSingle()
+    if (loose.data) return loose.data
+  }
+
+  if (noHyphen && noHyphen !== normalizedLoose) {
+    const { data: candidates } = await supabase
+      .from('patients')
+      .select('*')
+      .ilike('id', `%${noHyphen.slice(-8)}%`)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    const matched = (candidates || []).find((row) => String(row.id || '').toUpperCase().replace(/-/g, '') === noHyphen)
+    if (matched) return matched
+  }
+
+  const fuzzy = await supabase.from('patients').select('*').ilike('id', `%${normalizedLoose || compact}%`).order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (fuzzy.data) return fuzzy.data
 
   if (/^\d{6}$/.test(compact)) {
@@ -595,7 +613,9 @@ async function deductPatientTokens(patientId, amount) {
   const current = await getPatientTokenBalance(patientId)
   if (current < amount) return false
   const newBalance = current - amount
-  await supabase.from('patient_tokens').update({ balance: newBalance }).eq('patient_id', patientId)
+  await supabase
+    .from('patient_tokens')
+    .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
   await supabase.from('token_transactions').insert({
     id: generateId('txn'),
     patient_id: patientId,
@@ -610,7 +630,10 @@ async function deductPatientTokens(patientId, amount) {
 async function creditPatientTokens(patientId, amount, description = 'Token credit') {
   const current = await getPatientTokenBalance(patientId)
   const newBalance = current + amount
-  await supabase.from('patient_tokens').update({ balance: newBalance }).eq('patient_id', patientId)
+  await supabase
+    .from('patient_tokens')
+    .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
+  await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
   await supabase.from('token_transactions').insert({
     id: generateId('txn'),
     patient_id: patientId,
@@ -1133,7 +1156,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
             message: 'Your doctor account is waiting for platform admin approval.',
           })
         }
-        if (profile) await supabase.from('doctors').update({ is_online: true }).eq('id', profileId)
+        if (profile) await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true }).eq('id', profileId)
         return res.json({
           doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: profileId, verified: true, license_verified: true, is_online: true }),
           message: 'Doctor session ready',
@@ -1381,10 +1404,15 @@ app.post('/api/patients/facility/login', async (req, res) => {
     const found = await findPatientByIdentifier(patientId)
     if (found?.portal_pin === patientPin) patient = found
   } else {
-    let query = supabase.from('patients').select('*').eq('portal_pin', patientPin)
-    if (fullName) query = query.ilike('name', fullName)
-    const { data } = await query.maybeSingle()
-    patient = data
+    let query = supabase
+      .from('patients')
+      .select('*')
+      .eq('portal_pin', patientPin)
+      .order('created_at', { ascending: false })
+      .limit(10)
+    if (fullName) query = query.ilike('name', `%${fullName.replace(/[%_]/g, '')}%`)
+    const { data } = await query
+    patient = (data || [])[0] || null
   }
   if (!patient) return res.status(401).json({ error: 'Invalid credentials' })
 
@@ -1715,6 +1743,7 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
     reference,
     tokensDebited: tokensToWithdraw,
     remainingTokens: available - tokensToWithdraw,
+    amountUSD: tokensToWithdraw / settings.tokenToUSD,
   })
 })
 
@@ -1817,7 +1846,6 @@ app.get('/api/doctors', async (req, res) => {
   if (req.query.minRating) query = query.gte('rating', Number(req.query.minRating))
   if (req.query.online !== undefined && req.query.online !== '') {
     query = query.eq('is_online', req.query.online === 'true')
-    if (req.query.online === 'true') query = query.gte('updated_at', new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString())
   }
   query = query.order('rating', { ascending: false })
   const { data } = await query
@@ -2492,26 +2520,132 @@ app.patch('/api/admin/reviews/:reviewId/reject', async (req, res) => {
   res.json({ message: 'Review rejected' })
 })
 
-// ---------- ADMIN: REFERRALS (legacy specialty referrals) ----------
+async function buildPatientRecordSnapshot(patientId) {
+  const patient = await findPatientByIdentifier(patientId)
+  if (!patient) return null
+  const resolvedPatientId = patient.id
+  const labOrderIds = await supabase.from('lab_orders').select('id').eq('patient_id', resolvedPatientId)
+  const [files, appointments, consultations, labOrders, labPayments, facilityReferrals, specialtyReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
+    supabase.from('patient_files').select('*').eq('patient_id', resolvedPatientId),
+    supabase.from('appointments').select('*').eq('patient_id', resolvedPatientId),
+    supabase.from('consultations_ng').select('*').eq('patient_id', resolvedPatientId),
+    supabase.from('lab_orders').select('*').eq('patient_id', resolvedPatientId),
+    supabase.from('lab_payments').select('*').in('order_id', (labOrderIds.data || []).map((order) => order.id)),
+    supabase.from('facility_referrals').select('*').eq('patient_id', resolvedPatientId),
+    supabase.from('specialty_referrals').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }),
+    supabase.from('vital_parameters').select('*').eq('patient_id', resolvedPatientId).order('measured_at', { ascending: false }),
+    supabase.from('vital_parameter_requests').select('*').eq('patient_id', resolvedPatientId).order('requested_at', { ascending: false }),
+    supabase.from('reviews').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }),
+    supabase.from('prescriptions').select('*').eq('patient_id', resolvedPatientId).order('issued_at', { ascending: false }),
+    supabase.from('patient_clinical_notes').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }),
+  ])
+  return {
+    patient: sanitizePatientForResponse(patient),
+    files: files.data || [],
+    appointments: appointments.data || [],
+    consultations_ng: consultations.data || [],
+    labs: { orders: labOrders.data || [], payments: labPayments.data || [] },
+    referrals: { specialty: specialtyReferrals.data || [], facility: facilityReferrals.data || [] },
+    vitals: vitals.data || [],
+    vital_requests: vitalRequests.data || [],
+    reviews: reviews.data || [],
+    prescriptions: prescriptions.data || [],
+    clinical_notes: clinicalNotes.data || [],
+  }
+}
+
+// ---------- SPECIALTY REFERRALS ----------
+app.post('/api/referrals/specialty/create', async (req, res) => {
+  const { doctorId, patientId, consultationId, fromSpecialty, toSpecialty, reason, notes } = req.body || {}
+  if (!doctorId || !patientId || !toSpecialty || !reason) {
+    return res.status(400).json({ error: 'doctorId, patientId, target specialty, and reason are required' })
+  }
+  const [doctor, snapshot] = await Promise.all([
+    getDoctorProfile(doctorId),
+    buildPatientRecordSnapshot(patientId),
+  ])
+  if (!doctor) return res.status(404).json({ error: 'Referring doctor not found' })
+  if (!snapshot?.patient) return res.status(404).json({ error: 'Patient not found' })
+
+  const referral = {
+    id: generateId('sref'),
+    patient_id: snapshot.patient.id,
+    from_doctor_id: String(doctorId),
+    from_doctor_name: doctor.name || '',
+    from_specialty: fromSpecialty || doctor.specialty || 'General Practitioner',
+    to_specialty: String(toSpecialty).trim(),
+    consultation_id: consultationId || null,
+    reason: String(reason).trim(),
+    notes: String(notes || '').trim() || null,
+    patient_snapshot: snapshot.patient,
+    record_snapshot: snapshot,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  }
+  const insert = await insertAdaptive('specialty_referrals', referral)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
+
+  const { data: targetDoctors } = await supabase
+    .from('doctors')
+    .select('id')
+    .eq('verified', true)
+    .eq('license_verified', true)
+    .eq('specialty', referral.to_specialty)
+    .limit(20)
+
+  await Promise.all((targetDoctors || []).map((targetDoctor) => insertAdaptive('notifications', {
+    id: generateId('notif'),
+    user_id: targetDoctor.id,
+    user_type: 'doctor',
+    notification_type: 'specialty_referral',
+    type: 'referral',
+    title: 'Specialty referral available',
+    message: `${doctor.name || 'A doctor'} referred ${snapshot.patient.name || snapshot.patient.id} to ${referral.to_specialty}.`,
+    related_resource_type: 'specialty_referral',
+    related_resource_id: referral.id,
+    is_read: false,
+    notification_channels: ['in_app'],
+    created_at: new Date().toISOString(),
+  })))
+
+  res.status(201).json({ referral, message: 'Specialty referral created with patient record attached.' })
+})
+
+app.get('/api/referrals/specialty', async (req, res) => {
+  let query = supabase.from('specialty_referrals').select('*').order('created_at', { ascending: false })
+  if (req.query.patientId) query = query.eq('patient_id', req.query.patientId)
+  if (req.query.doctorId) query = query.eq('from_doctor_id', req.query.doctorId)
+  if (req.query.specialty) query = query.eq('to_specialty', req.query.specialty)
+  const { data, error } = await query.limit(100)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ referrals: data || [] })
+})
+
+app.post('/api/patients/referrals', async (req, res) => {
+  req.url = '/api/referrals/specialty/create'
+  req.body = {
+    ...req.body,
+    doctorId: req.body.doctorId || req.body.fromDoctorId || 'system-doctor',
+  }
+  app.handle(req, res)
+})
+
+app.get('/api/patients/:patientId/referrals', async (req, res) => {
+  const { data } = await supabase.from('specialty_referrals').select('*').eq('patient_id', req.params.patientId).order('created_at', { ascending: false })
+  res.json({ referrals: data || [] })
+})
+
+// ---------- ADMIN: REFERRALS ----------
 app.post('/api/admin/referrals', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  const { patientId, fromSpecialty, toSpecialty, reason, notes } = req.body
-  const id = generateId('ref')
-  res.status(201).json({ referral: { id, patientId, fromSpecialty, toSpecialty, reason, notes, status: 'pending' }, message: 'Referral created' })
+  req.url = '/api/referrals/specialty/create'
+  app.handle(req, res)
 })
 
 app.get('/api/admin/referrals', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  res.json({ referrals: [] })
-})
-
-app.post('/api/patients/referrals', async (req, res) => {
-  const { patientId, fromSpecialty, toSpecialty, reason, notes } = req.body
-  res.status(201).json({ referral: { id: generateId('ref'), patientId, fromSpecialty, toSpecialty, reason, notes, status: 'pending' }, message: 'Referral request submitted' })
-})
-
-app.get('/api/patients/:patientId/referrals', async (req, res) => {
-  res.json({ referrals: [] })
+  const { data } = await supabase.from('specialty_referrals').select('*').order('created_at', { ascending: false }).limit(500)
+  res.json({ referrals: data || [] })
 })
 
 // ---------- ADMIN: FILES ----------
@@ -2557,7 +2691,7 @@ app.get('/api/patients/:patientId/record', async (req, res) => {
   if (!patient) return res.status(404).json({ error: 'Patient not found' })
   const patientId = patient.id
 
-  const [tokens, files, appointments, consultations, labOrders, labPayments, facilityReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
+  const [tokens, files, appointments, consultations, labOrders, labPayments, facilityReferrals, specialtyReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
     supabase.from('patient_tokens').select('balance').eq('patient_id', patientId).maybeSingle(),
     supabase.from('patient_files').select('*').eq('patient_id', patientId),
     supabase.from('appointments').select('*').eq('patient_id', patientId),
@@ -2565,6 +2699,7 @@ app.get('/api/patients/:patientId/record', async (req, res) => {
     supabase.from('lab_orders').select('*').eq('patient_id', patientId),
     supabase.from('lab_payments').select('*').in('order_id', (await supabase.from('lab_orders').select('id').eq('patient_id', patientId)).data?.map(o => o.id) || []),
     supabase.from('facility_referrals').select('*').eq('patient_id', patientId),
+    supabase.from('specialty_referrals').select('*').eq('patient_id', patientId).order('created_at', { ascending: false }),
     supabase.from('vital_parameters').select('*').eq('patient_id', patientId).order('measured_at', { ascending: false }),
     supabase.from('vital_parameter_requests').select('*').eq('patient_id', patientId).order('requested_at', { ascending: false }),
     supabase.from('reviews').select('*').eq('patient_id', patientId).order('created_at', { ascending: false }),
@@ -2576,7 +2711,7 @@ app.get('/api/patients/:patientId/record', async (req, res) => {
     patient: sanitizePatientForResponse(patient),
     tokens: { balance: tokens.data?.balance || 0, transactions: [] },
     files: files.data || [],
-    referrals: { specialty: [], facility: facilityReferrals.data || [] },
+    referrals: { specialty: specialtyReferrals.data || [], facility: facilityReferrals.data || [] },
     appointments: appointments.data || [],
     consultations_ng: consultations.data || [],
     labs: { orders: labOrders.data || [], payments: labPayments.data || [] },
@@ -2636,7 +2771,7 @@ app.get('/api/facilities/:facilityId/patients/:patientId/record', async (req, re
   }
 
   const patientIdResolved = patient.id
-  const [tokens, files, appointments, consultations, labOrders, labPayments, facilityReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
+  const [tokens, files, appointments, consultations, labOrders, labPayments, facilityReferrals, specialtyReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
     supabase.from('patient_tokens').select('balance').eq('patient_id', patientIdResolved).maybeSingle(),
     supabase.from('patient_files').select('*').eq('patient_id', patientIdResolved),
     supabase.from('appointments').select('*').eq('patient_id', patientIdResolved),
@@ -2644,6 +2779,7 @@ app.get('/api/facilities/:facilityId/patients/:patientId/record', async (req, re
     supabase.from('lab_orders').select('*').eq('patient_id', patientIdResolved),
     supabase.from('lab_payments').select('*').in('order_id', (await supabase.from('lab_orders').select('id').eq('patient_id', patientIdResolved)).data?.map(o => o.id) || []),
     supabase.from('facility_referrals').select('*').eq('patient_id', patientIdResolved),
+    supabase.from('specialty_referrals').select('*').eq('patient_id', patientIdResolved).order('created_at', { ascending: false }),
     supabase.from('vital_parameters').select('*').eq('patient_id', patientIdResolved).order('measured_at', { ascending: false }),
     supabase.from('vital_parameter_requests').select('*').eq('patient_id', patientIdResolved).order('requested_at', { ascending: false }),
     supabase.from('reviews').select('*').eq('patient_id', patientIdResolved).order('created_at', { ascending: false }),
@@ -2655,7 +2791,7 @@ app.get('/api/facilities/:facilityId/patients/:patientId/record', async (req, re
     patient: sanitizePatientForResponse(patient),
     tokens: { balance: tokens.data?.balance || 0, transactions: [] },
     files: files.data || [],
-    referrals: { specialty: [], facility: facilityReferrals.data || [] },
+    referrals: { specialty: specialtyReferrals.data || [], facility: facilityReferrals.data || [] },
     appointments: appointments.data || [],
     consultations_ng: consultations.data || [],
     labs: { orders: labOrders.data || [], payments: labPayments.data || [] },
@@ -3412,22 +3548,24 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
 
   if ((payment.type || payment.payment_type) === 'token_purchase') {
     const result = await creditTokenPurchasePayment(payment, 'Kora')
+    const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
     return res.json({
       status: 'success',
       credited: result.credited,
       tokens: result.tokens,
-      payment,
+      payment: refreshedPayment || payment,
       message: result.reason,
     })
   }
 
   if ((payment.type || payment.payment_type) === 'subscription') {
     const result = await creditSubscriptionPayment(payment, 'Kora')
+    const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
     return res.json({
       status: 'success',
       credited: result.credited,
       tokens: result.tokens,
-      payment,
+      payment: refreshedPayment || payment,
       message: result.reason,
     })
   }
