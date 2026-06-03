@@ -74,6 +74,22 @@ async function uploadSupportFile(supabase, caseId, file) {
   }
 }
 
+async function insertNotification(supabase, ticket) {
+  if (!supabase) return
+  try {
+    await supabase.from('support_notifications').insert({
+      id: `${ticket.caseId}-notif-${Math.random().toString(36).slice(2, 8)}`,
+      ticket_id: ticket.caseId,
+      notification_type: 'new_support_request',
+      recipient_email: AGENT_EMAIL,
+      is_read: false,
+      created_at: ticket.createdAt,
+    })
+  } catch {
+    // Notifications should never block ticket submission.
+  }
+}
+
 async function maybeStoreTicket(ticket, files) {
   const supabase = getSupabaseClient()
   if (!supabase) return { stored: false, reason: 'Supabase not configured', fileRows: [] }
@@ -118,14 +134,7 @@ async function maybeStoreTicket(ticket, files) {
     if (filesError) return { stored: true, reason: `Ticket stored, file metadata failed: ${filesError.message}`, fileRows }
   }
 
-  await supabase.from('support_notifications').insert({
-    id: `${ticket.caseId}-notif-${Math.random().toString(36).slice(2, 8)}`,
-    ticket_id: ticket.caseId,
-    notification_type: 'new_support_request',
-    recipient_email: AGENT_EMAIL,
-    is_read: false,
-    created_at: ticket.createdAt,
-  }).catch(() => null)
+  await insertNotification(supabase, ticket)
 
   return { stored: true, fileRows }
 }
