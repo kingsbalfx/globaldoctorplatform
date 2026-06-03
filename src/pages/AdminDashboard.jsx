@@ -787,6 +787,15 @@ function AdminDashboard({ doctor, onLogout }) {
                   patientId={selectedConsultationPatient.id}
                   doctorId={doctor.id}
                 />
+                <div className="mt-5">
+                  <VitalParametersMonitor
+                    consultationId={selectedConsultation.id}
+                    patientId={selectedConsultationPatient.id}
+                    doctorId={doctor.id}
+                    userType="doctor"
+                    compact
+                  />
+                </div>
               </div>
 
               <div className="rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/50">

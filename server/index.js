@@ -3817,6 +3817,15 @@ app.post('/api/vital-requests', async (req, res) => {
     return res.status(400).json({ error: 'consultationId, patientId, doctorId, and parameterName are required' })
   }
 
+  await supabase
+    .from('vital_parameter_requests')
+    .update({ status: 'cancelled' })
+    .eq('consultation_id', consultationId)
+    .eq('patient_id', patientId)
+    .eq('doctor_id', doctorId)
+    .eq('parameter_name', parameterName)
+    .in('status', ['pending', 'measuring'])
+
   const request = {
     id: generateId('vreq'),
     consultation_id: consultationId,
@@ -3876,6 +3885,23 @@ app.patch('/api/vital-requests/:requestId', async (req, res) => {
     .maybeSingle()
   if (error) return res.status(500).json({ error: error.message })
   res.json({ request: data, message: 'Vital request updated' })
+})
+
+app.post('/api/vital-requests/cancel-active', async (req, res) => {
+  const { consultationId, patientId, doctorId } = req.body || {}
+  if (!consultationId && !patientId && !doctorId) {
+    return res.status(400).json({ error: 'consultationId, patientId, or doctorId is required' })
+  }
+  let query = supabase
+    .from('vital_parameter_requests')
+    .update({ status: 'cancelled' })
+    .in('status', ['pending', 'measuring'])
+  if (consultationId) query = query.eq('consultation_id', consultationId)
+  if (patientId) query = query.eq('patient_id', patientId)
+  if (doctorId) query = query.eq('doctor_id', doctorId)
+  const { error } = await query
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ message: 'Active vital requests cancelled' })
 })
 
 app.get('/api/vital-parameters', async (req, res) => {

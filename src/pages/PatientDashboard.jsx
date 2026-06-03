@@ -46,6 +46,9 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   const activeConsultation = useMemo(() => {
     return appointments.find((appointment) => appointment.id === selectedConsultationId) || appointments[0] || null
   }, [appointments, selectedConsultationId])
+  const activeConsultationId = selectedConsultationId || activeConsultation?.id || ''
+  const activeConsultationStatus = String(activeConsultation?.status || '').toLowerCase()
+  const liveConsultationActive = !['completed', 'cancelled', 'canceled', 'ended'].includes(activeConsultationStatus)
 
   const currentSpecialty =
     selectedDoctor?.specialty ||
@@ -77,6 +80,14 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   const cleanLogout = (reason = 'logout') => {
     const patientId = patient?.id
     if (patientId) {
+      void apiFetch('/api/vital-requests/cancel-active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientId,
+          consultationId: selectedConsultationId || activeConsultation?.id || '',
+        }),
+      }).catch(() => null)
       void apiFetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -424,7 +435,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       {activeTab !== 'overview' && activeTab !== 'video' && (
         <div className="mb-8">
           <VitalParametersMonitor
-            consultationId=""
+            consultationId={activeConsultationId}
             patientId={patient.id}
             doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
             userType="patient"
@@ -436,7 +447,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       {activeTab === 'overview' && (
         <div className="space-y-8">
           <VitalParametersMonitor
-            consultationId=""
+            consultationId={activeConsultationId}
             patientId={patient.id}
             doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
             userType="patient"
@@ -560,7 +571,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
 
       {activeTab === 'chat' && (
         <ChatPanel
-          consultationId={selectedConsultationId}
+          consultationId={activeConsultationId}
           userId={patient.id}
           userType="patient"
           recipientId={appointments.find((appt) => appt.id === selectedConsultationId)?.doctorId || appointments.find((appt) => appt.id === selectedConsultationId)?.doctor_id || selectedDoctor?.id || ''}
@@ -573,25 +584,48 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       {activeTab === 'video' && (
         <div className="space-y-6">
           <VideoChatPanel
-            consultationId={selectedConsultationId}
+            consultationId={activeConsultationId}
             userId={patient.id}
             userType="patient"
             patientId={patient.id}
             doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
           />
-          <LiveDocumentAlerts
-            consultationId={selectedConsultationId}
-            patientId={patient.id}
-            patientName={patient.name}
-            doctor={selectedDoctor}
-          />
-          <VitalParametersMonitor
-            consultationId=""
-            patientId={patient.id}
-            doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
-            userType="patient"
-            compact
-          />
+          {liveConsultationActive ? (
+            <>
+              <LiveDocumentAlerts
+                consultationId={activeConsultationId}
+                patientId={patient.id}
+                patientName={patient.name}
+                doctor={selectedDoctor}
+              />
+              <VitalParametersMonitor
+                consultationId={activeConsultationId}
+                patientId={patient.id}
+                doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+                userType="patient"
+                compact
+              />
+              <div className="rounded-3xl bg-white p-5 shadow-lg shadow-slate-200/40">
+                <h2 className="text-lg font-bold text-slate-900">Live chat</h2>
+                <p className="mt-1 text-sm text-slate-600">Chat stays below the video so the consultation is not interrupted.</p>
+                <div className="mt-4">
+                  <ChatPanel
+                    consultationId={activeConsultationId}
+                    userId={patient.id}
+                    userType="patient"
+                    recipientId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+                    recipientType="doctor"
+                    patientId={patient.id}
+                    doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-lg shadow-slate-200/40">
+              This consultation has ended. Live prompts and quick downloads are hidden here, but prescriptions and lab requests remain saved in their normal tabs.
+            </div>
+          )}
         </div>
       )}
 

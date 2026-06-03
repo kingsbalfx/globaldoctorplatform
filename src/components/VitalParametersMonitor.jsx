@@ -119,19 +119,26 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
 
   const loadRequests = async () => {
     if (!consultationId && !patientId && !doctorId) return
+    if (userType !== 'doctor' && !consultationId) {
+      setRequests([])
+      setAcceptedRequestId('')
+      setActiveRequest(null)
+      return
+    }
     const params = new URLSearchParams()
     if (patientId) params.set('patientId', patientId)
-    if (userType === 'doctor' && consultationId) params.set('consultationId', consultationId)
+    if (consultationId) params.set('consultationId', consultationId)
     if (userType === 'doctor' && doctorId) params.set('doctorId', doctorId)
     const response = await apiFetch(`/api/vital-requests?${params.toString()}`)
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || 'Failed to load vital requests')
-    const rows = Array.isArray(data.requests) ? data.requests : []
+    const rows = (Array.isArray(data.requests) ? data.requests : [])
+      .filter((request) => userType === 'doctor' || String(request.consultation_id || '') === String(consultationId || ''))
     setRequests(rows)
 
     if (userType !== 'doctor') {
       const pendingRows = rows
-        .filter((request) => request.status === 'pending' || request.status === 'measuring')
+        .filter((request) => request.status === 'pending')
         .sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
       if (pendingRows) {
         if (!handledRequestsRef.current.has(pendingRows.id)) {
@@ -147,6 +154,10 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
 
   const loadVitals = async () => {
     if (!consultationId && !patientId && !doctorId) return
+    if (userType !== 'doctor' && !consultationId) {
+      setVitals([])
+      return
+    }
     const params = new URLSearchParams()
     if (consultationId) params.set('consultationId', consultationId)
     if (patientId) params.set('patientId', patientId)
@@ -188,7 +199,21 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || `Failed to mark vital request as ${status}`)
-    setRequests((current) => current.map((item) => (item.id === request.id ? { ...item, status } : item)))
+    const nextRequest = data.request || { ...request, status }
+    setRequests((current) => current.map((item) => (item.id === request.id ? nextRequest : item)))
+    return nextRequest
+  }
+
+  const skipRequest = async (request) => {
+    try {
+      await markRequestStatus(request, 'cancelled')
+      setActiveRequest(null)
+      setAcceptedRequestId('')
+      addError('Vital request skipped for this consultation.', 'info')
+      await loadRequests()
+    } catch (error) {
+      addError(error.message || 'Could not skip vital request.', 'error')
+    }
   }
 
   const saveVital = async ({ request, value, unit, source, confidence, metadata }) => {
@@ -435,6 +460,13 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
   }
 
   useEffect(() => {
+    setActiveRequest(null)
+    setAcceptedRequestId('')
+    setManualValue('')
+    handledRequestsRef.current = new Set()
+  }, [consultationId, patientId, doctorId, userType])
+
+  useEffect(() => {
     void Promise.all([loadRequests(), loadVitals()]).catch((error) => addError(error.message, 'error'))
     const interval = window.setInterval(() => {
       void Promise.all([loadRequests(), loadVitals()]).catch(() => null)
@@ -449,13 +481,16 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
   const actionableRequests = requests.filter((request) => request.status === 'pending' || request.status === 'measuring')
   const currentPatientRequest = userType === 'doctor'
     ? null
-    : [...actionableRequests].sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
+    : requests.filter((request) => request.status === 'pending').sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
   const pending = requests.filter((request) => request.status === 'pending')
   const measuringRequests = requests.filter((request) => request.status === 'measuring')
 
+  if (userType !== 'doctor' && !consultationId && !currentPatientRequest && !activeRequest) return null
+  if (compact && userType !== 'doctor' && !currentPatientRequest && !activeRequest) return null
+
   return (
     <div className={compact ? 'space-y-4' : 'space-y-6'}>
-      {userType === 'doctor' && (
+      {userType === 'doctor' && !compact && (
         <div className="rounded-3xl bg-white p-6 shadow-lg">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -514,6 +549,13 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
             >
               Accept and continue
             </button>
+            <button
+              type="button"
+              onClick={() => skipRequest(currentPatientRequest)}
+              className="ml-3 mt-4 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Skip for now
+            </button>
           </div>
         </div>
       )}
@@ -534,6 +576,13 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
               className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50"
             >
               Hear guide
+            </button>
+            <button
+              type="button"
+              onClick={() => skipRequest(activeRequest)}
+              className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+            >
+              Skip
             </button>
           </div>
           {getVital(activeRequest.parameter_name).method === 'camera' ? (
@@ -582,7 +631,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
         </div>
       )}
 
-      {!compact && <div className="rounded-3xl bg-white p-6 shadow-lg">
+      {(userType === 'doctor' || !compact) && <div className="rounded-3xl bg-white p-6 shadow-lg">
         <h3 className="text-lg font-semibold text-slate-900">Saved Vital Signs</h3>
         {vitals.length === 0 ? (
           <p className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">No vital readings saved yet.</p>
