@@ -3,6 +3,8 @@ import LandingPageEnhanced from './pages/LandingPageEnhanced'
 import AdminDashboard from './pages/AdminDashboard'
 import PatientDashboard from './pages/PatientDashboard'
 import PlatformAdminDashboard from './pages/PlatformAdminDashboard'
+import SupportDashboard from './pages/SupportDashboard'
+import RequestTracker from './pages/RequestTracker'
 import FacilityPortal from './pages/FacilityPortal'
 import AuthCallback from './pages/AuthCallback'
 import PaymentSuccess from './pages/PaymentSuccess'
@@ -20,10 +22,12 @@ import './lib/i18n' // Initialize i18n
 function viewFromPath(pathname) {
   const path = String(pathname || '/')
   if (path === '/' || path === '') return 'landing'
+  if (path.startsWith('/request-tracker')) return 'request-tracker'
   if (path.startsWith('/patient')) return 'patient'
   if (path.startsWith('/doctor/dashboard')) return 'admin'
   if (path.startsWith('/doctor')) return 'doctor-auth'
   if (path.startsWith('/facility')) return 'facility'
+  if (path.startsWith('/platform-admin/support')) return 'platform-admin-support'
   if (path.startsWith('/platform-admin')) return 'platform-admin'
   if (path.startsWith('/auth/callback')) return 'auth-callback'
   if (path.startsWith('/payment-success')) return 'payment-success'
@@ -42,10 +46,14 @@ function pathFromView(view) {
       return '/doctor'
     case 'facility':
       return '/facility'
+    case 'platform-admin-support':
+      return '/platform-admin/support'
     case 'platform-admin':
       return '/platform-admin'
     case 'admin':
       return '/doctor/dashboard'
+    case 'request-tracker':
+      return '/request-tracker'
     case 'auth-callback':
       return '/auth/callback'
     case 'payment-success':
@@ -68,7 +76,7 @@ function portalFromView(view) {
   if (view === 'patient' || view === 'payment-success') return 'patient'
   if (view === 'doctor-auth' || view === 'admin') return 'doctor'
   if (view === 'facility') return 'facility'
-  if (view === 'platform-admin') return 'platform-admin'
+  if (view === 'platform-admin' || view === 'platform-admin-support') return 'platform-admin'
   return ''
 }
 
@@ -76,12 +84,12 @@ function assistantPortalFromView(view) {
   if (view === 'patient') return 'patient'
   if (view === 'admin') return 'doctor'
   if (view === 'facility') return 'facility'
-  if (view === 'platform-admin') return 'platform-admin'
+  if (view === 'platform-admin' || view === 'platform-admin-support') return 'platform-admin'
   return ''
 }
 
 function App() {
-  const [currentView, setCurrentView] = useState(() => viewFromPath(window.location.pathname)) // 'landing', 'patient', 'doctor-auth', 'admin', 'platform-admin', 'facility', 'auth-callback', 'terms', 'privacy', 'contact'
+  const [currentView, setCurrentView] = useState(() => viewFromPath(window.location.pathname))
   const [authDoctor, setAuthDoctor] = useState(null)
   const [authAdmin, setAuthAdmin] = useState(null)
   const [activePortal, setActivePortal] = useState(() => {
@@ -236,30 +244,11 @@ function App() {
         <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600">
           {!activePortal && (
             <>
-              <button
-                onClick={() => navigate('landing')}
-                className={`hover:text-brand-700 ${currentView === 'landing' ? 'text-brand-700' : ''}`}
-              >
-                Home
-              </button>
-              <button
-                onClick={() => navigate('patient')}
-                className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}
-              >
-                Patient Portal
-              </button>
-              <button
-                onClick={() => navigate('doctor-auth')}
-                className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}
-              >
-                Doctor Portal
-              </button>
-              <button
-                onClick={() => navigate('facility')}
-                className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}
-              >
-                Facility Portal
-              </button>
+              <button onClick={() => navigate('landing')} className={`hover:text-brand-700 ${currentView === 'landing' ? 'text-brand-700' : ''}`}>Home</button>
+              <button onClick={() => navigate('patient')} className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}>Patient Portal</button>
+              <button onClick={() => navigate('doctor-auth')} className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}>Doctor Portal</button>
+              <button onClick={() => navigate('facility')} className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}>Facility Portal</button>
+              <button onClick={() => navigate('request-tracker')} className={`hover:text-brand-700 ${currentView === 'request-tracker' ? 'text-brand-700' : ''}`}>Track Request</button>
             </>
           )}
           {activePortal === 'patient' && (
@@ -272,24 +261,24 @@ function App() {
             <button onClick={() => navigate('facility')} className="font-semibold text-brand-700">Facility Portal</button>
           )}
           {activePortal === 'platform-admin' && (
-            <button onClick={() => navigate('platform-admin')} className="font-semibold text-brand-700">Platform Admin</button>
+            <>
+              <button onClick={() => navigate('platform-admin')} className={`font-semibold ${currentView === 'platform-admin' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Platform Admin</button>
+              <button onClick={() => navigate('platform-admin-support')} className={`font-semibold ${currentView === 'platform-admin-support' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Support</button>
+            </>
           )}
           {(authDoctor || authAdmin || activePortal) && (
-            <button
-              onClick={handleLogout}
-              className="text-red-600 hover:text-red-700"
-            >
-              Logout
-            </button>
+            <button onClick={handleLogout} className="text-red-600 hover:text-red-700">Logout</button>
           )}
         </div>
       </nav>
 
       {currentView === 'landing' && <LandingPageEnhanced />}
+      {currentView === 'request-tracker' && <RequestTracker />}
       {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
       {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
       {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
       {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
+      {currentView === 'platform-admin-support' && <SupportDashboard adminSession={authAdmin} />}
       {currentView === 'facility' && <FacilityPortal logoutSignal={facilityLogoutSignal} onSessionChange={setPortalSession} />}
       {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
       {currentView === 'payment-success' && <PaymentSuccess onNavigate={navigate} />}
@@ -300,7 +289,6 @@ function App() {
 
       {assistantPortal && <HumanoidAssistant portal={assistantPortal} />}
 
-      {/* Footer - only show on landing page */}
       {currentView === 'landing' && <Footer onNavigate={setCurrentView} />}
     </div>
     </ErrorProvider>
