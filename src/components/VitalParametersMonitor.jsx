@@ -137,6 +137,16 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     setRequests(rows)
 
     if (userType !== 'doctor') {
+      const activeRow = rows.find((request) => {
+        const isSameRequest = request.id === activeRequest?.id || request.id === acceptedRequestId
+        return isSameRequest && (request.status === 'pending' || request.status === 'measuring')
+      })
+      if (activeRow) {
+        setActiveRequest(activeRow)
+        setAcceptedRequestId(activeRow.id)
+        return
+      }
+
       const pendingRows = rows
         .filter((request) => request.status === 'pending')
         .sort((a, b) => new Date(a.requested_at) - new Date(b.requested_at))[0]
@@ -279,7 +289,11 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     speak(request.instructions || vital.guide)
 
     try {
-      await markRequestStatus(request, 'measuring')
+      const measuringRequest = await markRequestStatus(request, 'measuring')
+      if (measuringRequest) {
+        setActiveRequest(measuringRequest)
+        setAcceptedRequestId(measuringRequest.id)
+      }
       window.dispatchEvent(new CustomEvent('globaldoc:vital-camera-started'))
       const cameraAttempts = [
         { video: { facingMode: { exact: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, max: 30 } }, audio: false },
@@ -409,7 +423,11 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     if (!activeRequest || !manualValue.trim()) return
     const vital = getVital(activeRequest.parameter_name)
     try {
-      await markRequestStatus(activeRequest, 'measuring')
+      const measuringRequest = await markRequestStatus(activeRequest, 'measuring')
+      if (measuringRequest) {
+        setActiveRequest(measuringRequest)
+        setAcceptedRequestId(measuringRequest.id)
+      }
       await saveVital({
         request: activeRequest,
         value: manualValue.trim(),
