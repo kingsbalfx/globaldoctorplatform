@@ -12,6 +12,7 @@ const specialties = [
   'Orthopedics',
   'Neurology',
   'Urology',
+  'Gynaecologist',
   'Obstetrics & Gynecology',
   'Ophthalmology',
 ]

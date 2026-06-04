@@ -33,6 +33,11 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const [announcements, setAnnouncements] = useState([])
   const [loading, setLoading] = useState(false)
   const [config, setConfig] = useState(null)
+  const [platformPaused, setPlatformPaused] = useState(false)
+  const [platformPauseMessage, setPlatformPauseMessage] = useState('We are sorry, GlobalDoc is currently under review or update. Please try again shortly.')
+  const [smtpTestResult, setSmtpTestResult] = useState(null)
+  const [payouts, setPayouts] = useState([])
+  const [payoutFilter, setPayoutFilter] = useState('pending')
 
   const [facilities, setFacilities] = useState([])
   const [facilityFilter, setFacilityFilter] = useState('')
@@ -65,7 +70,11 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     try {
       const response = await apiFetch(`/api/config`)
       const data = await response.json().catch(() => null)
-      if (response.ok) setConfig(data)
+      if (response.ok) {
+        setConfig(data)
+        setPlatformPaused(Boolean(data?.platform?.paused))
+        if (data?.platform?.message) setPlatformPauseMessage(data.platform.message)
+      }
     } catch {
       // ignore
     }
@@ -122,6 +131,51 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       await loadAnnouncements(selectedAudience)
       addError('Announcement published to the selected audience.', 'success')
     } catch (err) {
+      addError(err.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const savePlatformPause = async () => {
+    if (!headers) return
+    setLoading(true)
+    try {
+      const response = await apiFetch('/api/admin/settings', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          platformPaused,
+          platformPauseMessage,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to save platform pause setting')
+      await loadConfig()
+      addError(platformPaused ? 'Platform activity paused. Landing page and AI assistance remain available.' : 'Platform activity resumed.', 'success')
+    } catch (err) {
+      addError(err.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const testSmtp = async () => {
+    if (!headers) return
+    setLoading(true)
+    setSmtpTestResult(null)
+    try {
+      const response = await apiFetch('/api/admin/smtp/test', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ to: admin?.email || credentials?.email }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'SMTP test failed')
+      setSmtpTestResult(data)
+      addError(data.email?.sent ? 'SMTP test email sent.' : data.email?.reason || 'SMTP test completed without sending.', data.email?.sent ? 'success' : 'warning')
+    } catch (err) {
+      setSmtpTestResult({ error: err.message })
       addError(err.message, 'error')
     } finally {
       setLoading(false)
@@ -260,6 +314,78 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     }
   }
 
+  const updateFacilityStatus = async (facility, active) => {
+    if (!headers) return
+    const reason = active
+      ? ''
+      : window.prompt('Reason/query to show this facility:', facility.suspension_reason || 'Facility paused pending platform admin review.')
+    if (!active && reason === null) return
+    setLoading(true)
+    try {
+      const response = await apiFetch(`/api/admin/facilities/${encodeURIComponent(facility.id)}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          is_active: active,
+          suspension_reason: active ? '' : reason,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to update facility status')
+      setFacilities((current) => current.map((item) => item.id === facility.id ? { ...item, ...data.facility } : item))
+      addError(active ? 'Facility resumed.' : 'Facility paused.', 'success')
+    } catch (err) {
+      addError(err.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadPayouts = async () => {
+    if (!headers) return
+    setLoading(true)
+    try {
+      const response = await apiFetch(`/api/admin/payouts?status=${encodeURIComponent(payoutFilter)}`, { headers })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to load payout requests')
+      setPayouts(Array.isArray(data.payouts) ? data.payouts : [])
+    } catch (err) {
+      setPayouts([])
+      addError(err.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const updatePayoutStatus = async (payout, status) => {
+    if (!headers) return
+    const note = ['rejected', 'failed'].includes(status)
+      ? window.prompt('Reason to record for this payout:', payout.admin_note || 'Payout could not be completed.')
+      : window.prompt('Admin note or provider reference:', payout.provider_reference || '')
+    if (note === null) return
+
+    setLoading(true)
+    try {
+      const response = await apiFetch(`/api/admin/payouts/${encodeURIComponent(payout.id)}/status`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          status,
+          note,
+          providerReference: ['paid', 'completed', 'processing'].includes(status) ? note : payout.provider_reference || '',
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to update payout')
+      await loadPayouts()
+      addError(data.message || 'Payout updated.', 'success')
+    } catch (err) {
+      addError(err.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const loadAuditLogs = async () => {
     if (!headers) return
     setLoading(true)
@@ -284,9 +410,10 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   useEffect(() => {
     if (!adminSession) return
     if (activeSection === 'facilities') void loadFacilities()
+    if (activeSection === 'payouts') void loadPayouts()
     if (activeSection === 'audit') void loadAuditLogs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminSession, activeSection, facilityFilter])
+  }, [adminSession, activeSection, facilityFilter, payoutFilter])
 
   if (!adminSession || !admin || admin.role !== 'admin') {
     return (
@@ -329,6 +456,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
           { id: 'doctors', label: 'Doctors' },
           { id: 'broadcasts', label: 'Broadcasts' },
           { id: 'facilities', label: 'Facilities' },
+          { id: 'payouts', label: 'Payouts' },
           { id: 'community', label: 'Doctor Community' },
           { id: 'audit', label: 'Audit Logs' },
         ].map((tab) => (
@@ -449,6 +577,73 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                   <span>Agora configured</span>
                   <span className="font-semibold">{config?.configured?.agora ? 'Yes' : 'No'}</span>
                 </div>
+                <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
+                  <span>Platform activity</span>
+                  <span className={`font-semibold ${platformPaused ? 'text-red-700' : 'text-emerald-700'}`}>
+                    {platformPaused ? 'Paused' : 'Live'}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 p-4">
+                <label className="flex items-center gap-3 text-sm font-bold text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={platformPaused}
+                    onChange={(event) => setPlatformPaused(event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-brand-700 focus:ring-brand-500"
+                  />
+                  Pause app activity for upgrade/review
+                </label>
+                <textarea
+                  value={platformPauseMessage}
+                  onChange={(event) => setPlatformPauseMessage(event.target.value)}
+                  className="mt-3 min-h-[88px] w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-amber-500"
+                  placeholder="Message shown when users try to login or register"
+                />
+                <button
+                  type="button"
+                  onClick={savePlatformPause}
+                  disabled={loading}
+                  className="mt-3 w-full rounded-2xl bg-amber-600 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  Save platform status
+                </button>
+              </div>
+              <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">SMTP email test</p>
+                    <p className="mt-1 text-xs text-slate-500">Sends a test email to the platform admin address and returns the provider response.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={testSmtp}
+                    disabled={loading}
+                    className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    Test
+                  </button>
+                </div>
+                {smtpTestResult && (
+                  <div className="mt-3 rounded-2xl bg-white p-3 text-xs text-slate-700 ring-1 ring-slate-200">
+                    {smtpTestResult.error ? (
+                      <p className="font-semibold text-red-700">{smtpTestResult.error}</p>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-slate-900">{smtpTestResult.email?.sent ? 'Sent' : 'Not sent'}</p>
+                        <p className="mt-1 break-words">{smtpTestResult.email?.response || smtpTestResult.email?.reason || 'No provider response'}</p>
+                        <p className="mt-1 text-slate-500">Host: {smtpTestResult.smtp?.host}:{smtpTestResult.smtp?.port}</p>
+                        {Array.isArray(smtpTestResult.email?.warnings) && smtpTestResult.email.warnings.length > 0 && (
+                          <div className="mt-2 rounded-xl bg-amber-50 p-2 text-amber-800">
+                            {smtpTestResult.email.warnings.map((warning) => (
+                              <p key={warning}>{warning}</p>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -658,6 +853,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                         <th className="px-4 py-3">Type</th>
                         <th className="px-4 py-3">Wallet</th>
                         <th className="px-4 py-3">PIN</th>
+                        <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3">Action</th>
                       </tr>
                     </thead>
@@ -669,6 +865,15 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                           <td className="px-4 py-3 font-semibold text-slate-900">₦{f.wallet_balance_ngn ?? 0}</td>
                           <td className="px-4 py-3 font-mono text-xs text-slate-700">{f.pin || '—'}</td>
                           <td className="px-4 py-3">
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${f.is_active === false ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              {f.is_active === false ? 'Paused' : 'Active'}
+                            </span>
+                            {f.is_active === false && f.suspension_reason && (
+                              <p className="mt-2 max-w-[220px] text-xs font-semibold text-red-700">{f.suspension_reason}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
                               onClick={() => editFacility(f)}
@@ -676,6 +881,14 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                             >
                               Edit
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => updateFacilityStatus(f, f.is_active === false)}
+                              className={`rounded-full px-3 py-2 text-xs font-semibold text-white ${f.is_active === false ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}
+                            >
+                              {f.is_active === false ? 'Resume' : 'Pause'}
+                            </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -725,6 +938,135 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
               </form>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeSection === 'payouts' && (
+        <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Doctor payout queue</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                Review withdrawal requests, mark payouts as processing or paid, and reject failed requests with automatic token refund.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={payoutFilter}
+                onChange={(event) => setPayoutFilter(event.target.value)}
+                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 outline-none"
+              >
+                <option value="pending">Pending</option>
+                <option value="processing">Processing</option>
+                <option value="paid">Paid</option>
+                <option value="completed">Completed</option>
+                <option value="rejected">Rejected</option>
+                <option value="failed">Failed</option>
+                <option value="all">All</option>
+              </select>
+              <button
+                type="button"
+                onClick={loadPayouts}
+                className="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {payouts.length === 0 ? (
+            <div className="mt-6 rounded-2xl bg-slate-50 p-6 text-sm text-slate-600">No payout requests in this view.</div>
+          ) : (
+            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="px-4 py-3">Doctor</th>
+                    <th className="px-4 py-3">Amount</th>
+                    <th className="px-4 py-3">Destination</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {payouts.map((payout) => {
+                    const doctor = payout.doctor || {}
+                    const destination = payout.destination || {}
+                    const method = payout.payout_method || doctor.payout_method || 'bank_account'
+                    return (
+                      <tr key={payout.id} className="bg-white align-top">
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900">{doctor.name || payout.doctor_id || 'Unknown doctor'}</p>
+                          <p className="mt-1 text-xs text-slate-500">{doctor.email || 'No email'} {doctor.specialty ? `- ${doctor.specialty}` : ''}</p>
+                          <p className="mt-2 break-all font-mono text-[11px] text-slate-500">{payout.reference || payout.id}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-slate-900">{Number(payout.amount_tokens || 0).toLocaleString()} tokens</p>
+                          <p className="mt-1 text-xs text-slate-500">${Number(payout.amount_usd || 0).toFixed(2)}</p>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-700">
+                          <p className="font-semibold text-slate-900">{String(method).replace(/_/g, ' ')}</p>
+                          {method === 'mobile_money' ? (
+                            <>
+                              <p>{destination.mobile_money_operator || doctor.mobile_money_operator || 'No operator'}</p>
+                              <p>{destination.mobile_money_number || doctor.mobile_money_number || 'No number'}</p>
+                            </>
+                          ) : (
+                            <>
+                              <p>Bank: {destination.bank_code || doctor.bank_code || 'Missing'}</p>
+                              <p>Account: {destination.bank_account || doctor.bank_account || 'Missing'}</p>
+                            </>
+                          )}
+                          <p className="mt-1">Currency: {payout.currency || doctor.currency || 'USD'}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            ['paid', 'completed'].includes(String(payout.status || '').toLowerCase())
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : ['rejected', 'failed'].includes(String(payout.status || '').toLowerCase())
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {payout.status || 'pending'}
+                          </span>
+                          {payout.admin_note && <p className="mt-2 max-w-[220px] text-xs text-slate-600">{payout.admin_note}</p>}
+                          {payout.provider_reference && <p className="mt-2 break-all text-[11px] font-semibold text-slate-500">{payout.provider_reference}</p>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => updatePayoutStatus(payout, 'processing')}
+                              disabled={loading || ['paid', 'completed', 'rejected', 'failed'].includes(String(payout.status || '').toLowerCase())}
+                              className="rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+                            >
+                              Processing
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updatePayoutStatus(payout, 'paid')}
+                              disabled={loading || ['paid', 'completed', 'rejected', 'failed'].includes(String(payout.status || '').toLowerCase())}
+                              className="rounded-full bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                            >
+                              Mark paid
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updatePayoutStatus(payout, 'rejected')}
+                              disabled={loading || ['paid', 'completed', 'rejected', 'failed'].includes(String(payout.status || '').toLowerCase())}
+                              className="rounded-full bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-40"
+                            >
+                              Reject/refund
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

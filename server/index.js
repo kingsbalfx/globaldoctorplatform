@@ -18,6 +18,9 @@ app.use(express.urlencoded({ extended: true, limit: '8mb' }))
 
 const AGORA_APP_ID = process.env.AGORA_APP_ID
 const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE
+const VIDEO_TURN_URLS = String(process.env.VIDEO_TURN_URLS || process.env.TURN_URLS || '').split(',').map((item) => item.trim()).filter(Boolean)
+const VIDEO_TURN_USERNAME = String(process.env.VIDEO_TURN_USERNAME || process.env.TURN_USERNAME || '').trim()
+const VIDEO_TURN_CREDENTIAL = String(process.env.VIDEO_TURN_CREDENTIAL || process.env.TURN_CREDENTIAL || process.env.TURN_PASSWORD || '').trim()
 
 // ---------- Supabase server‑side client ----------
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -88,6 +91,20 @@ function getVideoSignalRoom(roomId) {
   const key = String(roomId || '').trim()
   if (!videoSignalRooms.has(key)) videoSignalRooms.set(key, [])
   return videoSignalRooms.get(key)
+}
+
+function buildVideoIceServers() {
+  const iceServers = [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  ]
+  if (VIDEO_TURN_URLS.length > 0 && VIDEO_TURN_USERNAME && VIDEO_TURN_CREDENTIAL) {
+    iceServers.push({
+      urls: VIDEO_TURN_URLS,
+      username: VIDEO_TURN_USERNAME,
+      credential: VIDEO_TURN_CREDENTIAL,
+    })
+  }
+  return iceServers
 }
 
 function withTimeout(promise, ms, fallbackValue) {
@@ -477,6 +494,8 @@ function sanitizeDoctorForResponse(doctor) {
   const earningsTokens = Number(doctor.earningsTokens ?? doctor.earnings_tokens ?? doctors?.earnings_tokens ?? 0) || 0
   const gender = doctor.gender || doctor.sex || doctors?.gender || ''
   const profilePhotoUrl = doctor.profilePhotoUrl || doctor.profile_photo_url || doctors?.profile_photo_url || doctor.passportDataUrl || doctor.passport_data_url || doctors?.passport_data_url || ''
+  const accountStatus = doctor.accountStatus || doctor.account_status || doctors?.account_status || 'active'
+  const suspensionReason = doctor.suspensionReason || doctor.suspension_reason || doctors?.suspension_reason || ''
   return {
     ...rest,
     earningsTokens,
@@ -493,6 +512,10 @@ function sanitizeDoctorForResponse(doctor) {
     currency: doctor.currency ?? doctors?.currency ?? '',
     isOnline,
     is_online: isOnline,
+    accountStatus,
+    account_status: accountStatus,
+    suspensionReason,
+    suspension_reason: suspensionReason,
     verified: Boolean(doctor.verified || doctors?.verified),
     license_verified: Boolean(doctor.license_verified || doctors?.license_verified),
     approval_status: (doctor.verified || doctors?.verified) ? 'approved' : 'pending_review',
@@ -581,7 +604,11 @@ function getSmtpSettings() {
     : port === 465
   const from = process.env.SMTP_FROM || process.env.EMAIL_FROM || user
   const fromName = process.env.SMTP_FROM_NAME || 'GlobalDoc Connect'
-  return { user, pass, host, port, secure, from, fromName }
+  const warnings = []
+  if (isGmailSmtp && pass && pass.length !== 16) {
+    warnings.push('Gmail app passwords are normally 16 characters after spaces are removed. Generate a fresh Gmail App Password if login fails.')
+  }
+  return { user, pass, host, port, secure, from, fromName, warnings }
 }
 
 function describeSmtpError(error) {
@@ -610,6 +637,7 @@ async function sendSmtpEmail({ to, subject, text, html }) {
       host: settings.host,
       port: settings.port,
       secure: settings.secure,
+      warnings: settings.warnings,
     }
   }
 
@@ -637,7 +665,7 @@ async function sendSmtpEmail({ to, subject, text, html }) {
     if (rejected.length > 0) {
       return { sent: false, reason: `SMTP rejected: ${rejected.join(', ')}`, messageId: info.messageId || null, accepted: info.accepted || [] }
     }
-    return { sent: true, messageId: info.messageId || null, accepted: info.accepted || [], response: info.response || null }
+    return { sent: true, messageId: info.messageId || null, accepted: info.accepted || [], response: info.response || null, warnings: settings.warnings }
   } catch (error) {
     return {
       sent: false,
@@ -646,6 +674,7 @@ async function sendSmtpEmail({ to, subject, text, html }) {
       port: settings.port,
       secure: settings.secure,
       configured: true,
+      warnings: settings.warnings,
     }
   }
 }
@@ -691,7 +720,29 @@ async function getServerSettings() {
     tokenPerUSDRepeatPurchase: Number(settings.tokenPerUSDRepeatPurchase) || 7.5,
     tokenToUSD: Number(settings.tokenToUSD) || 10,
     doctorMinimumWithdrawalUSD: Number(settings.doctorMinimumWithdrawalUSD) || 5,
+    platformPaused: String(settings.platformPaused || 'false').toLowerCase() === 'true',
+    platformPauseMessage: settings.platformPauseMessage || 'We are sorry, GlobalDoc is currently under review or update. Please try again shortly.',
   }
+}
+
+async function getPlatformPauseStatus() {
+  const settings = await getServerSettings()
+  return {
+    paused: Boolean(settings.platformPaused),
+    message: settings.platformPauseMessage,
+  }
+}
+
+async function blockIfPlatformPaused(req, res) {
+  if (await isPlatformAdminRequest(req)) return false
+  const status = await getPlatformPauseStatus()
+  if (!status.paused) return false
+  res.status(503).json({
+    error: status.message,
+    platformPaused: true,
+    message: status.message,
+  })
+  return true
 }
 
 async function getPatientTokenBalance(patientId) {
@@ -699,19 +750,21 @@ async function getPatientTokenBalance(patientId) {
   return data?.balance || 0
 }
 
-async function deductPatientTokens(patientId, amount) {
+async function deductPatientTokens(patientId, amount, description = '') {
+  const tokens = Math.max(0, Math.round(Number(amount) || 0))
   const current = await getPatientTokenBalance(patientId)
-  if (current < amount) return false
-  const newBalance = current - amount
+  if (current < tokens) return false
+  const newBalance = current - tokens
   await supabase
     .from('patient_tokens')
     .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
+  await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
   await supabase.from('token_transactions').insert({
     id: generateId('txn'),
     patient_id: patientId,
     transaction_type: 'use',
-    amount: -amount,
-    description: `Deducted ${amount} tokens`,
+    amount: -tokens,
+    description: description || `Deducted ${tokens} tokens`,
     created_at: new Date().toISOString()
   })
   return true
@@ -754,6 +807,24 @@ async function convertNgnToDoctorTokens(amountNgn) {
   const settings = await getServerSettings()
   const tokens = (amount / KORA_USD_EXCHANGE_RATE) * settings.tokenToUSD
   return Math.max(1, Math.round(tokens))
+}
+
+async function convertNgnToPatientTokens(amountNgn) {
+  const amount = Math.max(0, Number(amountNgn) || 0)
+  if (amount <= 0) return 0
+  const settings = await getServerSettings()
+  const tokens = (amount / KORA_USD_EXCHANGE_RATE) * settings.tokenToUSD
+  return Math.max(1, Math.ceil(tokens))
+}
+
+async function chargePatientTokensForNgn({ patientId, amountNgn, description }) {
+  const tokens = await convertNgnToPatientTokens(amountNgn)
+  if (tokens <= 0) return { ok: true, tokens: 0, balance: await getPatientTokenBalance(patientId) }
+  const balance = await getPatientTokenBalance(patientId)
+  if (balance < tokens) return { ok: false, tokens, balance }
+  const ok = await deductPatientTokens(patientId, tokens, description)
+  if (!ok) return { ok: false, tokens, balance }
+  return { ok: true, tokens, balance: balance - tokens }
 }
 
 async function reconcileDoctorEarnings(doctorId) {
@@ -805,6 +876,8 @@ async function reconcileDoctorEarnings(doctorId) {
 
   const { data: payouts } = await supabase.from('payouts').select('*').eq('doctor_id', String(doctorId))
   const paidOutTokens = (payouts || []).reduce((sum, payout) => {
+    const status = String(payout.status || 'pending').toLowerCase()
+    if (['rejected', 'failed', 'cancelled', 'canceled'].includes(status)) return sum
     return sum + (Number(payout.amount_tokens ?? payout.tokens) || 0)
   }, 0)
 
@@ -858,6 +931,134 @@ function calculateFacilitySpecialtySplit({ channel, doctor, durationMin }) {
     platform_ngn: platformShare,
     data_fee_ngn: dataFee,
   }
+}
+
+function normalizeSplitForAvailableFacility(split, facilityId) {
+  if (facilityId || !split?.facility_ngn) return split
+  return {
+    ...split,
+    platform_ngn: (Number(split.platform_ngn) || 0) + (Number(split.facility_ngn) || 0),
+    facility_ngn: 0,
+  }
+}
+
+async function recordConsultationFinancials({
+  consultationId,
+  patientId,
+  doctorId,
+  facilityId,
+  split,
+  source,
+  chargePatient = true,
+  debitFacilityTopup = false,
+}) {
+  const normalizedSplit = normalizeSplitForAvailableFacility(split, facilityId)
+  const { data: existingSplit } = await supabase
+    .from('revenue_splits_ng')
+    .select('*')
+    .eq('consultation_id', consultationId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (existingSplit) return { ok: true, split: existingSplit, tokensCharged: 0, existing: true }
+
+  if (debitFacilityTopup && facilityId && normalizedSplit.facility_topup_ngn > 0) {
+    const wallet = await getOrCreateFacilityWallet(facilityId)
+    if ((Number(wallet?.balance_ngn) || 0) < normalizedSplit.facility_topup_ngn) {
+      return {
+        ok: false,
+        error: 'PHC wallet insufficient balance for topup',
+        balance_ngn: Number(wallet?.balance_ngn) || 0,
+        required_ngn: normalizedSplit.facility_topup_ngn,
+      }
+    }
+  }
+
+  let tokensCharged = 0
+  const patientChargeNgn = Number(normalizedSplit.patient_copay_ngn || normalizedSplit.total_ngn || 0)
+  let requiredPatientTokens = 0
+  if (chargePatient && patientId && patientChargeNgn > 0) {
+    requiredPatientTokens = await convertNgnToPatientTokens(patientChargeNgn)
+    const balance = await getPatientTokenBalance(patientId)
+    if (balance < requiredPatientTokens) {
+      return {
+        ok: false,
+        error: `Insufficient tokens. Required ${requiredPatientTokens} tokens for this referral/consultation.`,
+        requiredTokens: requiredPatientTokens,
+        balanceTokens: balance,
+      }
+    }
+    const charge = await chargePatientTokensForNgn({
+      patientId,
+      amountNgn: patientChargeNgn,
+      description: `${source || 'Consultation'} charge: ${patientChargeNgn} NGN equivalent`,
+    })
+    if (!charge.ok) {
+      return {
+        ok: false,
+        error: `Insufficient tokens. Required ${charge.tokens} tokens for this referral/consultation.`,
+        requiredTokens: charge.tokens,
+        balanceTokens: charge.balance,
+      }
+    }
+    tokensCharged = charge.tokens
+  }
+
+  if (debitFacilityTopup && facilityId && normalizedSplit.facility_topup_ngn > 0) {
+    const debitResult = await debitFacilityWallet(facilityId, normalizedSplit.facility_topup_ngn, {
+      reason: 'PHC consult topup funding',
+      ref_type: 'consultation',
+      ref_id: consultationId,
+    })
+    if (!debitResult.ok) {
+      if (tokensCharged > 0 && patientId) await creditPatientTokens(patientId, tokensCharged, 'Automatic refund: facility top-up could not be completed')
+      return {
+        ok: false,
+        error: 'PHC wallet insufficient balance for topup',
+        balance_ngn: debitResult.balance_ngn,
+        required_ngn: debitResult.required_ngn,
+      }
+    }
+  }
+
+  if (facilityId && normalizedSplit.facility_ngn > 0) {
+    await creditFacilityWallet(facilityId, normalizedSplit.facility_ngn, {
+      reason: source === 'specialty_referral' ? 'Facility share from specialty referral consultation' : 'Facility share from consultation',
+      ref_type: 'consultation',
+      ref_id: consultationId,
+    })
+  }
+
+  if (doctorId && normalizedSplit.doctor_ngn > 0) {
+    await updateDoctorEarnings(doctorId, await convertNgnToDoctorTokens(normalizedSplit.doctor_ngn))
+  }
+
+  await updatePlatformBalance(normalizedSplit.platform_ngn || 0, normalizedSplit.data_fee_ngn || 0)
+
+  const revenueSplit = {
+    id: generateId('rsng'),
+    consultation_id: consultationId,
+    channel: normalizedSplit.channel,
+    track: normalizedSplit.track,
+    total_ngn: normalizedSplit.total_ngn,
+    doctor_ngn: normalizedSplit.doctor_ngn,
+    platform_ngn: normalizedSplit.platform_ngn,
+    facility_ngn: normalizedSplit.facility_ngn || 0,
+    data_fee_ngn: normalizedSplit.data_fee_ngn || 0,
+    patient_copay_ngn: normalizedSplit.patient_copay_ngn || 0,
+    facility_topup_ngn: normalizedSplit.facility_topup_ngn || 0,
+    created_at: new Date().toISOString(),
+  }
+  await insertAdaptive('revenue_splits_ng', revenueSplit)
+  await updateAdaptive('consultations_ng', {
+    total_ngn: normalizedSplit.total_ngn,
+    blocks: normalizedSplit.blocks,
+    duration_min: normalizedSplit.durationMin,
+    patient_tokens_charged: tokensCharged,
+  }, (query) => query.eq('id', consultationId), { select: null, maybeSingle: false })
+
+  return { ok: true, split: revenueSplit, tokensCharged, existing: false }
 }
 
 async function recordTokenRevenueSplit(payment, metadata = {}) {
@@ -991,15 +1192,25 @@ app.get('/api/debug', async (req, res) => {
 })
 
 // ---------- CONFIG ----------
-app.get('/api/config', (req, res) => {
+app.get('/api/config', async (req, res) => {
+  const platform = await getPlatformPauseStatus()
   res.json({
     status: 'ok',
     origin: getApiOrigin(req),
+    platform,
     configured: {
       kora: Boolean(KORA_SECRET_KEY),
       agora: Boolean(AGORA_APP_ID && AGORA_APP_CERTIFICATE),
+      turn: VIDEO_TURN_URLS.length > 0 && Boolean(VIDEO_TURN_USERNAME && VIDEO_TURN_CREDENTIAL),
       adminEnv: Boolean(process.env.ADMIN_EMAIL || process.env.ADMIN_PASSWORD),
     },
+  })
+})
+
+app.get('/api/video/ice-servers', (_req, res) => {
+  res.json({
+    iceServers: buildVideoIceServers(),
+    turnConfigured: VIDEO_TURN_URLS.length > 0 && Boolean(VIDEO_TURN_USERNAME && VIDEO_TURN_CREDENTIAL),
   })
 })
 
@@ -1022,6 +1233,8 @@ app.post('/api/doctors/login', async (req, res) => {
       }
     }
 
+    if (await blockIfPlatformPaused(req, res)) return
+
     // Doctor check
     const { data: doctor, error: docError } = await supabase.from('doctors_auth').select('*').eq('email', email).maybeSingle()
     if (docError) return res.status(500).json({ error: 'Database error (doctors_auth): ' + docError.message })
@@ -1037,6 +1250,14 @@ app.post('/api/doctors/login', async (req, res) => {
     }
 
     const { data: profile } = await supabase.from('doctors').select('*').eq('id', String(doctor.id)).maybeSingle()
+    const accountStatus = profile?.account_status || doctor.account_status || 'active'
+    if (accountStatus === 'paused' || accountStatus === 'stopped') {
+      return res.status(403).json({
+        error: profile?.suspension_reason || doctor.suspension_reason || 'Your doctor account is paused by platform admin. Please answer the query or update your profile before access is restored.',
+        doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: String(doctor.id), is_online: false }),
+        accountPaused: true,
+      })
+    }
     await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true }).eq('id', String(doctor.id))
     res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: String(doctor.id), verified: true, license_verified: true, is_online: true }), message: 'Login successful' })
   } catch (e) {
@@ -1046,6 +1267,7 @@ app.post('/api/doctors/login', async (req, res) => {
 
 // ---------- DOCTOR REGISTRATION ----------
 app.post('/api/doctors/register', async (req, res) => {
+  if (await blockIfPlatformPaused(req, res)) return
   const payload = normalizeDoctorPayload(req.body)
   if (!payload.email || !payload.name || !payload.specialty || !payload.location || !payload.licenseNumber || !payload.signatureDataUrl || !payload.passportDataUrl) {
     return res.status(400).json({ error: 'Email, name, specialty, country, license number, signature, and passport photo are required' })
@@ -1065,6 +1287,8 @@ app.post('/api/doctors/register', async (req, res) => {
     passport_data_url: payload.passportDataUrl || null,
     gender: payload.gender || null,
     profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
+    account_status: 'active',
+    suspension_reason: null,
     verified: false, created_at: new Date().toISOString()
   }
   const { data: authRow, error: authInsertError } = await insertOneReturningAdaptive('doctors_auth', newDoctor)
@@ -1091,6 +1315,8 @@ app.post('/api/doctors/register', async (req, res) => {
     passport_data_url: payload.passportDataUrl || null,
     gender: payload.gender || null,
     profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
+    account_status: 'active',
+    suspension_reason: null,
     created_at: new Date().toISOString()
   }
   const { error: profileInsertError } = await insertAdaptive('doctors', profile)
@@ -1105,6 +1331,7 @@ app.post('/api/doctors/register', async (req, res) => {
 
 // ---------- OAUTH BRIDGE ----------
 app.post('/api/auth/oauth/bridge', async (req, res) => {
+  if (await blockIfPlatformPaused(req, res)) return
   const {
     email,
     name,
@@ -1204,6 +1431,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         })
       }
       const newDoc = { ...doctorProfile, verified: false, created_at: new Date().toISOString() }
+      newDoc.account_status = 'active'
+      newDoc.suspension_reason = null
       const { data: insertedDoctor, error: insertDocErr } = await insertOneReturningAdaptive('doctors_auth', newDoc)
       if (insertDocErr) return res.status(500).json({ error: 'Failed to create doctor auth: ' + insertDocErr.message })
       const profileId = String(insertedDoctor.id)
@@ -1227,6 +1456,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         passport_data_url: insertedDoctor.passport_data_url || null,
         gender: doctorProfile.gender || null,
         profile_photo_url: doctorProfile.profile_photo_url || insertedDoctor.passport_data_url || null,
+        account_status: 'active',
+        suspension_reason: null,
         created_at: new Date().toISOString()
       })
       if (insertProfErr) return res.status(500).json({ error: 'Failed to create doctor profile: ' + insertProfErr.message })
@@ -1239,6 +1470,15 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
     } else {
       const profileId = String(doctor.id)
       const { data: profile } = await supabase.from('doctors').select('*').eq('id', profileId).maybeSingle()
+      const accountStatus = profile?.account_status || doctor.account_status || 'active'
+      if (accountStatus === 'paused' || accountStatus === 'stopped') {
+        return res.status(403).json({
+          doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: profileId, is_online: false }),
+          accountPaused: true,
+          message: profile?.suspension_reason || doctor.suspension_reason || 'Your doctor account is paused by platform admin. Please answer the query or update your profile before access is restored.',
+          error: profile?.suspension_reason || doctor.suspension_reason || 'Your doctor account is paused by platform admin.',
+        })
+      }
       if (!hasDoctorProfileDetails) {
         if (!doctor.verified) {
           return res.status(403).json({
@@ -1292,6 +1532,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           passport_data_url: doctorProfile.passport_data_url,
           gender: doctorProfile.gender || null,
           profile_photo_url: doctorProfile.profile_photo_url || doctorProfile.passport_data_url || null,
+          account_status: 'active',
+          suspension_reason: null,
           created_at: new Date().toISOString(),
         })
       }
@@ -1312,6 +1554,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
 
 // ---------- PATIENT AUTH (email) – lowercased ----------
 app.post('/api/patients/register', async (req, res) => {
+  if (await blockIfPlatformPaused(req, res)) return
   const email = String(req.body.email || '').trim().toLowerCase()
   const password = String(req.body.password || '')
   const name = String(req.body.name || '')
@@ -1398,6 +1641,7 @@ app.post('/api/patients/register', async (req, res) => {
 })
 
 app.post('/api/patients/login', async (req, res) => {
+  if (await blockIfPlatformPaused(req, res)) return
   const emailOrPatientId = String(req.body.email || req.body.patientId || '').trim()
   const email = emailOrPatientId.toLowerCase()
   const password = String(req.body.password || '')
@@ -1434,6 +1678,7 @@ app.post('/api/patients/login', async (req, res) => {
 
 // ---------- FACILITY PATIENT AUTH ----------
 app.post('/api/patients/facility/register', async (req, res) => {
+  if (await blockIfPlatformPaused(req, res)) return
   const facilityId = String(req.body?.facilityId || '').trim()
   const facilityPin = String(req.body?.facilityPin || req.body?.pin || '').trim()
   const fullName = String(req.body?.name || '').trim()
@@ -1486,6 +1731,7 @@ app.post('/api/patients/facility/register', async (req, res) => {
 })
 
 app.post('/api/patients/facility/login', async (req, res) => {
+  if (await blockIfPlatformPaused(req, res)) return
   const patientId = String(req.body?.patientId || '').trim()
   const fullName = String(req.body?.name || req.body?.fullName || '').trim()
   const patientPin = String(req.body?.pin || '').trim()
@@ -1800,11 +2046,29 @@ app.patch('/api/doctors/:doctorId/payout-details', async (req, res) => {
   res.json({ message: 'Payout details updated' })
 })
 
+function validateDoctorPayoutDetails(doctor = {}) {
+  const method = doctor.payout_method || doctor.payoutMethod || 'bank_account'
+  const currency = String(doctor.currency || '').trim()
+  if (method === 'mobile_money') {
+    if (!doctor.mobile_money_operator || !doctor.mobile_money_number) {
+      return 'Add your mobile money operator and mobile money number before requesting withdrawal.'
+    }
+    return null
+  }
+  if (!doctor.bank_code || !doctor.bank_account) {
+    return 'Add your bank code and bank account number before requesting withdrawal.'
+  }
+  if (!currency) return 'Select your payout currency before requesting withdrawal.'
+  return null
+}
+
 app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   const { doctorId } = req.params
   const { tokens: requestedTokens } = req.body
   const ledger = await reconcileDoctorEarnings(doctorId)
   if (!ledger?.doctor) return res.status(404).json({ error: 'Doctor not found' })
+  const payoutValidation = validateDoctorPayoutDetails(ledger.doctor)
+  if (payoutValidation) return res.status(400).json({ error: payoutValidation })
 
   const available = Number(ledger.earningsTokens) || 0
   const settings = await getServerSettings()
@@ -1815,8 +2079,6 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   if (tokensToWithdraw > available) return res.status(400).json({ error: 'Requested tokens exceed available balance' })
   if (tokensToWithdraw < minTokens) return res.status(400).json({ error: `Minimum withdrawal is ${minTokens} tokens ($${settings.doctorMinimumWithdrawalUSD})` })
 
-  await updateDoctorEarnings(String(doctorId), -tokensToWithdraw)
-
   const reference = `kora-wd-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   const payoutInsert = await insertAdaptive('payouts', {
     id: reference,
@@ -1825,9 +2087,19 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
     amount_usd: tokensToWithdraw / settings.tokenToUSD,
     status: 'pending',
     reference,
+    payout_method: ledger.doctor.payout_method || 'bank_account',
+    currency: ledger.doctor.currency || 'USD',
+    destination: {
+      bank_code: ledger.doctor.bank_code || null,
+      bank_account: ledger.doctor.bank_account || null,
+      mobile_money_operator: ledger.doctor.mobile_money_operator || null,
+      mobile_money_number: ledger.doctor.mobile_money_number || null,
+    },
     created_at: new Date().toISOString()
   })
   if (payoutInsert.error) return res.status(500).json({ error: payoutInsert.error.message })
+
+  await updateDoctorEarnings(String(doctorId), -tokensToWithdraw)
 
   res.json({
     message: KORA_SECRET_KEY
@@ -1836,6 +2108,7 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
     reference,
     tokensDebited: tokensToWithdraw,
     remainingTokens: available - tokensToWithdraw,
+    amountUsd: tokensToWithdraw / settings.tokenToUSD,
     amountUSD: tokensToWithdraw / settings.tokenToUSD,
   })
 })
@@ -1869,9 +2142,97 @@ app.get('/api/doctors/:doctorId/financials', async (req, res) => {
     consultationCount: ledger.consultations?.length || 0,
     completedConsultationCount: (ledger.consultations || []).filter((item) => item.status === 'completed').length,
     doctorNgn: ledger.doctorNgn,
+    settings: {
+      tokenToUSD: settings.tokenToUSD,
+      doctorMinimumWithdrawalUSD: settings.doctorMinimumWithdrawalUSD,
+      minimumWithdrawalTokens: settings.doctorMinimumWithdrawalUSD * settings.tokenToUSD,
+    },
     consultations: ledger.consultations || [],
     revenueSplits: ledger.revenueSplits || [],
     payouts: payouts || [],
+  })
+})
+
+app.get('/api/admin/payouts', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+  const status = String(req.query.status || '').trim().toLowerCase()
+  let query = supabase.from('payouts').select('*').order('created_at', { ascending: false }).limit(300)
+  if (status && status !== 'all') query = query.eq('status', status)
+  const { data: payouts, error } = await query
+  if (error) return res.status(500).json({ error: error.message })
+
+  const doctorIds = [...new Set((payouts || []).map((item) => item.doctor_id).filter(Boolean).map(String))]
+  let doctorsById = new Map()
+  if (doctorIds.length > 0) {
+    const { data: doctors } = await supabase
+      .from('doctors')
+      .select('id,email,name,specialty,payout_method,currency,bank_code,bank_account,mobile_money_operator,mobile_money_number')
+      .in('id', doctorIds)
+    doctorsById = new Map((doctors || []).map((doctor) => [String(doctor.id), sanitizeDoctorForResponse(doctor)]))
+  }
+
+  res.json({
+    payouts: (payouts || []).map((payout) => ({
+      ...payout,
+      doctor: doctorsById.get(String(payout.doctor_id)) || null,
+    })),
+  })
+})
+
+app.patch('/api/admin/payouts/:payoutId/status', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+  const allowedStatuses = new Set(['pending', 'processing', 'paid', 'completed', 'rejected', 'failed'])
+  const status = String(req.body?.status || '').trim().toLowerCase()
+  if (!allowedStatuses.has(status)) return res.status(400).json({ error: 'Invalid payout status' })
+
+  const { data: payout, error: fetchError } = await supabase
+    .from('payouts')
+    .select('*')
+    .eq('id', req.params.payoutId)
+    .maybeSingle()
+  if (fetchError) return res.status(500).json({ error: fetchError.message })
+  if (!payout) return res.status(404).json({ error: 'Payout request not found' })
+
+  const previousStatus = String(payout.status || 'pending').toLowerCase()
+  const shouldRefund = ['rejected', 'failed'].includes(status) && ['pending', 'processing'].includes(previousStatus)
+  if (shouldRefund && payout.doctor_id) {
+    await updateDoctorEarnings(String(payout.doctor_id), Number(payout.amount_tokens || 0))
+  }
+
+  const nowIso = new Date().toISOString()
+  const updates = {
+    status,
+    provider_reference: req.body?.providerReference ? String(req.body.providerReference).trim() : payout.provider_reference || null,
+    admin_note: req.body?.note ? String(req.body.note).trim() : payout.admin_note || null,
+    paid_at: ['paid', 'completed'].includes(status) ? nowIso : payout.paid_at || null,
+    updated_at: nowIso,
+  }
+
+  const update = await updateAdaptive(
+    'payouts',
+    updates,
+    (query) => query.eq('id', req.params.payoutId),
+  )
+  if (update.error) {
+    if (shouldRefund && payout.doctor_id) {
+      await updateDoctorEarnings(String(payout.doctor_id), -Number(payout.amount_tokens || 0))
+    }
+    return res.status(500).json({ error: update.error.message })
+  }
+
+  await recordAuditLog(req, {
+    action: 'payout.status.update',
+    resourceType: 'payout',
+    resourceId: req.params.payoutId,
+    changes: { previousStatus, status, refundedTokens: shouldRefund ? Number(payout.amount_tokens || 0) : 0 },
+  })
+
+  res.json({
+    payout: update.data || { ...payout, ...updates },
+    message: shouldRefund
+      ? `Payout marked ${status}. ${Number(payout.amount_tokens || 0)} tokens returned to the doctor.`
+      : `Payout marked ${status}.`,
   })
 })
 
@@ -1882,9 +2243,29 @@ app.get('/api/settings', async (_req, res) => {
 
 app.patch('/api/admin/settings', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  const { minimumSubscriptionUSD } = req.body
-  if (typeof minimumSubscriptionUSD !== 'number' || minimumSubscriptionUSD < 1) return res.status(400).json({ error: 'Invalid value' })
-  await supabase.from('server_settings').upsert({ key: 'minimumSubscriptionUSD', value: minimumSubscriptionUSD }, { onConflict: 'key' })
+  const updates = []
+  if (req.body?.minimumSubscriptionUSD !== undefined) {
+    const minimumSubscriptionUSD = Number(req.body.minimumSubscriptionUSD)
+    if (!Number.isFinite(minimumSubscriptionUSD) || minimumSubscriptionUSD < 1) return res.status(400).json({ error: 'Invalid minimum subscription value' })
+    updates.push({ key: 'minimumSubscriptionUSD', value: String(minimumSubscriptionUSD) })
+  }
+  if (req.body?.platformPaused !== undefined) {
+    updates.push({ key: 'platformPaused', value: Boolean(req.body.platformPaused) ? 'true' : 'false' })
+  }
+  if (req.body?.platformPauseMessage !== undefined) {
+    updates.push({
+      key: 'platformPauseMessage',
+      value: String(req.body.platformPauseMessage || '').trim() || 'We are sorry, GlobalDoc is currently under review or update. Please try again shortly.',
+    })
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'No settings supplied' })
+  await supabase.from('server_settings').upsert(updates, { onConflict: 'key' })
+  await recordAuditLog(req, {
+    action: 'settings.update',
+    resourceType: 'server_settings',
+    resourceId: 'platform',
+    changes: Object.fromEntries(updates.map((item) => [item.key, item.value])),
+  })
   res.json({ settings: await getServerSettings(), message: 'Updated' })
 })
 
@@ -1923,6 +2304,10 @@ app.get('/api/online/status', async (_req, res) => {
 })
 
 app.patch('/api/doctors/:doctorId/status', async (req, res) => {
+  const { data: doctor } = await supabase.from('doctors').select('account_status, suspension_reason').eq('id', req.params.doctorId).maybeSingle()
+  if ((doctor?.account_status === 'paused' || doctor?.account_status === 'stopped') && Boolean(req.body.isOnline)) {
+    return res.status(403).json({ error: doctor.suspension_reason || 'Doctor account is paused by platform admin.' })
+  }
   await supabase.from('doctors').update({ is_online: Boolean(req.body.isOnline) }).eq('id', req.params.doctorId)
   res.json({ message: 'Status updated' })
 })
@@ -1934,14 +2319,23 @@ app.patch('/api/patients/:patientId/status', async (req, res) => {
 
 // ---------- DOCTOR LIST ----------
 app.get('/api/doctors', async (req, res) => {
-  let query = supabase.from('doctors').select('*').eq('verified', true).eq('license_verified', true)
-  if (req.query.specialty) query = query.eq('specialty', req.query.specialty)
-  if (req.query.minRating) query = query.gte('rating', Number(req.query.minRating))
-  if (req.query.online !== undefined && req.query.online !== '') {
-    query = query.eq('is_online', req.query.online === 'true')
+  const buildQuery = (withStatus = true) => {
+    let query = supabase.from('doctors').select('*').eq('verified', true).eq('license_verified', true)
+    if (withStatus) query = query.or('account_status.is.null,account_status.eq.active')
+    if (req.query.specialty) query = query.eq('specialty', req.query.specialty)
+    if (req.query.minRating) query = query.gte('rating', Number(req.query.minRating))
+    if (req.query.online !== undefined && req.query.online !== '') {
+      query = query.eq('is_online', req.query.online === 'true')
+    }
+    return query.order('rating', { ascending: false })
   }
-  query = query.order('rating', { ascending: false })
-  const { data } = await query
+  let { data, error } = await buildQuery(true)
+  if (error && isMissingColumnError(error)) {
+    const fallback = await buildQuery(false)
+    data = fallback.data || []
+    error = fallback.error
+  }
+  if (error) return res.status(500).json({ error: error.message })
   res.json({ doctors: (data || []).map(sanitizeDoctorForResponse) })
 })
 
@@ -2342,6 +2736,7 @@ app.get('/api/specialties', (_req, res) => {
       'Oncology',
       'Neurology',
       'Urology',
+      'Gynaecologist',
       'Orthopedics',
       'Obstetrics & GYN',
       'Ophthalmology',
@@ -2439,6 +2834,8 @@ app.post('/api/admin/doctors', async (req, res) => {
     gender: payload.gender || null,
     profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
     verified: true,
+    account_status: 'active',
+    suspension_reason: null,
     created_at: new Date().toISOString(),
   }
   const { data: insertedAuthRow, error: authInsertError } = await insertOneReturningAdaptive('doctors_auth', authRow)
@@ -2457,6 +2854,8 @@ app.post('/api/admin/doctors', async (req, res) => {
     gender: payload.gender || null,
     profile_photo_url: payload.profilePhotoUrl || payload.passportDataUrl || null,
     license_verified: true,
+    account_status: 'active',
+    suspension_reason: null,
     created_at: new Date().toISOString()
   }
   let { error: profileInsertError } = await insertAdaptive('doctors', doctor)
@@ -2580,6 +2979,39 @@ app.patch('/api/admin/doctors/:doctorId/verify', async (req, res) => {
     resourceId: req.params.doctorId,
   })
   res.json({ doctor, email: emailResult, message: 'Doctor approved and access granted' })
+})
+
+app.patch('/api/admin/doctors/:doctorId/account-status', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+  const status = String(req.body?.status || '').trim().toLowerCase()
+  if (!['active', 'paused', 'stopped'].includes(status)) return res.status(400).json({ error: 'status must be active, paused, or stopped' })
+  const reason = String(req.body?.reason || '').trim()
+  const updates = {
+    account_status: status,
+    suspension_reason: status === 'active' ? null : reason || 'Account paused by platform admin pending review.',
+    is_online: status === 'active' ? false : false,
+  }
+  const authUpdates = {
+    account_status: status,
+    suspension_reason: updates.suspension_reason,
+  }
+  const [{ data: profile, error: profileError }, { data: authRow, error: authError }] = await Promise.all([
+    updateAdaptive('doctors', updates, (query) => query.eq('id', String(req.params.doctorId))),
+    updateAdaptive('doctors_auth', authUpdates, (query) => query.eq('id', req.params.doctorId)),
+  ])
+  if (profileError && !isMissingColumnError(profileError)) return res.status(500).json({ error: profileError.message })
+  if (authError && !isMissingColumnError(authError)) console.warn('doctors_auth status update skipped:', authError.message)
+  if (!profile && !authRow) return res.status(404).json({ error: 'Doctor not found' })
+  await recordAuditLog(req, {
+    action: status === 'active' ? 'doctor.resume' : 'doctor.pause',
+    resourceType: 'doctor',
+    resourceId: req.params.doctorId,
+    changes: { status, reason },
+  })
+  res.json({
+    doctor: sanitizeDoctorForResponse({ ...profile, ...authRow, id: String(req.params.doctorId), account_status: status, suspension_reason: updates.suspension_reason }),
+    message: status === 'active' ? 'Doctor resumed.' : 'Doctor paused.',
+  })
 })
 
 // ---------- ADMIN: REVIEWS ----------
@@ -2730,6 +3162,11 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
   const patient = await findPatientByIdentifier(referral.patient_id)
   if (!patient) return res.status(404).json({ error: 'Patient not found' })
 
+  const split = calculateFacilitySpecialtySplit({
+    channel: 'specialty_referral',
+    doctor,
+    durationMin: Number(req.body?.durationMin || 15),
+  })
   const consultation = {
     id: generateId('cng-ref'),
     patient_id: patient.id,
@@ -2737,9 +3174,9 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
     facility_id: patient.facility_id || null,
     channel: 'specialty_referral',
     track: doctor.specialty || referral.to_specialty || 'specialty',
-    duration_min: 15,
-    blocks: 1,
-    total_ngn: 0,
+    duration_min: split.durationMin,
+    blocks: split.blocks,
+    total_ngn: split.total_ngn,
     status: 'in_progress',
     created_at: new Date().toISOString(),
   }
@@ -2749,6 +3186,21 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
     .select('*')
     .maybeSingle()
   if (consultationError) return res.status(500).json({ error: consultationError.message })
+
+  const financials = await recordConsultationFinancials({
+    consultationId: insertedConsultation?.id || consultation.id,
+    patientId: patient.id,
+    doctorId,
+    facilityId: patient.facility_id || null,
+    split,
+    source: 'specialty_referral',
+    chargePatient: true,
+    debitFacilityTopup: false,
+  })
+  if (!financials.ok) {
+    await supabase.from('consultations_ng').update({ status: 'cancelled' }).eq('id', insertedConsultation?.id || consultation.id)
+    return res.status(402).json(financials)
+  }
 
   const acceptedAt = new Date().toISOString()
   const { data: updatedReferral, error: updateError } = await supabase
@@ -2767,9 +3219,11 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
   res.json({
     referral: updatedReferral || referral,
     patient: sanitizePatientForResponse(patient),
-    consultation: insertedConsultation || consultation,
+    consultation: { ...(insertedConsultation || consultation), patient_tokens_charged: financials.tokensCharged },
+    split: financials.split,
+    tokensCharged: financials.tokensCharged,
     doctor: sanitizeDoctorForResponse(doctor),
-    message: 'Referral accepted and consultation room opened',
+    message: 'Referral accepted, patient tokens charged, and consultation room opened',
   })
 })
 
@@ -2884,6 +3338,7 @@ app.get('/api/facilities/:facilityId/patients', async (req, res) => {
 
   const facility = await getFacilityById(facilityId)
   if (!facility || facility.pin !== pin) return res.status(401).json({ error: 'Invalid facility credentials' })
+  if (facility.is_active === false) return res.status(403).json({ error: facility.suspension_reason || 'This facility is paused by platform admin pending review.' })
 
   let query = supabase
     .from('patients')
@@ -3241,9 +3696,12 @@ app.patch('/api/admin/facilities/:facilityId', async (req, res) => {
     updates.referral_payout_ngn = Math.max(0, Math.round(Number(req.body.referral_payout_ngn || 0)))
   }
   if (req.body?.is_active !== undefined) updates.is_active = Boolean(req.body.is_active)
+  if (req.body?.suspension_reason !== undefined) {
+    updates.suspension_reason = String(req.body.suspension_reason || '').trim() || null
+  }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No facility changes supplied' })
 
-  const { data, error } = await supabase.from('facilities').update(updates).eq('id', facilityId).select('*').maybeSingle()
+  const { data, error } = await updateAdaptive('facilities', updates, (query) => query.eq('id', facilityId))
   if (error) return res.status(500).json({ error: error.message })
   if (!data) return res.status(404).json({ error: 'Facility not found' })
   await recordAuditLog(req, {
@@ -3256,9 +3714,16 @@ app.patch('/api/admin/facilities/:facilityId', async (req, res) => {
 })
 
 app.post('/api/facilities/auth', async (req, res) => {
+  if (await blockIfPlatformPaused(req, res)) return
   const { facilityId, pin } = req.body
   const { data: facility } = await supabase.from('facilities').select('*').eq('id', facilityId).eq('pin', pin).maybeSingle()
   if (!facility) return res.status(401).json({ error: 'Invalid credentials' })
+  if (facility.is_active === false) {
+    return res.status(403).json({
+      error: facility.suspension_reason || 'This facility account is paused by platform admin pending review.',
+      facilityPaused: true,
+    })
+  }
   const wallet = await getOrCreateFacilityWallet(facilityId)
   const { data: tx } = await supabase.from('facility_wallet_tx').select('*').eq('facility_id', facilityId).order('created_at', { ascending: false }).limit(20)
   res.json({ facility: { ...facility, pin: undefined }, wallet, transactions: tx || [] })
@@ -3296,6 +3761,7 @@ app.post('/api/consultations/start', async (req, res) => {
     if (!facilityId || !facilityPin) return res.status(400).json({ error: 'facilityId and facilityPin required' })
     const facility = await getFacilityById(facilityId)
     if (!facility || facility.pin !== facilityPin) return res.status(401).json({ error: 'Invalid facility credentials' })
+    if (facility.is_active === false) return res.status(403).json({ error: facility.suspension_reason || 'This facility is paused by platform admin pending review.' })
     if ((channel === 'facility_private' && facility.type !== 'private_clinic') ||
         (channel === 'facility_phc' && facility.type !== 'phc')) {
       return res.status(400).json({ error: 'Facility type mismatch' })
@@ -3320,24 +3786,41 @@ app.post('/api/consultations/start', async (req, res) => {
   }
   await supabase.from('consultations_ng').insert(consultation)
 
+  let directHomeTokensCharged = 0
   if (channel === 'direct_home') {
-    const doctorTokens = await convertNgnToDoctorTokens(split.doctor_ngn)
-    if (doctorTokens > 0) await updateDoctorEarnings(doctorId, doctorTokens)
-    await updatePlatformBalance(split.platform_ngn || 0, split.data_fee_ngn || 0)
-    await insertAdaptive('revenue_splits_ng', {
-      id: generateId('rsng'),
-      consultation_id: id,
-      channel: split.channel,
-      track: split.track,
-      total_ngn: split.total_ngn,
-      doctor_ngn: split.doctor_ngn,
-      platform_ngn: split.platform_ngn,
-      facility_ngn: split.facility_ngn || 0,
-      data_fee_ngn: split.data_fee_ngn || 0,
-      patient_copay_ngn: split.patient_copay_ngn || 0,
-      facility_topup_ngn: split.facility_topup_ngn || 0,
-      created_at: new Date().toISOString()
-    })
+    const doctorPrice = doctor?.price && typeof doctor.price === 'object' ? doctor.price : {}
+    const priceKey = split.track === 'premium' ? 'premium' : 'basic'
+    directHomeTokensCharged = Math.max(1, Math.round(Number(doctorPrice[priceKey] ?? doctorPrice[split.track] ?? doctor.consultation_fee ?? doctor.fee ?? 20) || 20))
+    const charged = await deductPatientTokens(patientRecord.id, directHomeTokensCharged, `Direct ${split.track} consultation with Dr. ${doctor.name || doctorId}`)
+    if (!charged) {
+      await supabase.from('consultations_ng').update({ status: 'cancelled' }).eq('id', id)
+      return res.status(402).json({
+        ok: false,
+        error: `Insufficient tokens. Required ${directHomeTokensCharged} tokens for this consultation.`,
+        requiredTokens: directHomeTokensCharged,
+        balanceTokens: await getPatientTokenBalance(patientRecord.id),
+      })
+    }
+  }
+
+  const financials = await recordConsultationFinancials({
+    consultationId: id,
+    patientId: patientRecord.id,
+    doctorId,
+    facilityId,
+    split,
+    source: channel === 'direct_home' ? 'Direct live consultation' : 'Facility consultation',
+    chargePatient: channel !== 'direct_home',
+    debitFacilityTopup: channel === 'facility_phc',
+  })
+  if (!financials.ok) {
+    await supabase.from('consultations_ng').update({ status: 'cancelled' }).eq('id', id)
+    return res.status(402).json(financials)
+  }
+  if (directHomeTokensCharged > 0) {
+    await updateAdaptive('consultations_ng', {
+      patient_tokens_charged: directHomeTokensCharged,
+    }, (query) => query.eq('id', id), { select: null, maybeSingle: false })
   }
 
   await insertAdaptive('notifications', {
@@ -3355,7 +3838,11 @@ app.post('/api/consultations/start', async (req, res) => {
     created_at: new Date().toISOString(),
   })
 
-  res.status(201).json({ consultation, split })
+  res.status(201).json({
+    consultation: { ...consultation, patient_tokens_charged: directHomeTokensCharged || financials.tokensCharged, total_ngn: financials.split?.total_ngn ?? split.total_ngn },
+    split: financials.split || split,
+    tokensCharged: directHomeTokensCharged || financials.tokensCharged,
+  })
 })
 
 app.post('/api/consultations/end', async (req, res) => {
@@ -3395,7 +3882,7 @@ app.post('/api/consultations/end', async (req, res) => {
     .limit(1)
     .maybeSingle()
 
-  if (split.channel === 'facility_phc' && consultation.facility_id) {
+  if (!existingSplit && split.channel === 'facility_phc' && consultation.facility_id) {
     const debitResult = await debitFacilityWallet(consultation.facility_id, split.facility_topup_ngn, {
       reason: 'PHC consult topup funding',
       ref_type: 'consultation',
@@ -3410,7 +3897,7 @@ app.post('/api/consultations/end', async (req, res) => {
     }
   }
 
-  if (consultation.facility_id && split.facility_ngn > 0) {
+  if (!existingSplit && consultation.facility_id && split.facility_ngn > 0) {
     await creditFacilityWallet(consultation.facility_id, split.facility_ngn, {
       reason: 'Facility share from consultation',
       ref_type: 'consultation', ref_id: consultationId
@@ -3503,7 +3990,28 @@ app.post('/api/referrals/facility/redeem', async (req, res) => {
     return res.status(400).json({ error: 'Referral expired' })
   }
 
-  await supabase.from('facility_referrals').update({ status: 'redeemed', redeemed_at: new Date().toISOString() }).eq('id', referral.id)
+  let tokensCharged = 0
+  if (referral.payout_ngn > 0) {
+    const charge = await chargePatientTokensForNgn({
+      patientId: referral.patient_id,
+      amountNgn: referral.payout_ngn,
+      description: `Facility referral redeemed at ${facility.name || facilityId}: ${referral.payout_ngn} NGN equivalent`,
+    })
+    if (!charge.ok) {
+      return res.status(402).json({
+        error: `Insufficient patient tokens for facility referral. Required ${charge.tokens} tokens.`,
+        requiredTokens: charge.tokens,
+        balanceTokens: charge.balance,
+      })
+    }
+    tokensCharged = charge.tokens
+  }
+
+  await updateAdaptive('facility_referrals', {
+    status: 'redeemed',
+    redeemed_at: new Date().toISOString(),
+    tokens_charged: tokensCharged,
+  }, (query) => query.eq('id', referral.id), { select: null, maybeSingle: false })
 
   if (referral.payout_ngn > 0) {
     await creditFacilityWallet(facilityId, referral.payout_ngn, {
@@ -3516,7 +4024,12 @@ app.post('/api/referrals/facility/redeem', async (req, res) => {
   }
 
   const wallet = await getOrCreateFacilityWallet(facilityId)
-  res.json({ referral: { ...referral, status: 'redeemed' }, wallet_balance_ngn: wallet.balance_ngn, message: 'Referral redeemed' })
+  res.json({
+    referral: { ...referral, status: 'redeemed', tokens_charged: tokensCharged },
+    wallet_balance_ngn: wallet.balance_ngn,
+    tokensCharged,
+    message: 'Referral redeemed and patient tokens charged',
+  })
 })
 
 // ---------- LAB ORDERS & PAYMENTS ----------

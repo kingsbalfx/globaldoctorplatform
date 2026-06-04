@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 
-const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
+const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Gynaecologist', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
 
 function PatientReferralPanel({ patient, currentDoctor, onReferralSubmitted }) {
   const [reason, setReason] = useState('')

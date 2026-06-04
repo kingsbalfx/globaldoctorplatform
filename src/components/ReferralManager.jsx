@@ -13,7 +13,7 @@ function ReferralManager() {
     notes: '',
   })
 
-  const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
+  const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Gynaecologist', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
 
   const loadReferrals = async () => {
     try {

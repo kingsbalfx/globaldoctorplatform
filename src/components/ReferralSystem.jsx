@@ -199,7 +199,8 @@ const ReferralSystem = ({
       'Urology': 2,
       'Ophthalmology': 1,
       'ENT': 1,
-      'OB/GYN': 2
+      'OB/GYN': 2,
+      'Gynaecologist': 2
     };
 
     return tokenCosts[specialty] || 1;
@@ -280,6 +281,7 @@ const ReferralSystem = ({
                 <option value="Ophthalmology">Ophthalmology (1 token)</option>
                 <option value="ENT">ENT (1 token)</option>
                 <option value="OB/GYN">OB/GYN (2 tokens)</option>
+                <option value="Gynaecologist">Gynaecologist (2 tokens)</option>
               </select>
             </div>
 

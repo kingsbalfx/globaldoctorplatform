@@ -80,6 +80,15 @@ export const specialtyRegistry = {
     description: 'Women and maternal health',
     gradient: 'from-pink-600 to-rose-500',
   },
+  gynaecologist: {
+    name: 'Gynaecologist',
+    color: '#C026D3',
+    bgColor: '#FAE8FF',
+    icon: 'GYN',
+    logo: 'GYN',
+    description: 'Women reproductive and pelvic health',
+    gradient: 'from-fuchsia-600 to-pink-500',
+  },
   ophthalmology: {
     name: 'Ophthalmology',
     color: '#1D4ED8',
@@ -107,6 +116,7 @@ export const getSpecialtyInfo = (specialty) => {
     .replace(/[^a-z]/g, '')
 
   if (normalized.includes('general')) return specialtyRegistry.general
+  if (normalized.includes('gynaecologist') || normalized.includes('gynaecology')) return specialtyRegistry.gynaecologist
   if (normalized.includes('obgyn') || normalized.includes('obstetrics') || normalized.includes('gynecology')) return specialtyRegistry.obstetrics
   return specialtyRegistry[normalized] || specialtyRegistry.general
 }

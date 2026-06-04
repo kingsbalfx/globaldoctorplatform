@@ -411,6 +411,7 @@ function DoctorAuth({ onAuth }) {
                     <option value="Oncology">Oncology</option>
                     <option value="Neurology">Neurology</option>
                     <option value="Urology">Urology</option>
+                    <option value="Gynaecologist">Gynaecologist</option>
                     {/* Add more as needed */}
                   </select>
                 </div>

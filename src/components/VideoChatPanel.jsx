@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
+const DEFAULT_ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
 const CALLER_TYPES = new Set(['patient', 'facility', 'admin'])
 const RECONNECT_WINDOW_MS = 360 * 1000
 const RECONNECT_INTERVAL_MS = 3000
 const VIDEO_MAX_BITRATE = 2_500_000
+const VIDEO_MEDIUM_BITRATE = 1_350_000
+const VIDEO_LOW_BITRATE = 700_000
 const AUDIO_MAX_BITRATE = 72 * 1000
 const CLEAN_AUDIO_CONSTRAINTS = {
   echoCancellation: { ideal: true },
@@ -35,8 +37,10 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const reconnectTimerRef = useRef(null)
   const reconnectStartedAtRef = useRef(null)
   const reconnectAttemptRef = useRef(0)
+  const signalFailureCountRef = useRef(0)
   const lastSignalSeqRef = useRef(0)
   const processedSignalsRef = useRef(new Set())
+  const iceServersRef = useRef(DEFAULT_ICE_SERVERS)
   const makingOfferRef = useRef(false)
   const ignoreOfferRef = useRef(false)
   const callStartedRef = useRef(false)
@@ -53,11 +57,25 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const [remoteAudioEnhanced, setRemoteAudioEnhanced] = useState(false)
   const [recoverySeconds, setRecoverySeconds] = useState(0)
   const [joinRequests, setJoinRequests] = useState([])
+  const [networkMode, setNetworkMode] = useState('standard')
+  const [turnConfigured, setTurnConfigured] = useState(false)
 
   const roomId = String(consultationId || '').trim()
   const participantId = String(userId || doctorId || patientId || userType || '').trim()
   const shouldCreateOffer = CALLER_TYPES.has(String(userType || '').toLowerCase())
   const politePeer = !shouldCreateOffer
+
+  const mediaProfile = useMemo(() => {
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+    const type = String(conn?.effectiveType || '').toLowerCase()
+    if (conn?.saveData || type.includes('2g')) {
+      return { mode: 'data saver', width: 640, height: 360, frameRate: 18, bitrate: VIDEO_LOW_BITRATE }
+    }
+    if (type.includes('3g')) {
+      return { mode: 'balanced', width: 960, height: 540, frameRate: 24, bitrate: VIDEO_MEDIUM_BITRATE }
+    }
+    return { mode: 'HD', width: 1280, height: 720, frameRate: 30, bitrate: VIDEO_MAX_BITRATE }
+  }, [])
 
   const isClosedPeer = (peer) => {
     return !peer || peer.signalingState === 'closed' || peer.connectionState === 'closed'
@@ -116,6 +134,20 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     usernameFragment: payload?.usernameFragment,
   })
 
+  const loadIceServers = async () => {
+    try {
+      const response = await apiFetch('/api/video/ice-servers')
+      const data = await response.json().catch(() => ({}))
+      if (response.ok && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+        iceServersRef.current = data.iceServers
+        setTurnConfigured(Boolean(data.turnConfigured))
+      }
+    } catch {
+      iceServersRef.current = DEFAULT_ICE_SERVERS
+      setTurnConfigured(false)
+    }
+  }
+
   const flushPendingIce = async (peer) => {
     if (!peer?.remoteDescription) return
     const candidates = pendingIceRef.current.splice(0)
@@ -156,8 +188,8 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       parameters.encodings = parameters.encodings || [{}]
       const [encoding] = parameters.encodings
       if (track.kind === 'video') {
-        encoding.maxBitrate = VIDEO_MAX_BITRATE
-        encoding.maxFramerate = 30
+        encoding.maxBitrate = mediaProfile.bitrate
+        encoding.maxFramerate = mediaProfile.frameRate
         encoding.scaleResolutionDownBy = 1
         parameters.degradationPreference = 'maintain-framerate'
       }
@@ -242,12 +274,13 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'user' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 24, max: 30 },
+        width: { ideal: mediaProfile.width },
+        height: { ideal: mediaProfile.height },
+        frameRate: { ideal: Math.min(24, mediaProfile.frameRate), max: mediaProfile.frameRate },
       },
       audio: CLEAN_AUDIO_CONSTRAINTS,
     })
+    setNetworkMode(mediaProfile.mode)
     stream.getAudioTracks().forEach((track) => {
       track.applyConstraints?.(CLEAN_AUDIO_CONSTRAINTS).catch(() => null)
     })
@@ -341,9 +374,9 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       const nextStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'user' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 24, max: 30 },
+          width: { ideal: mediaProfile.width },
+          height: { ideal: mediaProfile.height },
+          frameRate: { ideal: Math.min(24, mediaProfile.frameRate), max: mediaProfile.frameRate },
         },
         audio: false,
       })
@@ -374,11 +407,18 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const createPeer = async () => {
     if (peerRef.current && !isClosedPeer(peerRef.current)) return peerRef.current
     resetPeerOnly()
-    const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    const peer = new RTCPeerConnection({
+      iceServers: iceServersRef.current,
+      bundlePolicy: 'max-bundle',
+      iceCandidatePoolSize: 4,
+    })
     peerRef.current = peer
 
     peer.onicecandidate = (event) => {
       if (event.candidate) void sendSignal('ice', event.candidate.toJSON?.() || event.candidate)
+    }
+    peer.onicecandidateerror = () => {
+      if (!turnConfigured) setStatus('Connection is trying STUN. Add TURN for stricter mobile networks.')
     }
     peer.onnegotiationneeded = async () => {
       if (!callStartedRef.current || !shouldCreateOffer) return
@@ -400,6 +440,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       setConnectionState(state || 'unknown')
       if (state === 'connected') {
         clearReconnectTimer()
+        signalFailureCountRef.current = 0
         setStatus('Connected')
       }
       if (state === 'failed' || state === 'disconnected') {
@@ -438,6 +479,25 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (shouldCreateOffer) {
       await announceJoin()
       await createOffer()
+    }
+  }
+
+  const reconnectNow = async () => {
+    if (!callStartedRef.current) return
+    reconnectStartedAtRef.current = reconnectStartedAtRef.current || Date.now()
+    setStatus('Reconnecting now')
+    try {
+      const peer = peerRef.current
+      peer?.restartIce?.()
+      if (!peer || peer.connectionState === 'failed' || peer.connectionState === 'closed') {
+        resetPeerOnly()
+        await createPeer()
+      }
+      await sendReconnectSignals()
+      scheduleReconnect()
+    } catch (error) {
+      addError(error.message || 'Reconnect failed. Trying again automatically.', 'warning')
+      scheduleReconnect()
     }
   }
 
@@ -565,12 +625,20 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
 
   const pollSignals = async () => {
     if (!roomId || !participantId || !callStarted) return
-    const response = await apiFetch(`/api/video-signal?roomId=${encodeURIComponent(roomId)}&senderId=${encodeURIComponent(participantId)}&since=${lastSignalSeqRef.current}`)
-    const data = await response.json().catch(() => ({}))
-    const signals = Array.isArray(data.signals) ? data.signals : []
-    for (const signal of signals) {
-      lastSignalSeqRef.current = Math.max(lastSignalSeqRef.current, Number(signal.seq || 0))
-      await handleSignal(signal)
+    try {
+      const response = await apiFetch(`/api/video-signal?roomId=${encodeURIComponent(roomId)}&senderId=${encodeURIComponent(participantId)}&since=${lastSignalSeqRef.current}`)
+      if (!response.ok) throw new Error('Video signaling is temporarily unavailable')
+      const data = await response.json().catch(() => ({}))
+      signalFailureCountRef.current = 0
+      const signals = Array.isArray(data.signals) ? data.signals : []
+      for (const signal of signals) {
+        lastSignalSeqRef.current = Math.max(lastSignalSeqRef.current, Number(signal.seq || 0))
+        await handleSignal(signal)
+      }
+    } catch (error) {
+      signalFailureCountRef.current += 1
+      if (signalFailureCountRef.current >= 2) scheduleReconnect()
+      throw error
     }
   }
 
@@ -587,6 +655,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     setConnecting(true)
     try {
       clearReconnectTimer()
+      await loadIceServers()
       await createPeer()
       callStartedRef.current = true
       setCallStarted(true)
@@ -679,6 +748,20 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   }
 
   useEffect(() => {
+    void loadIceServers()
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+    const handleNetworkChange = () => {
+      const type = String(conn?.effectiveType || '').toLowerCase()
+      if (conn?.saveData || type.includes('2g')) setNetworkMode('data saver')
+      else if (type.includes('3g')) setNetworkMode('balanced')
+      else setNetworkMode(mediaProfile.mode)
+    }
+    conn?.addEventListener?.('change', handleNetworkChange)
+    return () => conn?.removeEventListener?.('change', handleNetworkChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     if (autoStart && !callStarted && !connecting && roomId && participantId) {
       void startCall()
     }
@@ -689,7 +772,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (!callStarted) return undefined
     const interval = window.setInterval(() => {
       void pollSignals().catch(() => scheduleReconnect())
-    }, 1200)
+    }, document.hidden ? 1800 : 900)
     void pollSignals().catch(() => scheduleReconnect())
     return () => window.clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -792,6 +875,12 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
                 <button type="button" onClick={toggleRemoteAudio} className="rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-200">
                   {remoteAudioMuted ? 'Enable clear speaker' : 'Mute speaker'}
                 </button>
+                <button type="button" onClick={reconnectNow} className="rounded-full bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">
+                  Reconnect
+                </button>
+                <button type="button" onClick={refreshFrontCamera} className="rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-200">
+                  Refresh camera
+                </button>
                 <button type="button" onClick={endCall} className="rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white hover:bg-red-700">
                   End Call
                 </button>
@@ -804,6 +893,17 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
             A patient or facility is waiting in this room. Press <span className="font-bold">Accept patient in room</span> to join.
           </div>
         )}
+        <div className="mt-4 grid gap-3 text-xs font-semibold text-slate-600 sm:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+            Camera quality: <span className="text-slate-900">{networkMode}</span>
+          </div>
+          <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+            Relay support: <span className={turnConfigured ? 'text-emerald-700' : 'text-amber-700'}>{turnConfigured ? 'TURN enabled' : 'STUN only'}</span>
+          </div>
+          <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+            Speaker: <span className="text-slate-900">{remoteAudioMuted ? 'muted' : remoteAudioEnhanced ? 'enhanced' : 'browser audio'}</span>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.35fr_0.65fr]">

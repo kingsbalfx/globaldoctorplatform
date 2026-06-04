@@ -54,7 +54,6 @@ function AdminDashboard({ doctor, onLogout }) {
   const [withdrawing, setWithdrawing] = useState(false)
   const [savingPayoutDetails, setSavingPayoutDetails] = useState(false)
   const [withdrawalResult, setWithdrawalResult] = useState(null)
-  const minWithdrawTokens = 50
   const [withdrawTokenAmount, setWithdrawTokenAmount] = useState(() => {
     const value = Number(doctor?.earningsTokens ?? doctor?.earnings_tokens ?? 0)
     return value > 0 ? String(Math.floor(value)) : ''
@@ -78,6 +77,9 @@ function AdminDashboard({ doctor, onLogout }) {
   const [financials, setFinancials] = useState(null)
   const earningsTokens = Number(financials?.earningsTokens ?? doctor?.earningsTokens ?? doctor?.earnings_tokens ?? 0) || 0
   const estimatedUsd = financials?.estimatedUsd ?? (earningsTokens / 10)
+  const tokenToUsd = Number(financials?.settings?.tokenToUSD || 10)
+  const minimumWithdrawalUsd = Number(financials?.settings?.doctorMinimumWithdrawalUSD || 5)
+  const minimumWithdrawTokens = Math.max(1, Math.round(minimumWithdrawalUsd * tokenToUsd))
 
   const loadConsultationPatients = async (limit = consultationPatientLimit, search = consultationPatientSearch) => {
     if (!doctor?.id) return
@@ -199,8 +201,8 @@ function AdminDashboard({ doctor, onLogout }) {
       addError('Enter a valid token amount to withdraw.', 'error')
       return
     }
-    if (tokens < minWithdrawTokens) {
-      addError(`Minimum withdrawal is ${minWithdrawTokens} tokens ($5).`, 'error')
+    if (tokens < minimumWithdrawTokens) {
+      addError(`Minimum withdrawal is ${minimumWithdrawTokens} tokens ($${minimumWithdrawalUsd}).`, 'error')
       return
     }
     if (tokens > earningsTokens) {
@@ -217,7 +219,7 @@ function AdminDashboard({ doctor, onLogout }) {
         body: JSON.stringify({ tokens })
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error)
+      if (!response.ok) throw new Error(data.error || 'Withdrawal request failed')
       setWithdrawalResult({
         message: data.message || 'Withdrawal request queued for payout review.',
         reference: data.reference,
@@ -264,6 +266,38 @@ function AdminDashboard({ doctor, onLogout }) {
         <div className="rounded-3xl bg-white p-10 shadow-xl shadow-slate-200/50 text-center">
           <h2 className="text-2xl font-bold text-slate-900">Access Denied</h2>
           <p className="text-slate-600 mt-2">Please log in as a doctor to access this dashboard.</p>
+        </div>
+      </section>
+    )
+  }
+
+  const doctorAccountStatus = doctor.account_status || doctor.accountStatus || 'active'
+  const doctorPaused = doctorAccountStatus === 'paused' || doctorAccountStatus === 'stopped'
+
+  if (doctorPaused) {
+    return (
+      <section className="mx-auto mt-16 max-w-5xl px-6 pb-20 sm:px-8">
+        <PortalArtBanner
+          theme="doctor"
+          title="Doctor account review"
+          body="Your dashboard is temporarily paused while the platform admin reviews your account."
+          className="mb-8"
+        />
+        <div className="rounded-3xl border border-amber-200 bg-white p-8 shadow-xl shadow-slate-200/50">
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-700">Action required</p>
+          <h2 className="mt-3 text-3xl font-bold text-slate-900">Your doctor account is paused</h2>
+          <p className="mt-3 rounded-2xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            {doctor.suspension_reason || doctor.suspensionReason || 'Please answer the platform admin query or update your profile before your account is restored.'}
+          </p>
+          <p className="mt-4 text-sm text-slate-600">
+            You can contact platform support or update the requested information. Live consultations, withdrawals, and patient access are unavailable until the admin resumes your account.
+          </p>
+          <button
+            onClick={onLogout}
+            className="mt-6 rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Logout
+          </button>
         </div>
       </section>
     )
@@ -440,14 +474,14 @@ function AdminDashboard({ doctor, onLogout }) {
                   <label className="block text-sm font-semibold text-brand-900">Withdraw token amount</label>
                   <input
                     type="number"
-                    min={minWithdrawTokens}
+                    min={minimumWithdrawTokens}
                     step="1"
                     value={withdrawTokenAmount}
                     onChange={(e) => setWithdrawTokenAmount(e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-brand-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-300"
-                    placeholder={`Minimum ${minWithdrawTokens}`}
+                    placeholder={`Minimum ${minimumWithdrawTokens}`}
                   />
-                  <p className="mt-2 text-xs text-brand-700/90">Minimum withdrawal: {minWithdrawTokens} tokens ($5). Conversion: 10 tokens = $1.</p>
+                  <p className="mt-2 text-xs text-brand-700/90">Minimum withdrawal: {minimumWithdrawTokens} tokens (${minimumWithdrawalUsd}). Conversion: {tokenToUsd} tokens = $1.</p>
                 </div>
               </div>
               <div className="bg-slate-50 rounded-3xl p-8 border border-slate-200">
@@ -531,7 +565,7 @@ function AdminDashboard({ doctor, onLogout }) {
                       {savingPayoutDetails ? 'Saving...' : 'Save details'}
                     </button>
                     <button
-                      disabled={withdrawing || earningsTokens < minWithdrawTokens}
+                      disabled={withdrawing || earningsTokens < minimumWithdrawTokens}
                       onClick={handleWithdraw}
                       className="flex-1 rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
                     >
@@ -571,11 +605,57 @@ function AdminDashboard({ doctor, onLogout }) {
             <div className="mt-8 p-6 bg-blue-50 rounded-2xl border border-blue-100">
               <h4 className="text-blue-900 font-semibold mb-2">Withdrawal Policy</h4>
               <ul className="list-disc pl-5 text-blue-800 text-sm space-y-1">
-                <li>Conversion rate: 10 Tokens = $1 USD.</li>
-                <li>Minimum withdrawal amount is 50 Tokens ($5).</li>
+                <li>Conversion rate: {tokenToUsd} Tokens = $1 USD.</li>
+                <li>Minimum withdrawal amount is {minimumWithdrawTokens} Tokens (${minimumWithdrawalUsd}).</li>
                 <li>Payouts are processed via Kora when configured.</li>
                 <li>Ensure payout details match your registered identity.</li>
               </ul>
+            </div>
+            <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-lg font-bold text-slate-900">Withdrawal history</h4>
+                <button
+                  type="button"
+                  onClick={loadFinancials}
+                  className="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+                >
+                  Refresh
+                </button>
+              </div>
+              {!Array.isArray(financials?.payouts) || financials.payouts.length === 0 ? (
+                <p className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">No withdrawal requests yet.</p>
+              ) : (
+                <div className="mt-4 grid gap-3">
+                  {financials.payouts.slice(0, 8).map((payout) => (
+                    <div key={payout.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">
+                            {Number(payout.amount_tokens || 0).toLocaleString()} tokens
+                            <span className="ml-2 text-xs font-semibold text-slate-500">
+                              ${Number(payout.amount_usd || 0).toFixed(2)}
+                            </span>
+                          </p>
+                          <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{payout.reference || payout.id}</p>
+                          {payout.admin_note && <p className="mt-2 text-xs font-semibold text-slate-600">{payout.admin_note}</p>}
+                        </div>
+                        <div className="text-left sm:text-right">
+                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            ['paid', 'completed'].includes(String(payout.status || '').toLowerCase())
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : ['rejected', 'failed'].includes(String(payout.status || '').toLowerCase())
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {payout.status || 'pending'}
+                          </span>
+                          <p className="mt-2 text-xs text-slate-500">{payout.created_at ? new Date(payout.created_at).toLocaleString() : ''}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

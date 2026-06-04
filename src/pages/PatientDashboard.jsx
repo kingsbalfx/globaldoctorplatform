@@ -247,13 +247,8 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to start consultation')
 
-      const debitResponse = await apiFetch('/api/tokens/deduct', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patientId: patient.id, amount: price }),
-      })
-      const debitData = await debitResponse.json().catch(() => ({}))
-      if (!debitResponse.ok) throw new Error(debitData.error || 'Unable to debit consultation tokens')
+      const updatedBalanceResponse = await apiFetch(`/api/patients/${encodeURIComponent(patient.id)}/tokens`)
+      const updatedBalanceData = await updatedBalanceResponse.json().catch(() => ({}))
 
       const consultation = data.consultation || {}
       const liveAppointment = {
@@ -273,11 +268,11 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         scheduledDate: new Date().toISOString(),
         scheduled_date: new Date().toISOString(),
         status: 'in_progress',
-        tokens_charged: price,
+        tokens_charged: data.tokensCharged ?? consultation.patient_tokens_charged ?? price,
       }
       setSelectedDoctor(doctor)
       setSubscriptionType(subType)
-      setTokens(debitData.tokens ?? debitData.balance ?? Math.max(0, tokens - price))
+      setTokens(updatedBalanceData.tokens ?? Math.max(0, tokens - Number(data.tokensCharged || price)))
       setAppointments((prev) => [liveAppointment, ...prev])
       setSelectedConsultationId(liveAppointment.id)
       setActiveTab('video')

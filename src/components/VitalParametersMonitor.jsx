@@ -99,6 +99,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
   const streamRef = useRef(null)
   const intervalRef = useRef(null)
   const handledRequestsRef = useRef(new Set())
+  const activeRequestRef = useRef(null)
+  const acceptedRequestIdRef = useRef('')
   const [requests, setRequests] = useState([])
   const [vitals, setVitals] = useState([])
   const [activeRequest, setActiveRequest] = useState(null)
@@ -108,6 +110,16 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
   const [progress, setProgress] = useState(0)
   const [captureHint, setCaptureHint] = useState('')
   const [acceptedRequestId, setAcceptedRequestId] = useState('')
+
+  const rememberActiveRequest = (request) => {
+    activeRequestRef.current = request || null
+    setActiveRequest(request || null)
+  }
+
+  const rememberAcceptedRequestId = (requestId) => {
+    acceptedRequestIdRef.current = requestId || ''
+    setAcceptedRequestId(requestId || '')
+  }
 
   const speak = (text) => {
     if (!('speechSynthesis' in window)) return
@@ -121,8 +133,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     if (!consultationId && !patientId && !doctorId) return
     if (userType !== 'doctor' && !consultationId) {
       setRequests([])
-      setAcceptedRequestId('')
-      setActiveRequest(null)
+      rememberAcceptedRequestId('')
+      rememberActiveRequest(null)
       return
     }
     const params = new URLSearchParams()
@@ -138,12 +150,12 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
 
     if (userType !== 'doctor') {
       const activeRow = rows.find((request) => {
-        const isSameRequest = request.id === activeRequest?.id || request.id === acceptedRequestId
+        const isSameRequest = request.id === activeRequestRef.current?.id || request.id === acceptedRequestIdRef.current
         return isSameRequest && (request.status === 'pending' || request.status === 'measuring')
       })
       if (activeRow) {
-        setActiveRequest(activeRow)
-        setAcceptedRequestId(activeRow.id)
+        rememberActiveRequest(activeRow)
+        rememberAcceptedRequestId(activeRow.id)
         return
       }
 
@@ -156,8 +168,9 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
           speak(`Your doctor requested ${getVital(pendingRows.parameter_name).label}. ${pendingRows.instructions || getVital(pendingRows.parameter_name).guide}`)
         }
       } else {
-        setAcceptedRequestId('')
-        setActiveRequest(null)
+        if (measuring && activeRequestRef.current) return
+        rememberAcceptedRequestId('')
+        rememberActiveRequest(null)
       }
     }
   }
@@ -217,8 +230,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
   const skipRequest = async (request) => {
     try {
       await markRequestStatus(request, 'cancelled')
-      setActiveRequest(null)
-      setAcceptedRequestId('')
+      rememberActiveRequest(null)
+      rememberAcceptedRequestId('')
       addError('Vital request skipped for this consultation.', 'info')
       await loadRequests()
     } catch (error) {
@@ -255,8 +268,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     const data = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(data.error || 'Failed to save vital reading')
     addError('Vital reading saved to the consultation.', 'success')
-    setActiveRequest(null)
-    setAcceptedRequestId('')
+    rememberActiveRequest(null)
+    rememberAcceptedRequestId('')
     setManualValue('')
     await Promise.all([loadRequests(), loadVitals()])
   }
@@ -291,8 +304,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     try {
       const measuringRequest = await markRequestStatus(request, 'measuring')
       if (measuringRequest) {
-        setActiveRequest(measuringRequest)
-        setAcceptedRequestId(measuringRequest.id)
+        rememberActiveRequest(measuringRequest)
+        rememberAcceptedRequestId(measuringRequest.id)
       }
       window.dispatchEvent(new CustomEvent('globaldoc:vital-camera-started'))
       const cameraAttempts = [
@@ -382,7 +395,7 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
           if (!value) {
             addError('Could not detect a stable pulse. Ask the patient to cover the camera fully and try again.', 'warning')
             setManualValue('')
-            setActiveRequest(request)
+            rememberActiveRequest(request)
             await markRequestStatus(request, 'pending').catch(() => null)
             return
           }
@@ -425,8 +438,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
     try {
       const measuringRequest = await markRequestStatus(activeRequest, 'measuring')
       if (measuringRequest) {
-        setActiveRequest(measuringRequest)
-        setAcceptedRequestId(measuringRequest.id)
+        rememberActiveRequest(measuringRequest)
+        rememberAcceptedRequestId(measuringRequest.id)
       }
       await saveVital({
         request: activeRequest,
@@ -478,8 +491,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
   }
 
   useEffect(() => {
-    setActiveRequest(null)
-    setAcceptedRequestId('')
+    rememberActiveRequest(null)
+    rememberAcceptedRequestId('')
     setManualValue('')
     handledRequestsRef.current = new Set()
   }, [consultationId, patientId, doctorId, userType])
@@ -559,8 +572,8 @@ function VitalParametersMonitor({ consultationId, patientId, doctorId, userType,
             <button
               type="button"
               onClick={() => {
-                setAcceptedRequestId(currentPatientRequest.id)
-                setActiveRequest(currentPatientRequest)
+                rememberAcceptedRequestId(currentPatientRequest.id)
+                rememberActiveRequest(currentPatientRequest)
                 speak(`Accepted. ${getVital(currentPatientRequest.parameter_name).label}. ${currentPatientRequest.instructions || getVital(currentPatientRequest.parameter_name).guide}`)
               }}
               className="mt-4 rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600"

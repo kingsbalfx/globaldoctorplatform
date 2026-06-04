@@ -16,6 +16,7 @@ const specialties = [
   'Neurology',
   'General Practitioner',
   'Urology',
+  'Gynaecologist',
 ]
 
 const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French', 'Hausa', 'Yoruba', 'Swahili', 'Igbo']

@@ -4,7 +4,7 @@ import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 import { COUNTRIES } from './DoctorAuth'
 
-const specialties = ['General Practitioner', 'Neurology', 'Urology', 'Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Obstetrics & GYN', 'Ophthalmology']
+const specialties = ['General Practitioner', 'Neurology', 'Urology', 'Gynaecologist', 'Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Obstetrics & GYN', 'Ophthalmology']
 
 const emptyForm = {
   id: '',
@@ -170,6 +170,30 @@ function DoctorManagement({ adminHeaders }) {
     }
   }
 
+  const handleDoctorStatus = async (doctor, status) => {
+    const paused = status !== 'active'
+    const reason = paused
+      ? window.prompt('Reason/query to show this doctor on their dashboard:', doctor.suspension_reason || doctor.suspensionReason || 'Account paused pending platform admin review.')
+      : ''
+    if (paused && reason === null) return
+    setLoading(true)
+    try {
+      const response = await apiFetch(`/api/admin/doctors/${encodeURIComponent(doctor.id)}/account-status`, {
+        method: 'PATCH',
+        headers: adminHeaders,
+        body: JSON.stringify({ status, reason }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result.error || 'Failed to update doctor account status')
+      setDoctors((current) => current.map((item) => item.id === doctor.id ? result.doctor : item))
+      addError(status === 'active' ? 'Doctor resumed.' : 'Doctor paused and query message saved.', 'success')
+    } catch (error) {
+      addError(error.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (!canManage) {
     return (
       <div className="rounded-3xl bg-white p-8 shadow-xl shadow-slate-200/50">
@@ -238,13 +262,13 @@ function DoctorManagement({ adminHeaders }) {
         </form>
       )}
 
-      <DoctorGrid title={`Pending review (${pendingDoctors.length})`} doctors={pendingDoctors} onApprove={handleApproveDoctor} onEdit={handleEdit} onDelete={handleDeleteDoctor} />
-      <DoctorGrid title={`Approved doctors (${approvedDoctors.length})`} doctors={approvedDoctors} onApprove={handleApproveDoctor} onEdit={handleEdit} onDelete={handleDeleteDoctor} />
+      <DoctorGrid title={`Pending review (${pendingDoctors.length})`} doctors={pendingDoctors} onApprove={handleApproveDoctor} onEdit={handleEdit} onDelete={handleDeleteDoctor} onStatus={handleDoctorStatus} />
+      <DoctorGrid title={`Approved doctors (${approvedDoctors.length})`} doctors={approvedDoctors} onApprove={handleApproveDoctor} onEdit={handleEdit} onDelete={handleDeleteDoctor} onStatus={handleDoctorStatus} />
     </div>
   )
 }
 
-function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete }) {
+function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete, onStatus }) {
   return (
     <div className="mt-8">
       <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
@@ -254,13 +278,20 @@ function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete }) {
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {doctors.map((doctor) => {
             const specialtyInfo = getSpecialtyInfo(doctor.specialty)
+            const accountStatus = doctor.account_status || doctor.accountStatus || 'active'
+            const isPaused = accountStatus === 'paused' || accountStatus === 'stopped'
             return (
               <div key={doctor.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div className="text-3xl">{getSpecialtyLogo(doctor.specialty)}</div>
-                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${doctor.verified ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {doctor.verified ? 'Approved' : 'Pending'}
-                  </span>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${doctor.verified ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {doctor.verified ? 'Approved' : 'Pending'}
+                    </span>
+                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${isPaused ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                      {isPaused ? accountStatus : 'Active'}
+                    </span>
+                  </div>
                 </div>
                 <h4 className="font-bold text-slate-900">{doctor.name}</h4>
                 <p className="text-sm font-medium" style={{ color: specialtyInfo.color }}>{specialtyInfo.name}</p>
@@ -268,6 +299,11 @@ function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete }) {
                 <p className="text-xs text-slate-500">{doctor.location}</p>
                 <p className="mt-2 text-xs text-slate-600">License: {doctor.license_number || 'Not supplied'}</p>
                 <p className="text-xs text-slate-600">Fee: {doctor.fee || doctor.consultation_fee || 50}</p>
+                {isPaused && (
+                  <p className="mt-2 rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                    {doctor.suspension_reason || doctor.suspensionReason || 'Paused pending admin review.'}
+                  </p>
+                )}
                 <div className="mt-4 flex flex-wrap gap-2">
                   {!doctor.verified && (
                     <button onClick={() => onApprove(doctor.id)} className="rounded-full bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700">
@@ -277,6 +313,14 @@ function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete }) {
                   <button onClick={() => onEdit(doctor)} className="rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">
                     Edit
                   </button>
+                  <button onClick={() => onStatus(doctor, isPaused ? 'active' : 'paused')} className={`rounded-full px-3 py-2 text-xs font-semibold text-white ${isPaused ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
+                    {isPaused ? 'Resume' : 'Pause'}
+                  </button>
+                  {!isPaused && (
+                    <button onClick={() => onStatus(doctor, 'stopped')} className="rounded-full bg-orange-700 px-3 py-2 text-xs font-semibold text-white hover:bg-orange-800">
+                      Stop
+                    </button>
+                  )}
                   <button onClick={() => onDelete(doctor.id)} className="rounded-full bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">
                     Delete
                   </button>

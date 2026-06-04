@@ -45,13 +45,30 @@ CREATE TABLE IF NOT EXISTS public.server_settings (
   updated_at timestamptz DEFAULT now()
 );
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'server_settings'
+      AND column_name = 'value'
+      AND data_type IN ('json', 'jsonb')
+  ) THEN
+    ALTER TABLE public.server_settings
+      ALTER COLUMN value TYPE text USING trim(both '"' from value::text);
+  END IF;
+END $$;
+
 INSERT INTO public.server_settings(key, value) VALUES
   ('minimumSubscriptionUSD', '10'),
   ('patientMinimumDepositUSD', '10'),
   ('tokenPerUSDFirstPurchase', '10'),
   ('tokenPerUSDRepeatPurchase', '7.5'),
   ('tokenToUSD', '10'),
-  ('doctorMinimumWithdrawalUSD', '5')
+  ('doctorMinimumWithdrawalUSD', '5'),
+  ('platformPaused', 'false'),
+  ('platformPauseMessage', 'We are sorry, GlobalDoc is currently under review or update. Please try again shortly.')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.doctors_auth (
@@ -66,6 +83,8 @@ CREATE TABLE IF NOT EXISTS public.doctors_auth (
   passport_data_url text,
   gender text,
   profile_photo_url text,
+  account_status text DEFAULT 'active',
+  suspension_reason text,
   verified boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -101,6 +120,8 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   payout_method text DEFAULT 'bank_account',
   mobile_money_operator text,
   mobile_money_number text,
+  account_status text DEFAULT 'active',
+  suspension_reason text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -156,8 +177,16 @@ CREATE TABLE IF NOT EXISTS public.payouts (
   doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
   amount_tokens numeric(14,2) DEFAULT 0,
   amount_usd numeric(14,2) DEFAULT 0,
+  reference text,
+  payout_method text DEFAULT 'bank_account',
+  currency text,
+  destination jsonb,
   status text DEFAULT 'pending',
-  created_at timestamptz DEFAULT now()
+  provider_reference text,
+  admin_note text,
+  paid_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS public.reviews (
@@ -276,6 +305,7 @@ CREATE TABLE IF NOT EXISTS public.facilities (
   pin text NOT NULL,
   referral_payout_ngn integer DEFAULT 0,
   is_active boolean DEFAULT true,
+  suspension_reason text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -319,6 +349,7 @@ CREATE TABLE IF NOT EXISTS public.consultations_ng (
   duration_min integer DEFAULT 15,
   blocks integer DEFAULT 1,
   total_ngn integer DEFAULT 0,
+  patient_tokens_charged integer DEFAULT 0,
   status text DEFAULT 'in_progress',
   completed_at timestamptz,
   created_at timestamptz DEFAULT now(),
@@ -354,6 +385,7 @@ CREATE TABLE IF NOT EXISTS public.facility_referrals (
   notes text,
   vitals_snapshot jsonb DEFAULT '[]'::jsonb,
   payout_ngn integer DEFAULT 0,
+  tokens_charged integer DEFAULT 0,
   status text DEFAULT 'pending',
   redeemed_at timestamptz,
   expires_at timestamptz,
@@ -659,6 +691,8 @@ ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS signature_data_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS passport_data_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS gender text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS profile_photo_url text;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active';
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS suspension_reason text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS availability text DEFAULT 'Available upon request';
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS consultation_fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS price jsonb DEFAULT '{"basic":50,"premium":100}'::jsonb;
@@ -705,6 +739,8 @@ ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS signature_data_url text
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS passport_data_url text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS gender text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS profile_photo_url text;
+ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active';
+ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS suspension_reason text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS verified boolean DEFAULT false;
 
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS type text;
@@ -717,8 +753,10 @@ ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS pin text;
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS referral_payout_ngn integer DEFAULT 0;
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS suspension_reason text;
 
 ALTER TABLE public.facility_referrals ADD COLUMN IF NOT EXISTS vitals_snapshot jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE public.facility_referrals ADD COLUMN IF NOT EXISTS tokens_charged integer DEFAULT 0;
 
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS patient_id text;
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS from_doctor_id text;
@@ -753,6 +791,7 @@ ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS track text;
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS duration_min integer DEFAULT 15;
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS blocks integer DEFAULT 1;
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS total_ngn integer DEFAULT 0;
+ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS patient_tokens_charged integer DEFAULT 0;
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS status text DEFAULT 'in_progress';
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS completed_at timestamptz;
 
@@ -830,6 +869,15 @@ ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS provider_transaction_id tex
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS description text;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS customer jsonb;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS metadata jsonb;
+
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS reference text;
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS payout_method text DEFAULT 'bank_account';
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS currency text;
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS destination jsonb;
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS provider_reference text;
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS admin_note text;
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS paid_at timestamptz;
+ALTER TABLE public.payouts ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
 ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS consultation_id text;
 ALTER TABLE public.prescriptions ADD COLUMN IF NOT EXISTS patient_id text;
@@ -945,6 +993,8 @@ CREATE INDEX IF NOT EXISTS idx_specialty_referrals_to_specialty ON public.specia
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_from_doctor ON public.specialty_referrals(from_doctor_id);
 CREATE INDEX IF NOT EXISTS idx_payments_reference ON public.payments(reference);
 CREATE INDEX IF NOT EXISTS idx_payments_patient ON public.payments(patient_id);
+CREATE INDEX IF NOT EXISTS idx_payouts_reference ON public.payouts(reference);
+CREATE INDEX IF NOT EXISTS idx_payouts_doctor_status ON public.payouts(doctor_id, status);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_patient ON public.prescriptions(patient_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_doctor ON public.prescriptions(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_facility ON public.prescriptions(facility_id);
@@ -978,6 +1028,8 @@ DROP TRIGGER IF EXISTS trg_facilities_updated_at ON public.facilities;
 CREATE TRIGGER trg_facilities_updated_at BEFORE UPDATE ON public.facilities FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_payments_updated_at ON public.payments;
 CREATE TRIGGER trg_payments_updated_at BEFORE UPDATE ON public.payments FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+DROP TRIGGER IF EXISTS trg_payouts_updated_at ON public.payouts;
+CREATE TRIGGER trg_payouts_updated_at BEFORE UPDATE ON public.payouts FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_prescriptions_updated_at ON public.prescriptions;
 CREATE TRIGGER trg_prescriptions_updated_at BEFORE UPDATE ON public.prescriptions FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 DROP TRIGGER IF EXISTS trg_patient_clinical_notes_updated_at ON public.patient_clinical_notes;
