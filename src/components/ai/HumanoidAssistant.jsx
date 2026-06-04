@@ -219,7 +219,7 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
     { icon: MessageCircle, label: 'Request first', body: 'Collects email, request details, and documents before chat.' },
     { icon: CalendarDays, label: 'Route guide', body: 'Takes users to the right page.' },
     { icon: Video, label: 'Video help', body: 'Guides users to video areas.' },
-    { icon: ShieldCheck, label: 'Track request', body: 'Shows a Request ID and tracking button after submission.' },
+    { icon: ShieldCheck, label: 'Track request', body: 'You can track an existing request anytime.' },
   ]
 
   if (panelState === 'closed') return null
@@ -244,7 +244,7 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
               <div>
                 <p className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-brand-50"><Sparkles className="h-3.5 w-3.5" /> {profile.badge}</p>
                 <h2 className="mt-3 text-xl font-bold">{profile.title}</h2>
-                <p className="mt-2 text-sm leading-6 text-brand-50/90">{chatUnlocked ? 'Chat is active. Your Request ID stays visible below.' : 'Submit your request first. No patient account is required.'}</p>
+                <p className="mt-2 text-sm leading-6 text-brand-50/90">{chatUnlocked ? 'Chat is active. Your Request ID stays visible below.' : 'Submit a new request, or track an existing request anytime.'}</p>
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={minimizeAssistant} className="flex h-9 items-center gap-1 rounded-full bg-white/10 px-3 text-sm font-semibold text-white hover:bg-white/20" aria-label="Minimize AI assistant" title="Minimize"><Minus className="h-4 w-4" /> Minimize</button>
@@ -266,6 +266,14 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
                 return <div key={card.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><Icon className="h-4 w-4 text-brand-700" /><p className="mt-2 text-xs font-bold text-slate-900">{card.label}</p><p className="mt-1 text-xs text-slate-600">{card.body}</p></div>
               })}
             </div>
+
+            {!supportCase?.caseId && (
+              <div className="mt-4 rounded-[1.5rem] border border-brand-100 bg-gradient-to-br from-brand-50 via-white to-slate-50 p-4">
+                <p className="text-sm font-bold text-slate-900">Already submitted a request?</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">You do not need to submit another request. Open the tracker anytime and enter your Request ID or email address.</p>
+                <button type="button" onClick={() => navigateTo('/request-tracker')} className="mt-3 w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Track existing request</button>
+              </div>
+            )}
 
             {!chatUnlocked && <div className="mt-4"><SupportIntakeForm onSubmitted={handleCaseSubmitted} /></div>}
 
