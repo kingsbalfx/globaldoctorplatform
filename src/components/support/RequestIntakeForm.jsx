@@ -25,6 +25,11 @@ function sizeLabel(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
 
+function goToTracker() {
+  if (typeof window === 'undefined') return
+  window.location.href = '/request-tracker'
+}
+
 function RequestIntakeForm({ onSubmitted }) {
   const [form, setForm] = useState({
     fullName: '',
@@ -133,6 +138,9 @@ function RequestIntakeForm({ onSubmitted }) {
               </div>
             </div>
             <p className="mt-3 text-sm leading-6">Use this ID whenever you contact support or track your request. Your email <span className="font-bold">{done.email}</span> is linked to it.</p>
+            <button type="button" onClick={goToTracker} className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">
+              Track request
+            </button>
             <p className="mt-2 text-xs font-semibold text-emerald-700">Chat is now unlocked.</p>
           </div>
         </div>
