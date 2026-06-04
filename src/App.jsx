@@ -128,7 +128,6 @@ function App() {
     }
   }
 
-  // Handle back/forward navigation.
   useEffect(() => {
     const handler = () => {
       const nextView = viewFromPath(window.location.pathname)
@@ -158,7 +157,6 @@ function App() {
     }
   }, [activePortal, authDoctor, currentView])
 
-  // Restore doctor session (OAuth bridge or prior login).
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem('gd_doctor_session')
@@ -248,7 +246,6 @@ function App() {
               <button onClick={() => navigate('patient')} className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}>Patient Portal</button>
               <button onClick={() => navigate('doctor-auth')} className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}>Doctor Portal</button>
               <button onClick={() => navigate('facility')} className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}>Facility Portal</button>
-              <button onClick={() => navigate('request-tracker')} className={`hover:text-brand-700 ${currentView === 'request-tracker' ? 'text-brand-700' : ''}`}>Track Request</button>
             </>
           )}
           {activePortal === 'patient' && (
