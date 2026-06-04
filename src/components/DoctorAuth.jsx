@@ -5,7 +5,7 @@ import { apiFetch } from '../lib/apiFetch'
 import { buildOAuthRedirectUrl } from '../lib/authRedirect'
 import { supabase } from '../lib/supabaseClient'
 import { useError } from './ErrorHandler'
-import ForgotPassword from '../pages/ForgotPassword'   // ← new import
+import ForgotPassword from '../pages/ForgotPassword'
 import GoogleSignInButton from './GoogleSignInButton'
 import { TelehealthHeroArt } from './TelehealthArt'
 
@@ -82,8 +82,9 @@ function DoctorAuth({ onAuth }) {
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [completingExistingUser, setCompletingExistingUser] = useState(false)
+  const [registrationStep, setRegistrationStep] = useState('profile')
 
-  // NEW – forgot password mode
+  // Forgot password mode
   const [forgotActive, setForgotActive] = useState(false)
 
   // Restore pending profile after OAuth (if any)
@@ -145,6 +146,27 @@ function DoctorAuth({ onAuth }) {
   // ========== EMAIL / PASSWORD LOGIN (admin + doctor) ==========
   const handleSubmit = async (event) => {
     event.preventDefault()
+
+    if (!isLogin) {
+      if (registrationStep === 'profile') {
+        if (!formData.name.trim() || !formData.email.trim() || (!completingExistingUser && !formData.password.trim()) || !formData.specialty || !formData.location) {
+          addError('Complete your profile details before continuing.', 'warning')
+          return
+        }
+        setRegistrationStep('license')
+        return
+      }
+      if (registrationStep === 'license') {
+        const licenseError = validateLicense(formData.licenseNumber, formData.location)
+        if (licenseError) {
+          addError(licenseError, 'error')
+          return
+        }
+        setRegistrationStep('uploads')
+        return
+      }
+    }
+
     setLoading(true)
 
     try {
@@ -294,6 +316,12 @@ function DoctorAuth({ onAuth }) {
     setFormData({ ...formData, [field]: value })
   }
 
+  const registrationSteps = [
+    { id: 'profile', label: 'Profile details' },
+    { id: 'license', label: 'License details' },
+    { id: 'uploads', label: 'Uploads' },
+  ]
+
   const handleSignatureUpload = (file) => {
     if (!file) return
     if (!file.type.startsWith('image/')) {
@@ -346,7 +374,7 @@ function DoctorAuth({ onAuth }) {
     <ForgotPassword userType="doctor" onBack={() => setForgotActive(false)} />
   ) : (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+      <div className={`w-full ${isLogin ? 'max-w-md' : 'max-w-2xl'}`}>
         <TelehealthHeroArt theme="doctor" className="mb-8" />
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900">GlobalDoc Connect</h1>
@@ -357,7 +385,10 @@ function DoctorAuth({ onAuth }) {
           {/* Login / Register toggle */}
           <div className="flex mb-6">
             <button
-              onClick={() => setIsLogin(true)}
+              onClick={() => {
+                setIsLogin(true)
+                setRegistrationStep('profile')
+              }}
               className={`flex-1 py-2 px-4 rounded-2xl font-semibold transition ${
                 isLogin ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-600'
               }`}
@@ -365,7 +396,10 @@ function DoctorAuth({ onAuth }) {
               Login
             </button>
             <button
-              onClick={() => setIsLogin(false)}
+              onClick={() => {
+                setIsLogin(false)
+                setRegistrationStep('profile')
+              }}
               className={`flex-1 py-2 px-4 rounded-2xl font-semibold transition ml-2 ${
                 !isLogin ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-600'
               }`}
@@ -381,26 +415,56 @@ function DoctorAuth({ onAuth }) {
               </div>
             )}
 
+            {!isLogin && (
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-3">
+                <div className="grid grid-cols-3 gap-2">
+                  {registrationSteps.map((step, index) => {
+                    const active = registrationStep === step.id
+                    const completed = registrationSteps.findIndex((item) => item.id === registrationStep) > index
+                    return (
+                      <button
+                        key={step.id}
+                        type="button"
+                        onClick={() => {
+                          if (active || completed) setRegistrationStep(step.id)
+                        }}
+                        className={`rounded-2xl px-2 py-3 text-center text-xs font-black transition ${
+                          active
+                            ? 'bg-brand-700 text-white shadow-lg shadow-brand-700/20'
+                            : completed
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-white text-slate-500 ring-1 ring-slate-200'
+                        }`}
+                      >
+                        <span className="block text-[10px] uppercase tracking-[0.14em]">Step {index + 1}</span>
+                        <span className="mt-1 block">{step.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Registration fields */}
             {!isLogin && (
               <>
-                <div>
+                <div className={registrationStep === 'profile' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">Full Name</label>
                   <input
                     type="text"
                     value={formData.name}
                     onChange={(e) => handleChange('name', e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                    required
+                    required={registrationStep === 'profile'}
                   />
                 </div>
-                <div>
+                <div className={registrationStep === 'profile' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">Specialty</label>
                   <select
                     value={formData.specialty}
                     onChange={(e) => handleChange('specialty', e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                    required
+                    required={registrationStep === 'profile'}
                   >
                     <option value="">Select specialty</option>
                     <option value="General Practitioner">General Practitioner</option>
@@ -409,19 +473,21 @@ function DoctorAuth({ onAuth }) {
                     <option value="Psychiatry">Psychiatry</option>
                     <option value="Pediatrics">Pediatrics</option>
                     <option value="Oncology">Oncology</option>
+                    <option value="Orthopedics">Orthopedics</option>
                     <option value="Neurology">Neurology</option>
                     <option value="Urology">Urology</option>
                     <option value="Gynaecologist">Gynaecologist</option>
-                    {/* Add more as needed */}
+                    <option value="Obstetrics & Gynecology">Obstetrics & Gynecology</option>
+                    <option value="Ophthalmology">Ophthalmology</option>
                   </select>
                 </div>
-                <div>
+                <div className={registrationStep === 'profile' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">Country</label>
                   <select
                     value={formData.location}
                     onChange={(e) => handleChange('location', e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                    required
+                    required={registrationStep === 'profile'}
                   >
                     <option value="">Select your country</option>
                     {COUNTRIES.map((c) => (
@@ -429,7 +495,7 @@ function DoctorAuth({ onAuth }) {
                     ))}
                   </select>
                 </div>
-                <div>
+                <div className={registrationStep === 'profile' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">Sex</label>
                   <select
                     value={formData.gender}
@@ -442,7 +508,7 @@ function DoctorAuth({ onAuth }) {
                     <option value="other">Other</option>
                   </select>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-sky-50 to-rose-50 p-4">
+                <div className={`rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-sky-50 to-rose-50 p-4 ${registrationStep === 'profile' ? '' : 'hidden'}`}>
                   <label className="block text-sm font-medium text-slate-700">Public Profile Picture</label>
                   <input
                     type="file"
@@ -455,10 +521,10 @@ function DoctorAuth({ onAuth }) {
                     <img src={formData.profilePhotoUrl} alt="Profile preview" className="mt-3 h-20 w-20 rounded-2xl object-cover ring-2 ring-white shadow" />
                   )}
                 </div>
-                <div>
+                <div className={registrationStep === 'license' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">
                     Medical License Number
-                    <span className="ml-1 text-xs text-slate-400">(must match your country’s format)</span>
+                    <span className="ml-1 text-xs text-slate-400">(must match your country's format)</span>
                   </label>
                   <input
                     type="text"
@@ -466,15 +532,15 @@ function DoctorAuth({ onAuth }) {
                     onChange={(e) => handleChange('licenseNumber', e.target.value)}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
                     placeholder="e.g., MDCN/12345"
-                    required
+                    required={registrationStep === 'license'}
                   />
                   {formData.location && (
                     <p className="mt-1 text-xs text-slate-500">
-                      Expected format: {getLicensePattern(formData.location)?.toString() || 'Any non‑empty value'}
+                      Expected format: {getLicensePattern(formData.location)?.toString() || 'Any non-empty value'}
                     </p>
                   )}
                 </div>
-                <div>
+                <div className={registrationStep === 'license' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">License Issuer / Medical Council</label>
                   <input
                     type="text"
@@ -484,7 +550,7 @@ function DoctorAuth({ onAuth }) {
                     placeholder="e.g., Medical and Dental Council of Nigeria"
                   />
                 </div>
-                <div>
+                <div className={registrationStep === 'license' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">License Expiry Date</label>
                   <input
                     type="date"
@@ -493,7 +559,7 @@ function DoctorAuth({ onAuth }) {
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
                   />
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${registrationStep === 'license' ? '' : 'hidden'}`}>
                   <label className="block text-sm font-medium text-slate-700">Payout Method</label>
                   <select
                     value={formData.payoutMethod}
@@ -546,14 +612,14 @@ function DoctorAuth({ onAuth }) {
                     </div>
                   )}
                 </div>
-                <div>
+                <div className={registrationStep === 'uploads' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">Signature Image</label>
                   <input
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
                     onChange={(e) => handleSignatureUpload(e.target.files?.[0])}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                    required={!formData.signatureDataUrl}
+                    required={registrationStep === 'uploads' && !formData.signatureDataUrl}
                   />
                   <p className="mt-1 text-xs text-slate-500">Upload a clear PNG/JPG/WebP signature. Max 300KB.</p>
                   {formData.signatureDataUrl && (
@@ -562,14 +628,14 @@ function DoctorAuth({ onAuth }) {
                     </div>
                   )}
                 </div>
-                <div>
+                <div className={registrationStep === 'uploads' ? '' : 'hidden'}>
                   <label className="block text-sm font-medium text-slate-700">Passport Photo</label>
                   <input
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
                     onChange={(e) => handlePassportUpload(e.target.files?.[0])}
                     className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                    required={!formData.passportDataUrl}
+                    required={registrationStep === 'uploads' && !formData.passportDataUrl}
                   />
                   <p className="mt-1 text-xs text-slate-500">Upload a clear doctor passport/headshot. Max 500KB.</p>
                   {formData.passportDataUrl && (
@@ -582,18 +648,18 @@ function DoctorAuth({ onAuth }) {
             )}
 
             {/* Email & Password */}
-            <div>
+            <div className={isLogin || registrationStep === 'profile' ? '' : 'hidden'}>
               <label className="block text-sm font-medium text-slate-700">Email</label>
               <input
                 type="email"
                 value={formData.email}
                 onChange={(e) => handleChange('email', e.target.value)}
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-brand-500"
-                required
+                required={isLogin || registrationStep === 'profile'}
               />
             </div>
 
-            <div>
+            <div className={isLogin || registrationStep === 'profile' ? '' : 'hidden'}>
               <label className="block text-sm font-medium text-slate-700">Password</label>
               <div className="relative mt-2">
                 <input
@@ -602,7 +668,7 @@ function DoctorAuth({ onAuth }) {
                   onChange={(e) => handleChange('password', e.target.value)}
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 outline-none transition focus:border-brand-500"
                   autoComplete={isLogin ? 'current-password' : 'new-password'}
-                  required={!completingExistingUser}
+                  required={(isLogin || registrationStep === 'profile') && !completingExistingUser}
                 />
                 <button
                   type="button"
@@ -615,7 +681,7 @@ function DoctorAuth({ onAuth }) {
               </div>
             </div>
 
-            {/* NEW – Forgot password link (only on login) */}
+            {/* Forgot password link (only on login) */}
             {isLogin && (
               <div className="text-right">
                 <button
@@ -628,13 +694,33 @@ function DoctorAuth({ onAuth }) {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Processing...' : isLogin ? 'Login' : completingExistingUser ? 'Complete Profile' : 'Register'}
-            </button>
+            {!isLogin ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  disabled={registrationStep === 'profile'}
+                  onClick={() => setRegistrationStep(registrationStep === 'uploads' ? 'license' : 'profile')}
+                  className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Processing...' : registrationStep === 'uploads' ? (completingExistingUser ? 'Complete Profile' : 'Submit Registration') : 'Continue'}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Processing...' : 'Login'}
+              </button>
+            )}
           </form>
 
           <div className="mt-6 flex items-center gap-3">
@@ -652,7 +738,7 @@ function DoctorAuth({ onAuth }) {
               onClick={() => window.location.href = '/'}
               className="text-sm text-brand-700 hover:text-brand-600"
             >
-              ← Back to patient portal
+              Back to patient portal
             </button>
           </div>
         </div>

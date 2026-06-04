@@ -9,6 +9,43 @@ const consultationTypes = [
   { id: 'premium', label: 'Premium', tokens: 100, description: 'Extended visit with specialist review.' },
 ]
 
+const DEFAULT_SPECIALTIES = [
+  'General Practitioner',
+  'Cardiology',
+  'Dermatology',
+  'Psychiatry',
+  'Pediatrics',
+  'Oncology',
+  'Orthopedics',
+  'Neurology',
+  'Urology',
+  'Gynaecologist',
+  'Obstetrics & Gynecology',
+  'Ophthalmology',
+]
+
+const normalizeSpecialty = (value = '') => String(value)
+  .toLowerCase()
+  .replace(/&/g, 'and')
+  .replace(/[^a-z0-9]/g, '')
+
+const specialtyAliases = {
+  gynaecologist: 'gynaecology',
+  gynaecology: 'gynaecology',
+  gynecologist: 'gynaecology',
+  gynecology: 'gynaecology',
+  obstetricsandgynecology: 'gynaecology',
+  obstetricsgynecology: 'gynaecology',
+  obgyn: 'gynaecology',
+  generalpractice: 'generalpractitioner',
+  gp: 'generalpractitioner',
+}
+
+const specialtyKey = (value) => {
+  const normalized = normalizeSpecialty(value)
+  return specialtyAliases[normalized] || normalized
+}
+
 function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
   const { addError } = useError()
   const [doctors, setDoctors] = useState([])
@@ -62,13 +99,13 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
   }
 
   const specialties = useMemo(() => {
-    return Array.from(new Set(doctors.map((doctor) => doctor.specialty).filter(Boolean))).sort()
+    return Array.from(new Set([...DEFAULT_SPECIALTIES, ...doctors.map((doctor) => doctor.specialty).filter(Boolean)])).sort()
   }, [doctors])
 
   const filteredDoctors = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
     return doctors.filter((doctor) => {
-      const matchesSpecialty = !specialty || doctor.specialty === specialty
+      const matchesSpecialty = !specialty || specialtyKey(doctor.specialty) === specialtyKey(specialty)
       const fields = [doctor.name, doctor.specialty, doctor.location, ...(doctor.languages || [])]
         .join(' ')
         .toLowerCase()

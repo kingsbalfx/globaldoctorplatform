@@ -79,33 +79,56 @@ const ErrorToast = ({ error, onClose }) => {
     }
   };
 
-  const getBgColor = () => {
+  const getTone = () => {
     switch (error.type) {
       case 'success':
-        return 'border-emerald-200 bg-white shadow-emerald-900/10';
+        return {
+          shell: 'border-emerald-200 bg-gradient-to-br from-white via-emerald-50 to-white shadow-emerald-900/15',
+          icon: 'bg-emerald-600 text-white shadow-emerald-700/25',
+          bar: 'from-emerald-500 via-teal-400 to-cyan-400',
+          title: 'Command completed',
+        };
       case 'warning':
-        return 'border-amber-200 bg-white shadow-amber-900/10';
+        return {
+          shell: 'border-amber-200 bg-gradient-to-br from-white via-amber-50 to-white shadow-amber-900/15',
+          icon: 'bg-amber-500 text-white shadow-amber-700/25',
+          bar: 'from-amber-500 via-orange-400 to-rose-400',
+          title: 'Review required',
+        };
       case 'info':
-        return 'border-blue-200 bg-white shadow-blue-900/10';
+        return {
+          shell: 'border-blue-200 bg-gradient-to-br from-white via-blue-50 to-white shadow-blue-900/15',
+          icon: 'bg-blue-600 text-white shadow-blue-700/25',
+          bar: 'from-blue-600 via-cyan-500 to-teal-400',
+          title: 'System update',
+        };
       default:
-        return 'border-rose-200 bg-white shadow-rose-900/10';
+        return {
+          shell: 'border-rose-200 bg-gradient-to-br from-white via-rose-50 to-white shadow-rose-900/15',
+          icon: 'bg-rose-600 text-white shadow-rose-700/25',
+          bar: 'from-rose-600 via-red-500 to-amber-400',
+          title: 'Action needed',
+        };
     }
   };
+  const tone = getTone();
 
   return (
-    <div className={`w-[min(560px,100%)] overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-3 ${getBgColor()}`}>
-      <div className="h-1 bg-gradient-to-r from-brand-700 via-cyan-500 to-emerald-500" />
-      <div className="flex items-start gap-3 p-4">
-        <div className="mt-0.5 rounded-full bg-slate-50 p-2 ring-1 ring-slate-100">{getIcon()}</div>
+    <div className={`w-[min(620px,100%)] overflow-hidden rounded-[1.35rem] border shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-3 ${tone.shell}`}>
+      <div className={`h-1.5 bg-gradient-to-r ${tone.bar}`} />
+      <div className="flex items-start gap-4 p-4 sm:p-5">
+        <div className={`mt-0.5 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl shadow-lg ${tone.icon}`}>
+          {React.cloneElement(getIcon(), { className: 'h-5 w-5 text-white' })}
+        </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
-            {error.type === 'success' ? 'Command completed' : error.type === 'warning' ? 'Review required' : error.type === 'info' ? 'System update' : 'Action needed'}
+            {tone.title}
           </p>
-          <p className="mt-1 text-sm font-semibold leading-6 text-slate-900">{error.message}</p>
+          <p className="mt-1 text-sm font-semibold leading-6 text-slate-900 sm:text-[15px]">{error.message}</p>
         </div>
         <button
           onClick={onClose}
-          className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          className="ml-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white/75 text-slate-400 ring-1 ring-slate-200 hover:bg-white hover:text-slate-700"
           aria-label="Close notification"
         >
           <X className="h-4 w-4" />

@@ -13,13 +13,38 @@ const specialties = [
   'Psychiatry',
   'Pediatrics',
   'Oncology',
+  'Orthopedics',
   'Neurology',
   'General Practitioner',
   'Urology',
   'Gynaecologist',
+  'Obstetrics & Gynecology',
+  'Ophthalmology',
 ]
 
 const languages = ['English', 'Spanish', 'Arabic', 'Hindi', 'French', 'Hausa', 'Yoruba', 'Swahili', 'Igbo']
+
+const normalizeSpecialty = (value = '') => String(value)
+  .toLowerCase()
+  .replace(/&/g, 'and')
+  .replace(/[^a-z0-9]/g, '')
+
+const specialtyAliases = {
+  gynaecologist: 'gynaecology',
+  gynaecology: 'gynaecology',
+  gynecologist: 'gynaecology',
+  gynecology: 'gynaecology',
+  obstetricsandgynecology: 'gynaecology',
+  obstetricsgynecology: 'gynaecology',
+  obgyn: 'gynaecology',
+  generalpractice: 'generalpractitioner',
+  gp: 'generalpractitioner',
+}
+
+const specialtyKey = (value) => {
+  const normalized = normalizeSpecialty(value)
+  return specialtyAliases[normalized] || normalized
+}
 
 function LandingPage() {
   const { t } = useTranslation()
@@ -98,7 +123,7 @@ function LandingPage() {
         location.includes(normalizedQuery) ||
         doctorSpecialty.toLowerCase().includes(normalizedQuery)
 
-      const matchesSpecialty = specialty === '' || doctorSpecialty.toLowerCase() === specialty.toLowerCase()
+      const matchesSpecialty = specialty === '' || specialtyKey(doctorSpecialty) === specialtyKey(specialty)
       const matchesLanguage =
         language === '' || doctorLanguages.some((item) => String(item).toLowerCase() === language.toLowerCase())
       const matchesRating = doctorRating >= minRating

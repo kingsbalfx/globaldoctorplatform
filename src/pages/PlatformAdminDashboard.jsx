@@ -17,12 +17,37 @@ const SEVERITIES = [
   { id: 'urgent', label: 'Urgent' },
 ]
 
+const formatNumber = (value) => new Intl.NumberFormat().format(Number(value || 0))
+const formatMoney = (amount, currency = 'NGN') => {
+  const normalizedCurrency = String(currency || 'NGN').toUpperCase()
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: normalizedCurrency,
+      maximumFractionDigits: normalizedCurrency === 'NGN' ? 0 : 2,
+    }).format(Number(amount || 0))
+  } catch {
+    return `${normalizedCurrency} ${formatNumber(amount)}`
+  }
+}
+
 function PlatformAdminDashboard({ adminSession, onLogout }) {
   const { addError } = useError()
-  const credentials = adminSession?.credentials || null
-  const admin = adminSession?.admin || null
+  const [localAdminSession, setLocalAdminSession] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem('gd_platform_admin_session')
+      return stored ? JSON.parse(stored) : null
+    } catch {
+      return null
+    }
+  })
+  const effectiveAdminSession = adminSession || localAdminSession
+  const credentials = effectiveAdminSession?.credentials || null
+  const admin = effectiveAdminSession?.admin || null
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' })
+  const [loginLoading, setLoginLoading] = useState(false)
 
-  const [activeSection, setActiveSection] = useState('doctors') // doctors | broadcasts | facilities | community | audit
+  const [activeSection, setActiveSection] = useState('overview') // overview | doctors | broadcasts | facilities | payouts | community | audit
 
   const [selectedAudience, setSelectedAudience] = useState('landing')
   const [severity, setSeverity] = useState('info')
@@ -32,6 +57,8 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
   const [announcements, setAnnouncements] = useState([])
   const [loading, setLoading] = useState(false)
+  const [overview, setOverview] = useState(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
   const [config, setConfig] = useState(null)
   const [platformPaused, setPlatformPaused] = useState(false)
   const [platformPauseMessage, setPlatformPauseMessage] = useState('We are sorry, GlobalDoc is currently under review or update. Please try again shortly.')
@@ -66,6 +93,50 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     }
   }, [credentials?.email, credentials?.password])
 
+  const handleAdminLogin = async (event) => {
+    event.preventDefault()
+    if (!loginForm.email.trim() || !loginForm.password) {
+      addError('Enter the platform admin email and password.', 'warning')
+      return
+    }
+    setLoginLoading(true)
+    try {
+      const response = await apiFetch('/api/doctors/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: loginForm.email.trim(),
+          password: loginForm.password,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data.admin) {
+        throw new Error(data.error || 'Admin login failed')
+      }
+      const session = {
+        type: 'admin-login',
+        admin: data.admin,
+        credentials: {
+          email: loginForm.email.trim(),
+          password: loginForm.password,
+        },
+      }
+      setLocalAdminSession(session)
+      try {
+        window.localStorage.setItem('gd_platform_admin_session', JSON.stringify(session))
+        window.localStorage.removeItem('gd_active_portal')
+      } catch {
+        // ignore
+      }
+      setLoginForm({ email: '', password: '' })
+      addError('Platform admin access restored.', 'success')
+    } catch (error) {
+      addError(error.message, 'error')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
   const loadConfig = async () => {
     try {
       const response = await apiFetch(`/api/config`)
@@ -77,6 +148,22 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       }
     } catch {
       // ignore
+    }
+  }
+
+  const loadOverview = async () => {
+    if (!headers) return
+    setOverviewLoading(true)
+    try {
+      const response = await apiFetch('/api/admin/overview', { headers })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to load overview')
+      setOverview(data.overview || null)
+    } catch (error) {
+      setOverview(null)
+      if (activeSection === 'overview') addError(error.message, 'error')
+    } finally {
+      setOverviewLoading(false)
     }
   }
 
@@ -402,25 +489,63 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   }
 
   useEffect(() => {
-    if (!adminSession) return
+    if (!effectiveAdminSession) return
     void loadConfig()
+    void loadOverview()
     void loadAnnouncements(selectedAudience)
-  }, [adminSession, selectedAudience])
+  }, [effectiveAdminSession, selectedAudience, headers])
 
   useEffect(() => {
-    if (!adminSession) return
+    if (!effectiveAdminSession) return
+    if (activeSection === 'overview') void loadOverview()
     if (activeSection === 'facilities') void loadFacilities()
     if (activeSection === 'payouts') void loadPayouts()
     if (activeSection === 'audit') void loadAuditLogs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminSession, activeSection, facilityFilter, payoutFilter])
+  }, [effectiveAdminSession, activeSection, facilityFilter, payoutFilter])
 
-  if (!adminSession || !admin || admin.role !== 'admin') {
+  if (!effectiveAdminSession || !admin || admin.role !== 'admin') {
     return (
       <section className="mx-auto mt-16 max-w-4xl px-6 pb-20 sm:px-8">
-        <div className="rounded-3xl bg-white p-10 shadow-xl shadow-slate-200/50 text-center">
-          <h2 className="text-2xl font-bold text-slate-900">Access Denied</h2>
-          <p className="text-slate-600 mt-2">Log in with the platform admin account to access this dashboard.</p>
+        <div className="overflow-hidden rounded-3xl bg-white shadow-xl shadow-slate-200/50">
+          <div className="bg-slate-950 px-8 py-8 text-white">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200">Admin recovery access</p>
+            <h2 className="mt-3 text-3xl font-bold">Platform Admin Login</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Admin login remains available even when the platform is paused, so you can resume service safely.
+            </p>
+          </div>
+          <form onSubmit={handleAdminLogin} className="space-y-4 p-8">
+            <label className="block text-left text-sm font-semibold text-slate-700">
+              Admin email
+              <input
+                type="email"
+                value={loginForm.email}
+                onChange={(event) => setLoginForm((value) => ({ ...value, email: event.target.value }))}
+                className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
+                autoComplete="username"
+                required
+              />
+            </label>
+            <label className="block text-left text-sm font-semibold text-slate-700">
+              Password
+              <input
+                type="password"
+                value={loginForm.password}
+                onChange={(event) => setLoginForm((value) => ({ ...value, password: event.target.value }))}
+                className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500"
+                autoComplete="current-password"
+                required
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full rounded-2xl bg-brand-700 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loginLoading ? 'Checking access...' : 'Open admin dashboard'}
+            </button>
+          </form>
         </div>
       </section>
     )
@@ -453,6 +578,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
       <div className="mb-8 flex flex-wrap gap-2">
         {[
+          { id: 'overview', label: 'Overview' },
           { id: 'doctors', label: 'Doctors' },
           { id: 'broadcasts', label: 'Broadcasts' },
           { id: 'facilities', label: 'Facilities' },
@@ -474,6 +600,183 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
           </button>
         ))}
       </div>
+
+      {activeSection === 'overview' && (
+        <div className="space-y-8">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              { label: 'Total registered users', value: overview?.users?.total, hint: 'Patients + doctors + facilities', tone: 'from-brand-700 to-cyan-600' },
+              { label: 'Patients registered', value: overview?.users?.patients, hint: `${formatNumber(overview?.patients?.today)} today, ${formatNumber(overview?.patients?.thisWeek)} this week`, tone: 'from-emerald-600 to-teal-500' },
+              { label: 'Doctors registered', value: overview?.users?.doctors, hint: `${formatNumber(overview?.doctors?.verified)} verified, ${formatNumber(overview?.doctors?.pending)} pending`, tone: 'from-blue-700 to-indigo-500' },
+              { label: 'Facilities registered', value: overview?.users?.facilities, hint: `${formatNumber(overview?.facilities?.active)} active, ${formatNumber(overview?.facilities?.paused)} paused`, tone: 'from-amber-600 to-orange-500' },
+            ].map((card) => (
+              <div key={card.label} className="overflow-hidden rounded-3xl bg-white shadow-lg shadow-slate-200/50 ring-1 ring-slate-100">
+                <div className={`h-1.5 bg-gradient-to-r ${card.tone}`} />
+                <div className="p-6">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">{card.label}</p>
+                  <p className="mt-3 text-4xl font-black text-slate-950">{overviewLoading ? '...' : formatNumber(card.value)}</p>
+                  <p className="mt-2 text-sm text-slate-600">{card.hint}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            {[
+              ['Online doctors', overview?.users?.onlineDoctors],
+              ['Online patients', overview?.users?.onlinePatients],
+              ['Consultations', overview?.activity?.consultations],
+              ['Completed consults', overview?.activity?.consultationsCompleted],
+              ['Live consults', overview?.activity?.consultationsInProgress],
+              ['Appointments', overview?.activity?.appointments],
+              ['Scheduled appointments', overview?.activity?.appointmentsScheduled],
+              ['Payments', overview?.activity?.payments],
+              ['Pending payments', overview?.activity?.pendingPayments],
+              ['Failed payments', overview?.activity?.failedPayments],
+              ['Referrals', overview?.activity?.referrals],
+              ['Pending payouts', overview?.activity?.pendingPayouts],
+              ['Paid payouts', overview?.activity?.paidPayouts],
+              ['Rejected payouts', overview?.activity?.rejectedPayouts],
+              ['Prescriptions', overview?.activity?.prescriptions],
+              ['Lab orders', overview?.activity?.labOrders],
+              ['Vital requests', overview?.activity?.vitalRequests],
+              ['Platform admins', overview?.users?.admins],
+              ['Audit logs', overview?.activity?.auditLogs],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+                <p className="mt-2 text-2xl font-black text-slate-950">{overviewLoading ? '...' : formatNumber(value)}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
+            <div className="rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/50">
+              <h2 className="text-xl font-bold text-slate-900">Financial snapshot</h2>
+              <p className="mt-1 text-sm text-slate-600">Payment volume and consultation revenue split totals.</p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {Object.entries(overview?.finance?.paymentsByCurrency || { NGN: 0 }).map(([currency, amount]) => (
+                  <div key={currency} className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">All payments</p>
+                    <p className="mt-2 text-2xl font-black text-slate-950">{formatMoney(amount, currency)}</p>
+                  </div>
+                ))}
+                {Object.entries(overview?.finance?.successfulPaymentsByCurrency || { NGN: 0 }).map(([currency, amount]) => (
+                  <div key={`success-${currency}`} className="rounded-2xl bg-emerald-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Successful payments</p>
+                    <p className="mt-2 text-2xl font-black text-slate-950">{formatMoney(amount, currency)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                {[
+                  ['Total NGN', overview?.finance?.revenueNgn?.totalNgn],
+                  ['Doctor NGN', overview?.finance?.revenueNgn?.doctorNgn],
+                  ['Platform NGN', overview?.finance?.revenueNgn?.platformNgn],
+                  ['Facility NGN', overview?.finance?.revenueNgn?.facilityNgn],
+                  ['Data fee NGN', overview?.finance?.revenueNgn?.dataFeeNgn],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">{label}</p>
+                    <p className="mt-2 text-lg font-black text-slate-950">{formatMoney(value, 'NGN')}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/50">
+              <h2 className="text-xl font-bold text-slate-900">Recent payments</h2>
+              <p className="mt-1 text-sm text-slate-600">Latest token, subscription, and consultation payment events.</p>
+              <div className="mt-5 space-y-3">
+                {(overview?.recent?.payments || []).slice(0, 8).map((payment) => (
+                  <div key={payment.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{payment.payment_type || payment.type || 'Payment'}</p>
+                        <p className="mt-1 text-xs text-slate-500">{payment.patient_id || payment.doctor_id || 'account'} - {new Date(payment.created_at).toLocaleString()}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-black text-slate-950">{formatMoney(payment.amount, payment.currency)}</p>
+                        <p className="mt-1 text-xs font-bold uppercase text-slate-500">{payment.status || 'pending'}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {!overviewLoading && (overview?.recent?.payments || []).length === 0 && (
+                  <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No payment activity yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
+            <div className="rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/50">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Activity pulse</h2>
+                  <p className="mt-1 text-sm text-slate-600">Consultations and core transactions across the platform.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadOverview}
+                  className="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+                >
+                  Refresh
+                </button>
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs text-slate-500">Today</p>
+                  <p className="mt-1 text-2xl font-black text-slate-950">{formatNumber(overview?.activity?.consultationsToday)}</p>
+                  <p className="text-xs text-slate-500">consultations</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs text-slate-500">7 days</p>
+                  <p className="mt-1 text-2xl font-black text-slate-950">{formatNumber(overview?.activity?.consultationsThisWeek)}</p>
+                  <p className="text-xs text-slate-500">consultations</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs text-slate-500">Successful</p>
+                  <p className="mt-1 text-2xl font-black text-slate-950">{formatNumber(overview?.activity?.successfulPayments)}</p>
+                  <p className="text-xs text-slate-500">payments</p>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {(overview?.recent?.consultations || []).slice(0, 5).map((item) => (
+                  <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-slate-900">{item.channel || item.track || 'Consultation'} - {item.status || 'unknown'}</p>
+                    <p className="mt-1 text-xs text-slate-500">{item.patient_id || 'patient'} with {item.doctor_id || 'doctor'} - {new Date(item.created_at).toLocaleString()}</p>
+                  </div>
+                ))}
+                {!overviewLoading && (overview?.recent?.consultations || []).length === 0 && (
+                  <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No recent consultations yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-3xl bg-white p-6 shadow-xl shadow-slate-200/50">
+              <h2 className="text-xl font-bold text-slate-900">Recent admin activity</h2>
+              <p className="mt-1 text-sm text-slate-600">Latest audit records from platform operations.</p>
+              <div className="mt-5 space-y-3">
+                {(overview?.recent?.auditLogs || []).slice(0, 8).map((log) => (
+                  <div key={log.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-slate-900">{log.action || 'Activity'}</p>
+                    <p className="mt-1 text-xs text-slate-500">{log.user_type || 'system'} {log.user_id ? `- ${log.user_id}` : ''} - {new Date(log.created_at).toLocaleString()}</p>
+                  </div>
+                ))}
+                {!overviewLoading && (overview?.recent?.auditLogs || []).length === 0 && (
+                  <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No audit activity yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {overview?.generatedAt && (
+            <p className="text-center text-xs text-slate-500">Last generated {new Date(overview.generatedAt).toLocaleString()}</p>
+          )}
+        </div>
+      )}
 
       {activeSection === 'doctors' && <DoctorManagement adminHeaders={headers} />}
 

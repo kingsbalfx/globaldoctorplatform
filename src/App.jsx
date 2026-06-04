@@ -73,10 +73,10 @@ function pathFromView(view) {
 }
 
 function portalFromView(view) {
+  if (view === 'platform-admin' || view === 'platform-admin-support') return ''
   if (view === 'patient' || view === 'payment-success') return 'patient'
   if (view === 'doctor-auth' || view === 'admin') return 'doctor'
   if (view === 'facility') return 'facility'
-  if (view === 'platform-admin' || view === 'platform-admin-support') return 'platform-admin'
   return ''
 }
 
@@ -116,6 +116,18 @@ function App() {
   const navigate = (view) => {
     const nextView = viewFromPath(pathFromView(view))
     const nextPortal = portalFromView(nextView)
+    if (nextView === 'platform-admin' || nextView === 'platform-admin-support') {
+      setCurrentView(nextView)
+      try {
+        const nextPath = pathFromView(nextView)
+        if (window.location.pathname !== nextPath) {
+          window.history.pushState({ view: nextView }, '', nextPath)
+        }
+      } catch {
+        // ignore
+      }
+      return
+    }
     if (activePortal && nextPortal !== activePortal) return
     setCurrentView(nextView)
     try {
@@ -132,6 +144,10 @@ function App() {
     const handler = () => {
       const nextView = viewFromPath(window.location.pathname)
       const nextPortal = portalFromView(nextView)
+      if (nextView === 'platform-admin' || nextView === 'platform-admin-support') {
+        setCurrentView(nextView)
+        return
+      }
       if (activePortal && nextPortal !== activePortal) {
         const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
         const fallbackPath = pathFromView(fallbackView)
@@ -147,6 +163,7 @@ function App() {
 
   useEffect(() => {
     if (!activePortal) return
+    if (currentView === 'platform-admin' || currentView === 'platform-admin-support') return
     if (portalFromView(currentView) === activePortal) return
     const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
     setCurrentView(fallbackView)
@@ -171,12 +188,30 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('gd_platform_admin_session')
+      if (!stored) return
+      const parsed = JSON.parse(stored)
+      if (parsed?.type === 'admin-login' && (parsed?.admin?.email || parsed?.email)) {
+        setAuthAdmin(parsed)
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const handleAuth = (authData) => {
     if (authData.type === 'admin-login') {
       setAuthAdmin(authData)
       setAuthDoctor(null)
-      setPortalSession('platform-admin')
+      setPortalSession('')
       setCurrentView('platform-admin')
+      try {
+        window.localStorage.setItem('gd_platform_admin_session', JSON.stringify(authData))
+      } catch {
+        // ignore
+      }
       try {
         window.history.pushState({ view: 'platform-admin' }, '', '/platform-admin')
       } catch {
@@ -240,7 +275,13 @@ function App() {
           <span className="text-lg font-bold text-brand-700">GlobalDoc Connect</span>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600">
-          {!activePortal && (
+          {authAdmin && (
+            <>
+              <button onClick={() => navigate('platform-admin')} className={`font-semibold ${currentView === 'platform-admin' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Platform Admin</button>
+              <button onClick={() => navigate('platform-admin-support')} className={`font-semibold ${currentView === 'platform-admin-support' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Support</button>
+            </>
+          )}
+          {!activePortal && !authAdmin && (
             <>
               <button onClick={() => navigate('landing')} className={`hover:text-brand-700 ${currentView === 'landing' ? 'text-brand-700' : ''}`}>Home</button>
               <button onClick={() => navigate('patient')} className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}>Patient Portal</button>

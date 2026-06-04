@@ -122,6 +122,32 @@ function safeNumber(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function normalizeSpecialtyKey(value = '') {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]/g, '')
+  const aliases = {
+    gynaecologist: 'gynaecology',
+    gynaecology: 'gynaecology',
+    gynecologist: 'gynaecology',
+    gynecology: 'gynaecology',
+    obstetricsandgynecology: 'gynaecology',
+    obstetricsgynecology: 'gynaecology',
+    obstetricsandgyn: 'gynaecology',
+    obstetricsgyn: 'gynaecology',
+    obgyn: 'gynaecology',
+    generalpractice: 'generalpractitioner',
+    gp: 'generalpractitioner',
+  }
+  return aliases[normalized] || normalized
+}
+
+function specialtyMatches(value, expected) {
+  if (!expected) return true
+  return normalizeSpecialtyKey(value) === normalizeSpecialtyKey(expected)
+}
+
 function normalizeAppBaseUrl(rawValue) {
   const value = String(rawValue || '').trim().replace(/\/+$/, '')
   if (!value) return ''
@@ -734,6 +760,15 @@ async function getPlatformPauseStatus() {
 }
 
 async function blockIfPlatformPaused(req, res) {
+  const path = String(req.path || req.originalUrl || '')
+  if (
+    path === '/api/doctors/login' ||
+    path === '/api/config' ||
+    path === '/api/settings' ||
+    path.startsWith('/api/admin/')
+  ) {
+    return false
+  }
   if (await isPlatformAdminRequest(req)) return false
   const status = await getPlatformPauseStatus()
   if (!status.paused) return false
@@ -2179,6 +2214,199 @@ app.get('/api/admin/payouts', async (req, res) => {
   })
 })
 
+app.get('/api/admin/overview', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+  const now = new Date()
+  const startOfDay = new Date(now)
+  startOfDay.setHours(0, 0, 0, 0)
+  const startOfWeek = new Date(now)
+  startOfWeek.setDate(now.getDate() - 7)
+
+  const countRows = async (table, apply = (query) => query) => {
+    try {
+      const query = apply(supabase.from(table).select('id', { count: 'exact', head: true }))
+      const { count, error } = await query
+      if (error) return 0
+      return count || 0
+    } catch {
+      return 0
+    }
+  }
+
+  const [
+    patientsTotal,
+    patientsToday,
+    patientsWeek,
+    patientsOnline,
+    doctorProfilesTotal,
+    doctorAccountsTotal,
+    doctorsVerified,
+    doctorsPending,
+    doctorsOnline,
+    doctorsPaused,
+    facilitiesTotal,
+    facilitiesActive,
+    facilitiesPaused,
+    consultationsTotal,
+    consultationsToday,
+    consultationsWeek,
+    appointmentsTotal,
+    paymentsTotal,
+    successfulPayments,
+    pendingPayments,
+    failedPayments,
+    payoutsPending,
+    payoutsPaid,
+    payoutsRejected,
+    specialtyReferrals,
+    facilityReferrals,
+    appointmentsScheduled,
+    appointmentsCompleted,
+    consultationsCompleted,
+    consultationsInProgress,
+    prescriptionsTotal,
+    labOrdersTotal,
+    vitalRequestsTotal,
+    adminsTotal,
+    auditCount,
+  ] = await Promise.all([
+    countRows('patients'),
+    countRows('patients', (query) => query.gte('created_at', startOfDay.toISOString())),
+    countRows('patients', (query) => query.gte('created_at', startOfWeek.toISOString())),
+    countRows('patients', (query) => query.eq('is_online', true)),
+    countRows('doctors'),
+    countRows('doctors_auth'),
+    countRows('doctors', (query) => query.eq('verified', true).eq('license_verified', true)),
+    countRows('doctors_auth', (query) => query.eq('verified', false)),
+    countRows('doctors', (query) => query.eq('is_online', true)),
+    countRows('doctors', (query) => query.in('account_status', ['paused', 'stopped'])),
+    countRows('facilities'),
+    countRows('facilities', (query) => query.eq('is_active', true)),
+    countRows('facilities', (query) => query.eq('is_active', false)),
+    countRows('consultations_ng'),
+    countRows('consultations_ng', (query) => query.gte('created_at', startOfDay.toISOString())),
+    countRows('consultations_ng', (query) => query.gte('created_at', startOfWeek.toISOString())),
+    countRows('appointments'),
+    countRows('payments'),
+    countRows('payments', (query) => query.in('status', ['success', 'successful', 'completed', 'paid'])),
+    countRows('payments', (query) => query.eq('status', 'pending')),
+    countRows('payments', (query) => query.in('status', ['failed', 'cancelled', 'rejected'])),
+    countRows('payouts', (query) => query.eq('status', 'pending')),
+    countRows('payouts', (query) => query.in('status', ['paid', 'completed'])),
+    countRows('payouts', (query) => query.in('status', ['rejected', 'failed'])),
+    countRows('specialty_referrals'),
+    countRows('facility_referrals'),
+    countRows('appointments', (query) => query.eq('status', 'scheduled')),
+    countRows('appointments', (query) => query.in('status', ['completed', 'done'])),
+    countRows('consultations_ng', (query) => query.eq('status', 'completed')),
+    countRows('consultations_ng', (query) => query.in('status', ['in_progress', 'active'])),
+    countRows('prescriptions'),
+    countRows('lab_orders'),
+    countRows('vital_parameter_requests'),
+    countRows('admins'),
+    countRows('audit_logs'),
+  ])
+
+  const [{ data: recentAuditLogs }, { data: recentConsultations }, { data: recentPayments }, { data: paymentRows }, { data: revenueRows }] = await Promise.all([
+    supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(8),
+    supabase.from('consultations_ng').select('id,patient_id,doctor_id,channel,track,status,total_ngn,created_at').order('created_at', { ascending: false }).limit(8),
+    supabase.from('payments').select('id,patient_id,doctor_id,amount,currency,type,payment_type,status,created_at').order('created_at', { ascending: false }).limit(8),
+    supabase.from('payments').select('amount,currency,status').limit(5000),
+    supabase.from('revenue_splits_ng').select('total_ngn,doctor_ngn,platform_ngn,facility_ngn,data_fee_ngn').limit(5000),
+  ])
+
+  const paymentSummary = (paymentRows || []).reduce((summary, payment) => {
+    const currency = String(payment.currency || 'NGN').toUpperCase()
+    const amount = Number(payment.amount || 0)
+    if (!Number.isFinite(amount)) return summary
+    summary.byCurrency[currency] = (summary.byCurrency[currency] || 0) + amount
+    if (['success', 'successful', 'completed', 'paid'].includes(String(payment.status || '').toLowerCase())) {
+      summary.successByCurrency[currency] = (summary.successByCurrency[currency] || 0) + amount
+    }
+    return summary
+  }, { byCurrency: {}, successByCurrency: {} })
+
+  const revenueSummary = (revenueRows || []).reduce((summary, row) => ({
+    totalNgn: summary.totalNgn + Number(row.total_ngn || 0),
+    doctorNgn: summary.doctorNgn + Number(row.doctor_ngn || 0),
+    platformNgn: summary.platformNgn + Number(row.platform_ngn || 0),
+    facilityNgn: summary.facilityNgn + Number(row.facility_ngn || 0),
+    dataFeeNgn: summary.dataFeeNgn + Number(row.data_fee_ngn || 0),
+  }), { totalNgn: 0, doctorNgn: 0, platformNgn: 0, facilityNgn: 0, dataFeeNgn: 0 })
+
+  const doctorsTotal = doctorAccountsTotal || doctorProfilesTotal
+
+  res.json({
+    overview: {
+      users: {
+        total: patientsTotal + doctorsTotal + facilitiesTotal,
+        patients: patientsTotal,
+        doctors: doctorsTotal,
+        facilities: facilitiesTotal,
+        admins: adminsTotal,
+        onlinePatients: patientsOnline,
+        onlineDoctors: doctorsOnline,
+      },
+      doctors: {
+        total: doctorsTotal,
+        profiles: doctorProfilesTotal,
+        accounts: doctorAccountsTotal,
+        verified: doctorsVerified,
+        pending: doctorsPending,
+        online: doctorsOnline,
+        paused: doctorsPaused,
+      },
+      facilities: {
+        total: facilitiesTotal,
+        active: facilitiesActive,
+        paused: facilitiesPaused,
+      },
+      patients: {
+        total: patientsTotal,
+        today: patientsToday,
+        thisWeek: patientsWeek,
+        online: patientsOnline,
+      },
+      activity: {
+        consultations: consultationsTotal,
+        consultationsToday,
+        consultationsThisWeek: consultationsWeek,
+        consultationsCompleted,
+        consultationsInProgress,
+        appointments: appointmentsTotal,
+        appointmentsScheduled,
+        appointmentsCompleted,
+        payments: paymentsTotal,
+        successfulPayments,
+        pendingPayments,
+        failedPayments,
+        pendingPayouts: payoutsPending,
+        paidPayouts: payoutsPaid,
+        rejectedPayouts: payoutsRejected,
+        referrals: specialtyReferrals + facilityReferrals,
+        specialtyReferrals,
+        facilityReferrals,
+        prescriptions: prescriptionsTotal,
+        labOrders: labOrdersTotal,
+        vitalRequests: vitalRequestsTotal,
+        auditLogs: auditCount,
+      },
+      finance: {
+        paymentsByCurrency: paymentSummary.byCurrency,
+        successfulPaymentsByCurrency: paymentSummary.successByCurrency,
+        revenueNgn: revenueSummary,
+      },
+      recent: {
+        auditLogs: recentAuditLogs || [],
+        consultations: recentConsultations || [],
+        payments: recentPayments || [],
+      },
+      generatedAt: now.toISOString(),
+    },
+  })
+})
+
 app.patch('/api/admin/payouts/:payoutId/status', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
 
@@ -2322,7 +2550,6 @@ app.get('/api/doctors', async (req, res) => {
   const buildQuery = (withStatus = true) => {
     let query = supabase.from('doctors').select('*').eq('verified', true).eq('license_verified', true)
     if (withStatus) query = query.or('account_status.is.null,account_status.eq.active')
-    if (req.query.specialty) query = query.eq('specialty', req.query.specialty)
     if (req.query.minRating) query = query.gte('rating', Number(req.query.minRating))
     if (req.query.online !== undefined && req.query.online !== '') {
       query = query.eq('is_online', req.query.online === 'true')
@@ -2336,7 +2563,11 @@ app.get('/api/doctors', async (req, res) => {
     error = fallback.error
   }
   if (error) return res.status(500).json({ error: error.message })
-  res.json({ doctors: (data || []).map(sanitizeDoctorForResponse) })
+  const specialty = String(req.query.specialty || '').trim()
+  const doctors = (data || [])
+    .filter((doctor) => specialtyMatches(doctor.specialty, specialty))
+    .map(sanitizeDoctorForResponse)
+  res.json({ doctors })
 })
 
 // ---------- DOCTOR AVAILABILITY (mock) ----------
@@ -2738,7 +2969,7 @@ app.get('/api/specialties', (_req, res) => {
       'Urology',
       'Gynaecologist',
       'Orthopedics',
-      'Obstetrics & GYN',
+      'Obstetrics & Gynecology',
       'Ophthalmology',
     ],
   })
@@ -3085,7 +3316,6 @@ app.get('/api/referrals/specialty/doctors', async (req, res) => {
     .select('id,email,name,specialty,location,languages,rating,rating_count,is_online,updated_at,account_status,profile_photo_url,gender')
     .eq('verified', true)
     .eq('license_verified', true)
-    .eq('specialty', specialty)
     .or('account_status.is.null,account_status.eq.active')
     .order('is_online', { ascending: false })
     .order('rating', { ascending: false })
@@ -3094,7 +3324,7 @@ app.get('/api/referrals/specialty/doctors', async (req, res) => {
 
   const { data, error } = await query
   if (error) return res.status(500).json({ error: error.message })
-  const doctors = (data || []).map((doctor) => {
+  const doctors = (data || []).filter((doctor) => specialtyMatches(doctor.specialty, specialty)).map((doctor) => {
     const recentlySeen = doctor.updated_at ? new Date(doctor.updated_at).getTime() >= new Date(activeSince).getTime() : false
     return sanitizeDoctorForResponse({
       ...doctor,
@@ -3119,7 +3349,7 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
   if (!snapshot?.patient) return res.status(404).json({ error: 'Patient not found' })
   if (targetDoctorId) {
     if (!targetDoctor) return res.status(404).json({ error: 'Selected specialist not found' })
-    if (String(targetDoctor.specialty || '').toLowerCase() !== String(toSpecialty || '').toLowerCase()) {
+    if (!specialtyMatches(targetDoctor.specialty, toSpecialty)) {
       return res.status(400).json({ error: 'Selected doctor does not match the target specialty' })
     }
   }
@@ -3149,14 +3379,13 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
 
   const targetDoctors = targetDoctorId
     ? [{ id: String(targetDoctorId) }]
-    : (await supabase
+    : ((await supabase
       .from('doctors')
-      .select('id')
+      .select('id,specialty')
       .eq('verified', true)
       .eq('license_verified', true)
-      .eq('specialty', referral.to_specialty)
       .or('account_status.is.null,account_status.eq.active')
-      .limit(20)).data || []
+      .limit(100)).data || []).filter((doctor) => specialtyMatches(doctor.specialty, referral.to_specialty)).slice(0, 20)
 
   await Promise.all((targetDoctors || []).map((targetDoctor) => insertAdaptive('notifications', {
     id: generateId('notif'),
@@ -3231,11 +3460,11 @@ app.get('/api/referrals/specialty', async (req, res) => {
   let query = supabase.from('specialty_referrals').select('*').order('created_at', { ascending: false })
   if (req.query.patientId) query = query.eq('patient_id', req.query.patientId)
   if (req.query.doctorId) query = query.eq('from_doctor_id', req.query.doctorId)
-  if (req.query.specialty) query = query.eq('to_specialty', req.query.specialty)
   if (req.query.targetDoctorId) query = query.or(`target_doctor_id.is.null,target_doctor_id.eq.${String(req.query.targetDoctorId).replace(/[,()]/g, '')}`)
   const { data, error } = await query.limit(100)
   if (error) return res.status(500).json({ error: error.message })
-  res.json({ referrals: data || [] })
+  const specialty = String(req.query.specialty || '').trim()
+  res.json({ referrals: (data || []).filter((referral) => specialtyMatches(referral.to_specialty, specialty)) })
 })
 
 app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
@@ -3256,7 +3485,7 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
 
   const doctor = await getDoctorProfile(doctorId)
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
-  if (String(referral.to_specialty || '').toLowerCase() !== String(doctor.specialty || '').toLowerCase()) {
+  if (!specialtyMatches(doctor.specialty, referral.to_specialty)) {
     return res.status(403).json({ error: 'This referral belongs to a different specialty' })
   }
   if (referral.target_doctor_id && String(referral.target_doctor_id) !== doctorId) {
