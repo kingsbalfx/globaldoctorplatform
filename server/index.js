@@ -3074,17 +3074,57 @@ async function buildPatientRecordSnapshot(patientId) {
 }
 
 // ---------- SPECIALTY REFERRALS ----------
+app.get('/api/referrals/specialty/doctors', async (req, res) => {
+  const specialty = String(req.query.specialty || '').trim()
+  const excludeDoctorId = String(req.query.excludeDoctorId || '').trim()
+  if (!specialty) return res.status(400).json({ error: 'specialty is required' })
+
+  const activeSince = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+  let query = supabase
+    .from('doctors')
+    .select('id,email,name,specialty,location,languages,rating,rating_count,is_online,updated_at,account_status,profile_photo_url,gender')
+    .eq('verified', true)
+    .eq('license_verified', true)
+    .eq('specialty', specialty)
+    .or('account_status.is.null,account_status.eq.active')
+    .order('is_online', { ascending: false })
+    .order('rating', { ascending: false })
+    .limit(100)
+  if (excludeDoctorId) query = query.neq('id', excludeDoctorId)
+
+  const { data, error } = await query
+  if (error) return res.status(500).json({ error: error.message })
+  const doctors = (data || []).map((doctor) => {
+    const recentlySeen = doctor.updated_at ? new Date(doctor.updated_at).getTime() >= new Date(activeSince).getTime() : false
+    return sanitizeDoctorForResponse({
+      ...doctor,
+      is_online: Boolean(doctor.is_online && recentlySeen),
+      availability_status: doctor.is_online && recentlySeen ? 'online' : 'offline',
+    })
+  })
+  res.json({ doctors })
+})
+
 app.post('/api/referrals/specialty/create', async (req, res) => {
-  const { doctorId, patientId, consultationId, fromSpecialty, toSpecialty, reason, notes } = req.body || {}
+  const { doctorId, patientId, consultationId, fromSpecialty, toSpecialty, targetDoctorId, appointmentAt, reason, notes } = req.body || {}
   if (!doctorId || !patientId || !toSpecialty || !reason) {
     return res.status(400).json({ error: 'doctorId, patientId, target specialty, and reason are required' })
   }
-  const [doctor, snapshot] = await Promise.all([
+  const [doctor, snapshot, targetDoctor] = await Promise.all([
     getDoctorProfile(doctorId),
     buildPatientRecordSnapshot(patientId),
+    targetDoctorId ? getDoctorProfile(targetDoctorId) : Promise.resolve(null),
   ])
   if (!doctor) return res.status(404).json({ error: 'Referring doctor not found' })
   if (!snapshot?.patient) return res.status(404).json({ error: 'Patient not found' })
+  if (targetDoctorId) {
+    if (!targetDoctor) return res.status(404).json({ error: 'Selected specialist not found' })
+    if (String(targetDoctor.specialty || '').toLowerCase() !== String(toSpecialty || '').toLowerCase()) {
+      return res.status(400).json({ error: 'Selected doctor does not match the target specialty' })
+    }
+  }
+  const appointmentDate = appointmentAt ? new Date(appointmentAt) : null
+  if (appointmentDate && Number.isNaN(appointmentDate.getTime())) return res.status(400).json({ error: 'Invalid appointment time' })
 
   const referral = {
     id: generateId('sref'),
@@ -3093,6 +3133,9 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
     from_doctor_name: doctor.name || '',
     from_specialty: fromSpecialty || doctor.specialty || 'General Practitioner',
     to_specialty: String(toSpecialty).trim(),
+    target_doctor_id: targetDoctorId ? String(targetDoctorId) : null,
+    target_doctor_name: targetDoctor?.name || null,
+    source_consultation_id: consultationId || null,
     consultation_id: consultationId || null,
     reason: String(reason).trim(),
     notes: String(notes || '').trim() || null,
@@ -3104,13 +3147,16 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
   const insert = await insertAdaptive('specialty_referrals', referral)
   if (insert.error) return res.status(500).json({ error: insert.error.message })
 
-  const { data: targetDoctors } = await supabase
-    .from('doctors')
-    .select('id')
-    .eq('verified', true)
-    .eq('license_verified', true)
-    .eq('specialty', referral.to_specialty)
-    .limit(20)
+  const targetDoctors = targetDoctorId
+    ? [{ id: String(targetDoctorId) }]
+    : (await supabase
+      .from('doctors')
+      .select('id')
+      .eq('verified', true)
+      .eq('license_verified', true)
+      .eq('specialty', referral.to_specialty)
+      .or('account_status.is.null,account_status.eq.active')
+      .limit(20)).data || []
 
   await Promise.all((targetDoctors || []).map((targetDoctor) => insertAdaptive('notifications', {
     id: generateId('notif'),
@@ -3127,7 +3173,58 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
     created_at: new Date().toISOString(),
   })))
 
-  res.status(201).json({ referral, message: 'Specialty referral created with patient record attached.' })
+  await insertAdaptive('notifications', {
+    id: generateId('notif'),
+    user_id: snapshot.patient.id,
+    user_type: 'patient',
+    notification_type: 'specialty_referral_created',
+    type: 'referral',
+    title: 'Specialty referral created',
+    message: `${doctor.name || 'Your doctor'} referred you to ${targetDoctor?.name ? `Dr. ${targetDoctor.name}` : referral.to_specialty}. You can review this in your notifications and appointments.`,
+    related_resource_type: 'specialty_referral',
+    related_resource_id: referral.id,
+    is_read: false,
+    notification_channels: ['in_app'],
+    created_at: new Date().toISOString(),
+  })
+
+  let appointment = null
+  if (appointmentAt) {
+    const appointmentId = generateId('apt-ref')
+    appointment = {
+      id: appointmentId,
+      patient_id: snapshot.patient.id,
+      doctor_id: targetDoctorId ? String(targetDoctorId) : null,
+      doctor_name: targetDoctor?.name || referral.to_specialty,
+      doctor_specialty: referral.to_specialty,
+      consultation_type: 'specialty_referral',
+      subscription_type: 'referral',
+      scheduled_date: appointmentDate.toISOString(),
+      duration_minutes: 30,
+      status: 'scheduled',
+      notes: `Referral from Dr. ${doctor.name || doctorId}: ${referral.reason}`,
+      tokens_charged: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    await insertAdaptive('appointments', appointment)
+    await insertAdaptive('notifications', {
+      id: generateId('notif'),
+      user_id: snapshot.patient.id,
+      user_type: 'patient',
+      notification_type: 'specialty_referral_appointment',
+      type: 'appointment',
+      title: 'Specialist appointment suggested',
+      message: `A ${referral.to_specialty} appointment was scheduled for ${appointmentDate.toLocaleString()}.`,
+      related_resource_type: 'appointment',
+      related_resource_id: appointmentId,
+      is_read: false,
+      notification_channels: ['in_app'],
+      created_at: new Date().toISOString(),
+    })
+  }
+
+  res.status(201).json({ referral, appointment, message: 'Specialty referral created with patient record attached.' })
 })
 
 app.get('/api/referrals/specialty', async (req, res) => {
@@ -3135,6 +3232,7 @@ app.get('/api/referrals/specialty', async (req, res) => {
   if (req.query.patientId) query = query.eq('patient_id', req.query.patientId)
   if (req.query.doctorId) query = query.eq('from_doctor_id', req.query.doctorId)
   if (req.query.specialty) query = query.eq('to_specialty', req.query.specialty)
+  if (req.query.targetDoctorId) query = query.or(`target_doctor_id.is.null,target_doctor_id.eq.${String(req.query.targetDoctorId).replace(/[,()]/g, '')}`)
   const { data, error } = await query.limit(100)
   if (error) return res.status(500).json({ error: error.message })
   res.json({ referrals: data || [] })
@@ -3152,11 +3250,17 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
     .maybeSingle()
   if (referralError) return res.status(500).json({ error: referralError.message })
   if (!referral) return res.status(404).json({ error: 'Referral not found' })
+  if (String(referral.status || '').toLowerCase() === 'accepted') {
+    return res.status(409).json({ error: 'Referral has already been accepted' })
+  }
 
   const doctor = await getDoctorProfile(doctorId)
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
   if (String(referral.to_specialty || '').toLowerCase() !== String(doctor.specialty || '').toLowerCase()) {
     return res.status(403).json({ error: 'This referral belongs to a different specialty' })
+  }
+  if (referral.target_doctor_id && String(referral.target_doctor_id) !== doctorId) {
+    return res.status(403).json({ error: 'This referral was assigned to another specialist' })
   }
 
   const patient = await findPatientByIdentifier(referral.patient_id)
@@ -3210,11 +3314,51 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
       accepted_by_doctor_id: doctorId,
       accepted_at: acceptedAt,
       consultation_id: insertedConsultation?.id || consultation.id,
+      updated_at: acceptedAt,
     })
     .eq('id', referralId)
     .select('*')
     .maybeSingle()
   if (updateError) return res.status(500).json({ error: updateError.message })
+
+  if (referral.source_consultation_id || (referral.consultation_id && referral.consultation_id !== (insertedConsultation?.id || consultation.id))) {
+    await supabase
+      .from('consultations_ng')
+      .update({ status: 'referred', completed_at: acceptedAt, updated_at: acceptedAt })
+      .eq('id', referral.source_consultation_id || referral.consultation_id)
+      .neq('id', insertedConsultation?.id || consultation.id)
+  }
+
+  await insertAdaptive('notifications', [
+    {
+      id: generateId('notif'),
+      user_id: patient.id,
+      user_type: 'patient',
+      notification_type: 'specialty_referral_accepted',
+      type: 'referral',
+      title: 'Specialist accepted your referral',
+      message: `Dr. ${doctor.name || doctorId} accepted your ${doctor.specialty || referral.to_specialty} referral. Open the video room when ready.`,
+      related_resource_type: 'consultation',
+      related_resource_id: insertedConsultation?.id || consultation.id,
+      is_read: false,
+      notification_channels: ['in_app'],
+      created_at: acceptedAt,
+    },
+    {
+      id: generateId('notif'),
+      user_id: referral.from_doctor_id,
+      user_type: 'doctor',
+      notification_type: 'specialty_referral_accepted',
+      type: 'referral',
+      title: 'Referral accepted',
+      message: `Dr. ${doctor.name || doctorId} accepted ${patient.name || patient.id}. The previous consultation was closed as referred.`,
+      related_resource_type: 'specialty_referral',
+      related_resource_id: referralId,
+      is_read: false,
+      notification_channels: ['in_app'],
+      created_at: acceptedAt,
+    },
+  ])
 
   res.json({
     referral: updatedReferral || referral,
@@ -3544,13 +3688,14 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
   const search = String(req.query.search || '').trim().toLowerCase()
   const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)))
   const offset = Math.max(0, Number(req.query.offset || 0))
+  const onlineOnly = req.query.onlineOnly === undefined ? true : String(req.query.onlineOnly).toLowerCase() !== 'false'
 
   const { data: consultations, error: consultError } = await supabase
     .from('consultations_ng')
     .select('*')
     .eq('doctor_id', String(doctorId))
     .order('created_at', { ascending: false })
-    .limit(300)
+    .limit(500)
   if (consultError) return res.status(500).json({ error: consultError.message })
 
   const patientIds = [...new Set((consultations || []).map((item) => item.patient_id).filter(Boolean))]
@@ -3584,7 +3729,23 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
   }
 
   const patientById = new Map((patients || []).map((patient) => [patient.id, patient]))
-  let rows = (consultations || []).map((consultation) => {
+  const activeConsultations = (consultations || []).filter((consultation) => {
+    const status = String(consultation.status || '').toLowerCase()
+    return !['completed', 'cancelled', 'canceled', 'referred'].includes(status)
+  })
+  const consultationByPatient = new Map()
+  for (const consultation of activeConsultations) {
+    const current = consultationByPatient.get(consultation.patient_id)
+    const latestVideoSignal = latestVideoSignalByRoom.get(consultation.id)
+    const currentSignal = current ? latestVideoSignalByRoom.get(current.id) : null
+    const consultationWaiting = latestVideoSignal?.type === 'join_request'
+    const currentWaiting = currentSignal?.type === 'join_request'
+    if (!current || (consultationWaiting && !currentWaiting) || new Date(consultation.created_at || 0) > new Date(current.created_at || 0)) {
+      consultationByPatient.set(consultation.patient_id, consultation)
+    }
+  }
+
+  let rows = [...consultationByPatient.values()].map((consultation) => {
     const patient = patientById.get(consultation.patient_id) || { id: consultation.patient_id, name: 'Patient' }
     const latestVideoSignal = latestVideoSignalByRoom.get(consultation.id)
     const facilityId = consultation.facility_id || patient.facility_id || null
@@ -3606,8 +3767,13 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
       source,
       video_waiting: latestVideoSignal?.type === 'join_request',
       video_waiting_at: latestVideoSignal?.type === 'join_request' ? latestVideoSignal.created_at : null,
+      online_status: patient.is_online ? 'online' : 'offline',
     }
   })
+
+  if (onlineOnly) {
+    rows = rows.filter((patient) => patient.is_online || patient.video_waiting)
+  }
 
   if (search) {
     rows = rows.filter((patient) => {

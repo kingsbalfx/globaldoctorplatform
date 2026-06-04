@@ -399,6 +399,9 @@ CREATE TABLE IF NOT EXISTS public.specialty_referrals (
   from_doctor_name text,
   from_specialty text,
   to_specialty text NOT NULL,
+  target_doctor_id text REFERENCES public.doctors(id) ON DELETE SET NULL,
+  target_doctor_name text,
+  source_consultation_id text,
   consultation_id text,
   reason text NOT NULL,
   notes text,
@@ -763,6 +766,9 @@ ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS from_doctor_id t
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS from_doctor_name text;
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS from_specialty text;
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS to_specialty text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS target_doctor_id text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS target_doctor_name text;
+ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS source_consultation_id text;
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS consultation_id text;
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS reason text;
 ALTER TABLE public.specialty_referrals ADD COLUMN IF NOT EXISTS notes text;
@@ -991,6 +997,7 @@ CREATE INDEX IF NOT EXISTS idx_facility_wallet_tx_facility ON public.facility_wa
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_patient ON public.specialty_referrals(patient_id);
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_to_specialty ON public.specialty_referrals(to_specialty, status);
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_from_doctor ON public.specialty_referrals(from_doctor_id);
+CREATE INDEX IF NOT EXISTS idx_specialty_referrals_target_doctor ON public.specialty_referrals(target_doctor_id, status);
 CREATE INDEX IF NOT EXISTS idx_payments_reference ON public.payments(reference);
 CREATE INDEX IF NOT EXISTS idx_payments_patient ON public.payments(patient_id);
 CREATE INDEX IF NOT EXISTS idx_payouts_reference ON public.payouts(reference);

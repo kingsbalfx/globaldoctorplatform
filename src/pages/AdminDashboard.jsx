@@ -46,6 +46,8 @@ function WorkspaceModal({ title, subtitle, onClose, children, size = 'max-w-4xl'
 function AdminDashboard({ doctor, onLogout }) {
   const { addError } = useError()
   const [activeTab, setActiveTab] = useState('overview')
+  const [doctorOnline, setDoctorOnline] = useState(Boolean(doctor?.isOnline || doctor?.is_online))
+  const [updatingDoctorStatus, setUpdatingDoctorStatus] = useState(false)
   const adminSpecialty = doctor?.specialty || 'General Practitioner'
   const adminSpecialtyInfo = getSpecialtyInfo(adminSpecialty)
   const adminHeaderStyle = {
@@ -86,6 +88,7 @@ function AdminDashboard({ doctor, onLogout }) {
     setLoadingConsultationPatients(true)
     try {
       const params = new URLSearchParams({ limit: String(limit), offset: '0' })
+      params.set('onlineOnly', 'true')
       if (search.trim()) params.set('search', search.trim())
       const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/consultation-patients?${params.toString()}`)
       const data = await response.json().catch(() => ({}))
@@ -236,6 +239,27 @@ function AdminDashboard({ doctor, onLogout }) {
     }
   }
 
+  const toggleDoctorOnline = async () => {
+    if (!doctor?.id) return
+    const next = !doctorOnline
+    setUpdatingDoctorStatus(true)
+    try {
+      const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOnline: next }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to update doctor status')
+      setDoctorOnline(next)
+      addError(next ? 'You are now visible as online.' : 'You are now offline.', 'success')
+    } catch (err) {
+      addError(err.message, 'error')
+    } finally {
+      setUpdatingDoctorStatus(false)
+    }
+  }
+
   const waitingConsultationPatients = consultationPatients.filter((patient) => patient.video_waiting)
   const facilityConsultationPatients = consultationPatients.filter((patient) => patient.source === 'facility' && !patient.video_waiting)
   const referredConsultationPatients = consultationPatients.filter((patient) => patient.source === 'specialty_referral' && !patient.video_waiting)
@@ -314,20 +338,36 @@ function AdminDashboard({ doctor, onLogout }) {
       <AnnouncementBanner audience="doctor" />
       {/* Header */}
       <div className="rounded-3xl px-8 py-10 text-white shadow-xl shadow-brand-700/20 mb-8" style={adminHeaderStyle}>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-4xl font-bold">Doctor Dashboard</h2>
             <p className="text-brand-100 mt-2">Welcome back, Dr. {doctor.name}</p>
-            <p className="mt-2 inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-sm font-semibold text-white">
-              {adminSpecialtyInfo.logo} {adminSpecialty}
-            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <p className="inline-flex items-center rounded-full bg-white/20 px-3 py-1 text-sm font-semibold text-white">
+                {adminSpecialtyInfo.logo} {adminSpecialty}
+              </p>
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-bold ${doctorOnline ? 'bg-emerald-400/25 text-white' : 'bg-slate-900/20 text-white/85'}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${doctorOnline ? 'bg-emerald-200' : 'bg-slate-300'}`} />
+                {doctorOnline ? 'Online' : 'Offline'}
+              </span>
+            </div>
           </div>
-          <button
-            onClick={onLogout}
-            className="rounded-full bg-white/20 hover:bg-white/30 px-6 py-3 text-sm font-semibold text-white transition"
-          >
-            Logout
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={toggleDoctorOnline}
+              disabled={updatingDoctorStatus}
+              className={`rounded-full px-6 py-3 text-sm font-semibold text-white transition disabled:opacity-50 ${doctorOnline ? 'bg-amber-500/90 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+            >
+              {updatingDoctorStatus ? 'Updating...' : doctorOnline ? 'Go offline' : 'Go online'}
+            </button>
+            <button
+              onClick={onLogout}
+              className="rounded-full bg-white/20 hover:bg-white/30 px-6 py-3 text-sm font-semibold text-white transition"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 
@@ -827,8 +867,19 @@ function AdminDashboard({ doctor, onLogout }) {
                               </div>
                               <div className="text-sm text-slate-600 lg:text-right">
                                 <p className="font-semibold text-slate-900">{getPatientChannelLabel(patient)}</p>
-                                <p className="mt-1 font-bold text-emerald-700">{patient.latest_consultation?.status || 'in_progress'}</p>
-                                {patient.video_waiting && <p className="mt-2 text-xs font-black text-emerald-700">Ready to accept video room</p>}
+                                <div className="mt-2 flex flex-wrap justify-start gap-2 lg:justify-end">
+                                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                                    {patient.latest_consultation?.status || 'in_progress'}
+                                  </span>
+                                  <span className={`rounded-full px-3 py-1 text-xs font-black ${patient.is_online ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'}`}>
+                                    {patient.is_online ? 'Patient online' : 'Patient offline'}
+                                  </span>
+                                  {patient.video_waiting && (
+                                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-700">
+                                      Waiting in room
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </button>

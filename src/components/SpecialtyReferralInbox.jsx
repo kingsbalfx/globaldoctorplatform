@@ -14,7 +14,11 @@ function SpecialtyReferralInbox({ doctor, onAcceptReferral }) {
     setLoading(true)
     setError('')
     try {
-      const response = await apiFetch(`/api/referrals/specialty?specialty=${encodeURIComponent(doctor.specialty)}`)
+      const params = new URLSearchParams({
+        specialty: doctor.specialty,
+        targetDoctorId: doctor.id,
+      })
+      const response = await apiFetch(`/api/referrals/specialty?${params.toString()}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load specialty referrals')
       const rows = Array.isArray(data.referrals) ? data.referrals : []
@@ -104,6 +108,9 @@ function SpecialtyReferralInbox({ doctor, onAcceptReferral }) {
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-700">{referral.status || 'pending'}</p>
                 <p className="mt-1 text-sm font-bold text-slate-900">{referral.patient_snapshot?.name || referral.patient_id}</p>
                 <p className="mt-1 text-xs text-slate-500">{referral.from_specialty || 'Unknown specialty'} to {referral.to_specialty}</p>
+                {referral.target_doctor_id && (
+                  <p className="mt-1 text-xs font-semibold text-brand-700">Assigned to you</p>
+                )}
                 <p className="mt-2 line-clamp-2 text-xs text-slate-600">{referral.reason}</p>
               </button>
             ))
@@ -130,6 +137,11 @@ function SpecialtyReferralInbox({ doctor, onAcceptReferral }) {
               >
                 {selected.status === 'accepted' ? 'Referral accepted' : accepting ? 'Opening consultation...' : 'Accept referral and open consultation'}
               </button>
+              {selected.status === 'accepted' && selected.consultation_id && (
+                <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+                  Room opened: {selected.consultation_id}
+                </p>
+              )}
 
               <div className="rounded-2xl bg-brand-50 p-4">
                 <p className="text-sm font-bold text-slate-900">Referral reason</p>
