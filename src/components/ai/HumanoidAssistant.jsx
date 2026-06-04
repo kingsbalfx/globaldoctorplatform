@@ -6,7 +6,7 @@ const portalProfiles = {
   landing: {
     title: 'GlobalDoc AI Guide',
     badge: 'Platform guide',
-    greeting: 'Hello 👋 I am your GlobalDoc AI guide. Submit a quick support case first, then I can help with directions, booking flow, uploads, video, and support.',
+    greeting: 'Hello 👋 I am your GlobalDoc AI guide. Submit a quick request first, then I can help with directions, booking flow, uploads, video, and support.',
     quickActions: ['How does it work?', 'Find a provider', 'Patient portal', 'Provider portal'],
   },
   patient: {
@@ -18,13 +18,13 @@ const portalProfiles = {
   doctor: {
     title: 'Provider AI Guide',
     badge: 'Workspace guide',
-    greeting: 'Hello 👋 Submit a support case first, then I can help you move around the provider workspace and organize your daily flow.',
+    greeting: 'Hello 👋 Submit a support request first, then I can help you move around the provider workspace and organize your daily flow.',
     quickActions: ['Provider dashboard', 'Follow-up flow', 'Messages', 'Support issue'],
   },
   facility: {
     title: 'Facility AI Guide',
     badge: 'Facility support',
-    greeting: 'Hello 👋 Submit a support case first, then I can help with facility navigation, team coordination, and support links.',
+    greeting: 'Hello 👋 Submit a support request first, then I can help with facility navigation, team coordination, and support links.',
     quickActions: ['Facility portal', 'Team flow', 'Provider matching', 'Contact support'],
   },
   'platform-admin': {
@@ -41,11 +41,21 @@ const routeActions = [
   { label: 'Facility Portal', href: '/facility', keywords: ['facility', 'hospital', 'clinic'] },
   { label: 'Platform Admin', href: '/platform-admin', keywords: ['admin', 'platform admin'] },
   { label: 'Support Dashboard', href: '/platform-admin/support', keywords: ['support dashboard', 'tickets', 'cases'] },
+  { label: 'Track Request', href: '/request-tracker', keywords: ['track', 'tracking', 'request id', 'case id', 'status'] },
   { label: 'Search Providers', href: '/#search', keywords: ['find', 'search', 'provider', 'specialist'] },
   { label: 'Directory', href: '/#directory', keywords: ['directory', 'available', 'list', 'browse'] },
   { label: 'How It Works', href: '/#how-it-works', keywords: ['how', 'work', 'explain', 'walkthrough', 'guide'] },
   { label: 'Contact Support', href: '/contact', keywords: ['contact', 'support', 'help', 'email', 'complaint'] },
 ]
+
+const languageLabels = {
+  en: 'English',
+  ha: 'Hausa',
+  yo: 'Yoruba',
+  ig: 'Igbo',
+  ar: 'Arabic',
+  fr: 'French',
+}
 
 function getPortalProfile(portal) {
   return portalProfiles[portal] || portalProfiles.landing
@@ -63,28 +73,29 @@ function humanReply(text) {
   if (lower.includes('how are you') || lower.includes('how far') || lower.includes('are you okay')) return 'I am doing well, thank you 😊 What would you like to do today?'
   if (lower.includes('thank')) return 'You are welcome. I am here whenever you need help.'
   if (lower.includes('who are you') || lower.includes('your name')) return 'I am the GlobalDoc AI Guide — your assistant for navigation, communication, and platform direction.'
-  if (lower.includes('what can you do') || lower.includes('help me')) return 'I can answer simple questions, show useful links, and direct users to patient, provider, facility, admin, directory, walkthrough, or support pages.'
+  if (lower.includes('what can you do') || lower.includes('help me')) return 'I can answer simple questions, show useful links, and direct users to patient, provider, facility, admin, directory, walkthrough, tracker, or support pages.'
   return null
 }
 
 function buildResponse(input, portal, supportCase) {
   const text = String(input || '').trim().toLowerCase()
   const routes = findRoutes(text)
-  const caseNote = supportCase?.caseId ? ` Your support case is ${supportCase.caseId}.` : ''
+  const caseNote = supportCase?.caseId ? ` Your Request ID is ${supportCase.caseId}. Keep it safe and use it whenever you contact support.` : ''
   const friendly = humanReply(text)
-  if (friendly) return { text: `${friendly}${caseNote}`, routes: routes.length ? routes : [{ label: 'Patient Portal', href: '/patient' }, { label: 'Search Providers', href: '/#search' }] }
+  if (friendly) return { text: `${friendly}${caseNote}`, routes: routes.length ? routes : [{ label: 'Patient Portal', href: '/patient' }, { label: 'Track Request', href: '/request-tracker' }] }
   if (!text) return { text: 'Please type what you need help with.', routes: [] }
+  if (text.includes('track') || text.includes('status') || text.includes('request id') || text.includes('case id')) return { text: `Use the tracker page and enter your Request ID.${caseNote}`, routes: [{ label: 'Track Request', href: '/request-tracker' }] }
   if (text.includes('how') && (text.includes('work') || text.includes('platform'))) return { text: `GlobalDoc Connect brings patients, providers, facilities, and admins into one connected platform. Open the walkthrough for the full summary.${caseNote}`, routes: [{ label: 'How It Works', href: '/#how-it-works' }] }
   if (text.includes('book') || text.includes('appointment') || text.includes('visit')) return { text: `To book, go to the patient portal or use the search area to choose a provider.${caseNote}`, routes: [{ label: 'Search Providers', href: '/#search' }, { label: 'Patient Portal', href: '/patient' }] }
   if (text.includes('video') || text.includes('call')) return { text: `For video, open the patient portal and go to the video area after your booking is ready.${caseNote}`, routes: [{ label: 'Patient Portal', href: '/patient' }] }
-  if (text.includes('upload') || text.includes('file') || text.includes('record') || text.includes('document')) return { text: `Your uploaded files are attached to your support case. To upload more platform files, open the patient portal and use the files section.${caseNote}`, routes: [{ label: 'Patient Portal', href: '/patient' }] }
-  if (text.includes('language') || text.includes('translate')) return { text: 'Use the language selector on the home page.', routes: [{ label: 'Home', href: '/' }] }
-  if (text.includes('agent') || text.includes('human')) return { text: `Your case has been sent to the support agent at globaldoctorconnect@gmail.com.${caseNote}`, routes: [{ label: 'Contact Support', href: '/contact' }] }
+  if (text.includes('upload') || text.includes('file') || text.includes('record') || text.includes('document')) return { text: `Your uploaded files are attached to your support request. To upload more platform files, open the patient portal and use the files section.${caseNote}`, routes: [{ label: 'Patient Portal', href: '/patient' }] }
+  if (text.includes('language') || text.includes('translate')) return { text: 'Use the language selector inside this assistant to choose your preferred language. Full automatic translation depends on the app translation setup.', routes: [] }
+  if (text.includes('agent') || text.includes('human')) return { text: `Your request is available to the support team inside the Patient Support dashboard.${caseNote}`, routes: [{ label: 'Track Request', href: '/request-tracker' }, { label: 'Contact Support', href: '/contact' }] }
   if (routes.length > 0) return { text: 'I found the direction you may need. Use one of these buttons.', routes }
   if (portal === 'doctor') return { text: `I can guide you around the provider workspace.${caseNote}`, routes: [{ label: 'Provider Dashboard', href: '/doctor/dashboard' }] }
   if (portal === 'facility') return { text: `I can guide you around the facility portal.${caseNote}`, routes: [{ label: 'Facility Portal', href: '/facility' }] }
   if (portal === 'platform-admin') return { text: 'I can guide you around admin operations.', routes: [{ label: 'Platform Admin', href: '/platform-admin' }, { label: 'Support Dashboard', href: '/platform-admin/support' }] }
-  return { text: `Tell me where you want to go, or choose a direction below.${caseNote}`, routes: [{ label: 'Patient Portal', href: '/patient' }, { label: 'Provider Portal', href: '/doctor' }, { label: 'Contact Support', href: '/contact' }] }
+  return { text: `Tell me where you want to go, or choose a direction below.${caseNote}`, routes: [{ label: 'Patient Portal', href: '/patient' }, { label: 'Track Request', href: '/request-tracker' }, { label: 'Contact Support', href: '/contact' }] }
 }
 
 function speak(text) {
@@ -120,10 +131,23 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
   const [input, setInput] = useState('')
   const [mode, setMode] = useState('idle')
   const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [assistantLanguage, setAssistantLanguage] = useState('en')
+  const [caseCopied, setCaseCopied] = useState(false)
   const [messages, setMessages] = useState([{ role: 'assistant', text: profile.greeting, routes: [] }])
   const recognitionRef = useRef(null)
   const visibleMessages = useMemo(() => messages.slice(-6), [messages])
   const chatUnlocked = Boolean(supportCase?.caseId) || portal === 'platform-admin'
+
+  const copyRequestId = async () => {
+    if (!supportCase?.caseId) return
+    try {
+      await navigator.clipboard.writeText(supportCase.caseId)
+      setCaseCopied(true)
+      window.setTimeout(() => setCaseCopied(false), 1800)
+    } catch {
+      setCaseCopied(false)
+    }
+  }
 
   const handleCaseSubmitted = (submittedCase) => {
     setSupportCase(submittedCase)
@@ -131,8 +155,8 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
       ...prev,
       {
         role: 'assistant',
-        text: `Thank you ${submittedCase.fullName || ''}. Your support case ${submittedCase.caseId} has been submitted and sent to globaldoctorconnect@gmail.com. You can now chat with me and use the direction buttons.`,
-        routes: [{ label: 'Patient Portal', href: '/patient' }, { label: 'Search Providers', href: '/#search' }, { label: 'Contact Support', href: '/contact' }],
+        text: `Thank you ${submittedCase.fullName || ''}. Your request has been submitted. IMPORTANT: copy and keep your Request ID: ${submittedCase.caseId}. Use it to track your request or when talking with support.`,
+        routes: [{ label: 'Track Request', href: '/request-tracker' }, { label: 'Patient Portal', href: '/patient' }, { label: 'Contact Support', href: '/contact' }],
       },
     ])
   }
@@ -141,7 +165,7 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
     const cleanValue = String(value || '').trim()
     if (!cleanValue) return
     if (!chatUnlocked) {
-      setMessages((prev) => [...prev, { role: 'assistant', text: 'Please submit the support intake form first. This lets the agent receive your email, complaint, and uploaded documents before chat starts.', routes: [] }])
+      setMessages((prev) => [...prev, { role: 'assistant', text: 'Please submit the support request form first. You only need a valid email, your name, request details, and optional documents.', routes: [{ label: 'Track Request', href: '/request-tracker' }] }])
       return
     }
     setMode('thinking')
@@ -154,7 +178,7 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
 
   const startVoiceInput = () => {
     if (!chatUnlocked) {
-      setMessages((prev) => [...prev, { role: 'assistant', text: 'Submit the intake form first, then voice chat will be available.', routes: [] }])
+      setMessages((prev) => [...prev, { role: 'assistant', text: 'Submit the request form first, then voice chat will be available.', routes: [] }])
       return
     }
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -163,7 +187,7 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
       return
     }
     const recognition = new SpeechRecognition()
-    recognition.lang = 'en-US'
+    recognition.lang = assistantLanguage === 'en' ? 'en-US' : assistantLanguage
     recognition.interimResults = false
     recognition.maxAlternatives = 1
     recognition.onstart = () => setMode('listening')
@@ -192,10 +216,10 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
   }
 
   const cards = [
-    { icon: MessageCircle, label: 'Case first', body: 'Collects email, request details, and documents before chat.' },
+    { icon: MessageCircle, label: 'Request first', body: 'Collects email, request details, and documents before chat.' },
     { icon: CalendarDays, label: 'Route guide', body: 'Takes users to the right page.' },
     { icon: Video, label: 'Video help', body: 'Guides users to video areas.' },
-    { icon: ShieldCheck, label: 'Agent handoff', body: 'Sends submissions to the support agent.' },
+    { icon: ShieldCheck, label: 'Track request', body: 'Shows a Request ID and tracking button after submission.' },
   ]
 
   if (panelState === 'closed') return null
@@ -220,7 +244,7 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
               <div>
                 <p className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-brand-50"><Sparkles className="h-3.5 w-3.5" /> {profile.badge}</p>
                 <h2 className="mt-3 text-xl font-bold">{profile.title}</h2>
-                <p className="mt-2 text-sm leading-6 text-brand-50/90">{chatUnlocked ? 'Chat is active. Ask naturally or use the direction buttons.' : 'Submit your case first so a human agent receives your email, request, and documents.'}</p>
+                <p className="mt-2 text-sm leading-6 text-brand-50/90">{chatUnlocked ? 'Chat is active. Your Request ID stays visible below.' : 'Submit your request first. No patient account is required.'}</p>
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={minimizeAssistant} className="flex h-9 items-center gap-1 rounded-full bg-white/10 px-3 text-sm font-semibold text-white hover:bg-white/20" aria-label="Minimize AI assistant" title="Minimize"><Minus className="h-4 w-4" /> Minimize</button>
@@ -245,6 +269,19 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
 
             {!chatUnlocked && <div className="mt-4"><SupportIntakeForm onSubmitted={handleCaseSubmitted} /></div>}
 
+            {chatUnlocked && supportCase?.caseId && (
+              <div className="mt-4 rounded-[1.5rem] border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">Important: copy and keep safe</p>
+                <p className="mt-2 text-sm font-semibold">Your Request ID is:</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <code className="rounded-xl bg-emerald-900 px-4 py-2 text-lg font-black tracking-wide text-white">{supportCase.caseId}</code>
+                  <button type="button" onClick={copyRequestId} className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-600">{caseCopied ? 'Copied' : 'Copy ID'}</button>
+                </div>
+                <p className="mt-3 text-xs leading-5 text-emerald-800">You need this ID to track the request or when speaking with support.</p>
+                <button type="button" onClick={() => navigateTo('/request-tracker')} className="mt-3 w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">Track request</button>
+              </div>
+            )}
+
             {chatUnlocked && (
               <>
                 <div className="mt-4 space-y-3">
@@ -268,14 +305,20 @@ function HumanoidAssistant({ portal = 'landing', docked = true }) {
           </div>
 
           <form onSubmit={(event) => { event.preventDefault(); sendMessage() }} className="border-t border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setVoiceEnabled((value) => !value)} disabled={!chatUnlocked} className={`rounded-full p-3 ${voiceEnabled ? 'bg-brand-700 text-white' : 'bg-white text-slate-600'} shadow-sm disabled:opacity-40`} title="Toggle spoken replies"><Languages className="h-4 w-4" /></button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-full bg-white px-3 py-2 shadow-sm">
+                <Languages className="h-4 w-4 text-slate-500" />
+                <select value={assistantLanguage} onChange={(event) => setAssistantLanguage(event.target.value)} className="bg-transparent text-xs font-semibold text-slate-700 outline-none" title="Assistant language">
+                  {Object.entries(languageLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </div>
+              <button type="button" onClick={() => setVoiceEnabled((value) => !value)} disabled={!chatUnlocked} className={`rounded-full px-3 py-2 text-xs font-bold ${voiceEnabled ? 'bg-brand-700 text-white' : 'bg-white text-slate-600'} shadow-sm disabled:opacity-40`} title="Toggle spoken replies">{voiceEnabled ? 'Voice on' : 'Voice off'}</button>
               <button type="button" onClick={mode === 'listening' ? () => recognitionRef.current?.stop?.() : startVoiceInput} disabled={!chatUnlocked} className={`rounded-full p-3 ${mode === 'listening' ? 'bg-red-600 text-white' : 'bg-white text-slate-600'} shadow-sm disabled:opacity-40`} title="Voice input">{mode === 'listening' ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}</button>
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-white px-4 py-2 shadow-sm"><MessageCircle className="h-4 w-4 shrink-0 text-slate-400" /><input disabled={!chatUnlocked} value={input} onChange={(event) => setInput(event.target.value)} placeholder={chatUnlocked ? 'Say hi, ask where to go, or request help...' : 'Submit case first to unlock chat'} className="min-w-0 flex-1 bg-transparent text-sm outline-none disabled:cursor-not-allowed" /></div>
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-white px-4 py-2 shadow-sm"><MessageCircle className="h-4 w-4 shrink-0 text-slate-400" /><input disabled={!chatUnlocked} value={input} onChange={(event) => setInput(event.target.value)} placeholder={chatUnlocked ? 'Say hi, ask where to go, or request help...' : 'Submit request first to unlock chat'} className="min-w-0 flex-1 bg-transparent text-sm outline-none disabled:cursor-not-allowed" /></div>
               <button type="submit" disabled={!chatUnlocked} className="rounded-full bg-brand-700 p-3 text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:bg-slate-300"><Send className="h-4 w-4" /></button>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="flex items-start gap-2 text-xs leading-5 text-slate-500"><FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supportCase?.caseId ? `Active case: ${supportCase.caseId}` : 'Support intake is required before chat.'}</p>
+              <p className="flex items-start gap-2 text-xs leading-5 text-slate-500"><FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supportCase?.caseId ? `Active Request ID: ${supportCase.caseId}` : 'Support request is required before chat.'}</p>
               <button type="button" onClick={cancelAssistant} className="text-xs font-bold text-red-600 hover:text-red-700">Cancel assistant</button>
             </div>
           </form>
