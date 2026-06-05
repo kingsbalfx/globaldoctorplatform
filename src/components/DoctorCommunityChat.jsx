@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { MessageCircle, Send } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 function DoctorCommunityChat({ sender }) {
+  const { addError } = useError()
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
@@ -44,7 +46,7 @@ function DoctorCommunityChat({ sender }) {
       setDraft('')
       await loadMessages()
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setLoading(false)
     }

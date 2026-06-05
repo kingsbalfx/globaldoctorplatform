@@ -56,6 +56,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const [expiresHours, setExpiresHours] = useState(24)
 
   const [announcements, setAnnouncements] = useState([])
+  const [deleteAnnouncementId, setDeleteAnnouncementId] = useState('')
   const [loading, setLoading] = useState(false)
   const [overview, setOverview] = useState(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
@@ -273,7 +274,6 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
   const deleteAnnouncement = async (id) => {
     if (!headers) return
-    if (!window.confirm('Delete this announcement?')) return
     setLoading(true)
     try {
       const response = await apiFetch(`/api/admin/announcements/${encodeURIComponent(id)}`, {
@@ -282,6 +282,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to delete announcement')
+      setDeleteAnnouncementId('')
       await loadAnnouncements(selectedAudience)
     } catch (err) {
       addError(err.message, 'error')
@@ -999,12 +1000,35 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                         </div>
                         <button
                           type="button"
-                          onClick={() => deleteAnnouncement(item.id)}
+                          onClick={() => setDeleteAnnouncementId(item.id)}
                           className="rounded-full bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700"
                         >
                           Delete
                         </button>
                       </div>
+                      {deleteAnnouncementId === item.id && (
+                        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
+                          <p className="text-sm font-bold text-red-800">Delete this announcement?</p>
+                          <p className="mt-1 text-xs text-red-700">It will disappear from the selected audience immediately.</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={loading}
+                              onClick={() => deleteAnnouncement(item.id)}
+                              className="rounded-full bg-red-700 px-4 py-2 text-xs font-bold text-white hover:bg-red-800 disabled:opacity-50"
+                            >
+                              {loading ? 'Deleting...' : 'Confirm delete'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteAnnouncementId('')}
+                              className="rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

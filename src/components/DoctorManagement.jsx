@@ -53,6 +53,7 @@ function DoctorManagement({ adminHeaders }) {
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState(emptyForm)
   const [statusDraft, setStatusDraft] = useState(null)
+  const [deleteDoctorId, setDeleteDoctorId] = useState('')
 
   const canManage = Boolean(adminHeaders)
   const pendingDoctors = useMemo(() => doctors.filter((doctor) => !doctor.verified), [doctors])
@@ -135,7 +136,6 @@ function DoctorManagement({ adminHeaders }) {
   }
 
   const handleDeleteDoctor = async (doctorId) => {
-    if (!window.confirm('Delete this doctor account and profile?')) return
     setLoading(true)
     try {
       const response = await apiFetch(`/api/admin/doctors/${encodeURIComponent(doctorId)}`, {
@@ -145,6 +145,7 @@ function DoctorManagement({ adminHeaders }) {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to delete doctor')
       setDoctors((current) => current.filter((doctor) => doctor.id !== doctorId))
+      setDeleteDoctorId('')
       addError('Doctor deleted.', 'success')
     } catch (error) {
       addError(error.message, 'error')
@@ -275,7 +276,9 @@ function DoctorManagement({ adminHeaders }) {
         title={`Pending review (${pendingDoctors.length})`}
         doctors={pendingDoctors}
         statusDraft={statusDraft}
+        deleteDoctorId={deleteDoctorId}
         onStatusDraftChange={setStatusDraft}
+        onDeleteDraftChange={setDeleteDoctorId}
         onApprove={handleApproveDoctor}
         onEdit={handleEdit}
         onDelete={handleDeleteDoctor}
@@ -287,7 +290,9 @@ function DoctorManagement({ adminHeaders }) {
         title={`Approved doctors (${approvedDoctors.length})`}
         doctors={approvedDoctors}
         statusDraft={statusDraft}
+        deleteDoctorId={deleteDoctorId}
         onStatusDraftChange={setStatusDraft}
+        onDeleteDraftChange={setDeleteDoctorId}
         onApprove={handleApproveDoctor}
         onEdit={handleEdit}
         onDelete={handleDeleteDoctor}
@@ -299,7 +304,7 @@ function DoctorManagement({ adminHeaders }) {
   )
 }
 
-function DoctorGrid({ title, doctors, statusDraft, onStatusDraftChange, onApprove, onEdit, onDelete, onStatus, onSubmitStatus, loading }) {
+function DoctorGrid({ title, doctors, statusDraft, deleteDoctorId, onStatusDraftChange, onDeleteDraftChange, onApprove, onEdit, onDelete, onStatus, onSubmitStatus, loading }) {
   return (
     <div className="mt-8">
       <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
@@ -312,6 +317,7 @@ function DoctorGrid({ title, doctors, statusDraft, onStatusDraftChange, onApprov
             const accountStatus = doctor.account_status || doctor.accountStatus || 'active'
             const isPaused = accountStatus === 'paused' || accountStatus === 'stopped'
             const activeDraft = statusDraft?.doctorId === doctor.id ? statusDraft : null
+            const deleteDraftActive = deleteDoctorId === doctor.id
             return (
               <div key={doctor.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="mb-3 flex items-start justify-between gap-3">
@@ -353,10 +359,33 @@ function DoctorGrid({ title, doctors, statusDraft, onStatusDraftChange, onApprov
                       Stop
                     </button>
                   )}
-                  <button onClick={() => onDelete(doctor.id)} className="rounded-full bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">
+                  <button onClick={() => onDeleteDraftChange(doctor.id)} className="rounded-full bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">
                     Delete
                   </button>
                 </div>
+                {deleteDraftActive && (
+                  <div className="mt-4 rounded-3xl border border-red-200 bg-red-50 p-4 shadow-sm">
+                    <p className="text-sm font-bold text-red-800">Delete Dr. {doctor.name}?</p>
+                    <p className="mt-1 text-xs text-red-700">This removes the doctor account and profile from the platform.</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => onDelete(doctor.id)}
+                        className="rounded-full bg-red-700 px-4 py-2 text-xs font-bold text-white hover:bg-red-800 disabled:opacity-50"
+                      >
+                        {loading ? 'Deleting...' : 'Confirm delete'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteDraftChange('')}
+                        className="rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {activeDraft && (
                   <div
                     className="mt-4 overflow-hidden rounded-3xl border bg-white shadow-lg"

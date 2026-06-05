@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 function ReferralManager() {
+  const { addError } = useError()
   const [showReferralForm, setShowReferralForm] = useState(false)
   const [selectedPatientId, setSelectedPatientId] = useState('')
   const [selectedPatientName, setSelectedPatientName] = useState('')
@@ -36,7 +38,7 @@ function ReferralManager() {
   const handleCreateReferral = async (event) => {
     event.preventDefault()
     if (!selectedPatientId || !selectedPatientName) {
-      alert('Please provide the patient ID and patient name')
+      addError('Please provide the patient ID and patient name.', 'warning')
       return
     }
 
@@ -55,18 +57,18 @@ function ReferralManager() {
       })
 
       if (!response.ok) {
-        const error = await response.json()
+        const error = await response.json().catch(() => ({}))
         throw new Error(error.error || 'Failed to create referral')
       }
 
       await loadReferrals()
-      alert('Referral created successfully!')
+      addError('Referral created successfully.', 'success')
       setShowReferralForm(false)
       setSelectedPatientId('')
       setSelectedPatientName('')
       setReferralData({ reason: '', targetSpecialty: 'Cardiology', notes: '' })
     } catch (error) {
-      alert('Error: ' + error.message)
+      addError('Error: ' + error.message, 'error')
     } finally {
       setLoading(false)
     }

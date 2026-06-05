@@ -48,11 +48,13 @@ function AppointmentScheduler({ patientId, onScheduled }) {
           notes,
         }),
       })
+      const data = await response.clone().json().catch(async () => {
+        const text = await response.text().catch(() => '')
+        return { error: text || 'Failed to schedule appointment' }
+      })
       if (!response.ok) {
-        const body = await response.json()
-        throw new Error(body.error || 'Failed to schedule appointment')
+        throw new Error(data.error || data.message || 'Failed to schedule appointment')
       }
-      const data = await response.json()
       setScheduledDate('')
       setNotes('')
       setConsultationType('telehealth')

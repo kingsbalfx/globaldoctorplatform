@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useError } from './ErrorHandler';
 
 /**
  * ReferralSystem Component
@@ -15,6 +16,7 @@ const ReferralSystem = ({
   consultationId,
   onReferralComplete 
 }) => {
+  const { addError } = useError();
   const [showPrompt, setShowPrompt] = useState(false);
   const [referralRequest, setReferralRequest] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -73,7 +75,7 @@ const ReferralSystem = ({
   // Patient initiates referral request
   const handlePatientRequestReferral = async () => {
     if (!selectedSpecialty) {
-      alert('Please select a specialty for referral');
+      addError('Please select a specialty for referral.', 'warning');
       return;
     }
 
@@ -89,11 +91,11 @@ const ReferralSystem = ({
         status: 'pending_doctor_approval'
       });
 
-      alert('Referral request sent to your doctor. Waiting for approval...');
+      addError('Referral request sent to your doctor. Waiting for approval...', 'success');
       setShowPrompt(false);
     } catch (error) {
       console.error('Error requesting referral:', error);
-      alert('Failed to request referral. Please try again.');
+      addError('Failed to request referral. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -102,7 +104,7 @@ const ReferralSystem = ({
   // Doctor initiates referral
   const handleDoctorInitiateReferral = async () => {
     if (!selectedSpecialty) {
-      alert('Please select a specialty for referral');
+      addError('Please select a specialty for referral.', 'warning');
       return;
     }
 
@@ -118,11 +120,11 @@ const ReferralSystem = ({
         status: 'pending_patient_approval'
       });
 
-      alert('Referral initiated. Waiting for patient approval...');
+      addError('Referral initiated. Waiting for patient approval...', 'success');
       setShowPrompt(false);
     } catch (error) {
       console.error('Error initiating referral:', error);
-      alert('Failed to initiate referral. Please try again.');
+      addError('Failed to initiate referral. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -139,7 +141,7 @@ const ReferralSystem = ({
         if (userType === 'patient' && tokensAvailable < tokensRequired) {
           // Not enough tokens - set to "not yet"
           response = 'not_yet';
-          alert(`Insufficient tokens. You need ${tokensRequired} tokens for ${referralRequest.specialty} consultation. Status set to "Not Yet".`);
+          addError(`Insufficient tokens. You need ${tokensRequired} tokens for ${referralRequest.specialty} consultation. Status set to "Not Yet".`, 'warning');
         }
       }
 
@@ -160,21 +162,21 @@ const ReferralSystem = ({
           });
         }
 
-        alert('Referral accepted! You will be connected with a specialist shortly.');
+        addError('Referral accepted! You will be connected with a specialist shortly.', 'success');
         if (onReferralComplete) {
           onReferralComplete(referralRequest);
         }
       } else if (response === 'not_yet') {
-        alert('Referral postponed. You can accept when tokens are available.');
+        addError('Referral postponed. You can accept when tokens are available.', 'info');
       } else {
-        alert('Referral declined.');
+        addError('Referral declined.', 'info');
       }
 
       setShowPrompt(false);
       setReferralRequest(null);
     } catch (error) {
       console.error('Error responding to referral:', error);
-      alert('Failed to process response. Please try again.');
+      addError('Failed to process response. Please try again.', 'error');
     } finally {
       setLoading(false);
     }

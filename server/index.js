@@ -25,6 +25,18 @@ const VIDEO_TURN_CREDENTIAL = String(process.env.VIDEO_TURN_CREDENTIAL || proces
 // ---------- Supabase server‑side client ----------
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_KEY
+const SUPABASE_HTTP_TIMEOUT_MS = Math.max(3000, Number(process.env.SUPABASE_HTTP_TIMEOUT_MS || 7000))
+const KORA_HTTP_TIMEOUT_MS = Math.max(3000, Number(process.env.KORA_HTTP_TIMEOUT_MS || 6500))
+
+function timeoutFetch(url, options = {}) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SUPABASE_HTTP_TIMEOUT_MS)
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort()
+    else options.signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout))
+}
 if (!supabaseUrl || !supabaseServiceKey) {
   console.error('❌ FATAL: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables.')
 }
@@ -32,7 +44,8 @@ if (supabaseUrl && supabaseServiceKey && !process.env.SUPABASE_SERVICE_ROLE_KEY)
   console.warn('SUPABASE_SERVICE_ROLE_KEY is not set. Falling back to anon key; database writes may fail if RLS is enabled.')
 }
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { autoRefreshToken: false, persistSession: false }
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: timeoutFetch },
 })
 
 const KORA_SECRET_KEY = String(process.env.KORA_SECRET_KEY || '').trim()
@@ -248,7 +261,7 @@ async function queryKoraCharge(reference) {
   try {
     const { data } = await axios.get(
       `${KORA_BASE_URL}/merchant/api/v1/charges/${encodeURIComponent(reference)}`,
-      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` }, timeout: KORA_HTTP_TIMEOUT_MS }
     )
     return { ok: true, status: normalizeKoraStatus(data), payload: data }
   } catch (error) {
@@ -1962,7 +1975,7 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
     const { data: response } = await axios.post(
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
       koraPayload,
-      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` }, timeout: KORA_HTTP_TIMEOUT_MS }
     )
 
     const checkoutUrl = extractKoraCheckoutUrl(response)
@@ -2085,7 +2098,7 @@ app.post('/api/subscriptions', async (req, res) => {
     const { data: response } = await axios.post(
       `${KORA_BASE_URL}/merchant/api/v1/charges/initialize`,
       koraPayload,
-      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` }, timeout: KORA_HTTP_TIMEOUT_MS }
     )
     const checkoutUrl = extractKoraCheckoutUrl(response)
     if (!checkoutUrl) return res.status(500).json({ error: 'Kora did not return a checkout URL', details: response })
@@ -2659,63 +2672,74 @@ app.post('/api/reviews', async (req, res) => {
 
 // ---------- APPOINTMENTS ----------
 app.post('/api/appointments', async (req, res) => {
-  const { patientId, doctorId, consultationType, notes, subscriptionType, tokensRequired } = req.body
-  const scheduledDate = req.body.scheduledDate || (req.body.date && req.body.time ? new Date(`${req.body.date}T${req.body.time}:00`).toISOString() : '')
-  if (!patientId || !doctorId || !scheduledDate || !consultationType) return res.status(400).json({ error: 'Missing fields' })
+  let deductedTokens = 0
+  let patientId = ''
+  try {
+    const { doctorId, consultationType, notes, subscriptionType, tokensRequired } = req.body
+    patientId = req.body.patientId
+    const scheduledDate = req.body.scheduledDate || (req.body.date && req.body.time ? new Date(`${req.body.date}T${req.body.time}:00`).toISOString() : '')
+    if (!patientId || !doctorId || !scheduledDate || !consultationType) return res.status(400).json({ error: 'Missing fields' })
 
-  const requiredTokens = tokensRequired || (consultationType === 'referral' ? 15 : 20)
-  const balance = await getPatientTokenBalance(patientId)
-  if (balance < requiredTokens) return res.status(402).json({ error: 'Insufficient tokens' })
+    const requiredTokens = tokensRequired || (consultationType === 'referral' ? 15 : 20)
+    const balance = await getPatientTokenBalance(patientId)
+    if (balance < requiredTokens) return res.status(402).json({ error: 'Insufficient tokens' })
 
-  const deducted = await deductPatientTokens(patientId, requiredTokens)
-  if (!deducted) return res.status(402).json({ error: 'Insufficient tokens' })
+    const deducted = await deductPatientTokens(patientId, requiredTokens)
+    if (!deducted) return res.status(402).json({ error: 'Insufficient tokens' })
+    deductedTokens = requiredTokens
 
-  const { data: doctor } = await supabase.from('doctors').select('name').eq('id', doctorId).maybeSingle()
+    const { data: doctor } = await supabase.from('doctors').select('name').eq('id', doctorId).maybeSingle()
 
-  const id = generateId('appt')
-  const appointment = {
-    id, patient_id: patientId, doctor_id: doctorId, doctor_name: doctor?.name || '',
-    consultation_type: consultationType, scheduled_date: scheduledDate, notes,
-    subscription_type: subscriptionType, tokens_charged: requiredTokens,
-    status: 'confirmed', created_at: new Date().toISOString()
+    const id = generateId('appt')
+    const appointment = {
+      id, patient_id: patientId, doctor_id: doctorId, doctor_name: doctor?.name || '',
+      consultation_type: consultationType, scheduled_date: scheduledDate, notes,
+      subscription_type: subscriptionType, tokens_charged: requiredTokens,
+      status: 'confirmed', created_at: new Date().toISOString()
+    }
+    const appointmentInsert = await insertAdaptive('appointments', appointment)
+    if (appointmentInsert.error) throw new Error(appointmentInsert.error.message)
+
+    const date = new Date(scheduledDate)
+    await insertAdaptive('appointment_reminders', [
+      {
+        id: generateId('rem24'), appointment_id: id, reminder_type: '24_hours',
+        should_send_to: ['doctor', 'patient'], notification_channels: ['in_app', 'email'],
+        scheduled_send_time: new Date(date.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+        is_sent: false, created_at: new Date().toISOString()
+      },
+      {
+        id: generateId('rem1h'), appointment_id: id, reminder_type: '1_hour',
+        should_send_to: ['doctor', 'patient'], notification_channels: ['in_app', 'email'],
+        scheduled_send_time: new Date(date.getTime() - 60 * 60 * 1000).toISOString(),
+        is_sent: false, created_at: new Date().toISOString()
+      }
+    ])
+
+    await insertAdaptive('notifications', [
+      {
+        id: generateId('notif'), user_id: patientId, user_type: 'patient',
+        notification_type: 'appointment_confirmed', title: 'Appointment confirmed',
+        message: `Your appointment with ${doctor?.name || ''} is on ${new Date(scheduledDate).toLocaleString()}`,
+        related_resource_type: 'appointment', related_resource_id: id,
+        is_read: false, notification_channels: ['in_app', 'email'], created_at: new Date().toISOString()
+      },
+      {
+        id: generateId('notif'), user_id: doctorId, user_type: 'doctor',
+        notification_type: 'appointment_confirmed', title: 'New appointment',
+        message: `You have a new appointment on ${new Date(scheduledDate).toLocaleString()}`,
+        related_resource_type: 'appointment', related_resource_id: id,
+        is_read: false, notification_channels: ['in_app', 'email'], created_at: new Date().toISOString()
+      }
+    ])
+
+    return res.status(201).json({ appointment, message: 'Appointment scheduled' })
+  } catch (error) {
+    if (deductedTokens > 0 && patientId) {
+      await creditPatientTokens(patientId, deductedTokens, 'Automatic refund: appointment scheduling failed').catch(() => null)
+    }
+    return res.status(500).json({ error: error.name === 'AbortError' ? 'Appointment service timed out. Please try again.' : error.message || 'Failed to schedule appointment' })
   }
-  const appointmentInsert = await insertAdaptive('appointments', appointment)
-  if (appointmentInsert.error) return res.status(500).json({ error: appointmentInsert.error.message })
-
-  const date = new Date(scheduledDate)
-  await insertAdaptive('appointment_reminders', [
-    {
-      id: generateId('rem24'), appointment_id: id, reminder_type: '24_hours',
-      should_send_to: ['doctor', 'patient'], notification_channels: ['in_app', 'email'],
-      scheduled_send_time: new Date(date.getTime() - 24 * 60 * 60 * 1000).toISOString(),
-      is_sent: false, created_at: new Date().toISOString()
-    },
-    {
-      id: generateId('rem1h'), appointment_id: id, reminder_type: '1_hour',
-      should_send_to: ['doctor', 'patient'], notification_channels: ['in_app', 'email'],
-      scheduled_send_time: new Date(date.getTime() - 60 * 60 * 1000).toISOString(),
-      is_sent: false, created_at: new Date().toISOString()
-    }
-  ])
-
-  await insertAdaptive('notifications', [
-    {
-      id: generateId('notif'), user_id: patientId, user_type: 'patient',
-      notification_type: 'appointment_confirmed', title: 'Appointment confirmed',
-      message: `Your appointment with ${doctor?.name || ''} is on ${new Date(scheduledDate).toLocaleString()}`,
-      related_resource_type: 'appointment', related_resource_id: id,
-      is_read: false, notification_channels: ['in_app', 'email'], created_at: new Date().toISOString()
-    },
-    {
-      id: generateId('notif'), user_id: doctorId, user_type: 'doctor',
-      notification_type: 'appointment_confirmed', title: 'New appointment',
-      message: `You have a new appointment on ${new Date(scheduledDate).toLocaleString()}`,
-      related_resource_type: 'appointment', related_resource_id: id,
-      is_read: false, notification_channels: ['in_app', 'email'], created_at: new Date().toISOString()
-    }
-  ])
-
-  res.status(201).json({ appointment, message: 'Appointment scheduled' })
 })
 
 app.get('/api/appointments', async (req, res) => {
@@ -4647,7 +4671,7 @@ app.post('/api/payments/kora/initialize', async (req, res) => {
         },
         metadata: metadata || {},
       },
-      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` } }
+      { headers: { Authorization: `Bearer ${KORA_SECRET_KEY}` }, timeout: KORA_HTTP_TIMEOUT_MS }
     )
 
     const checkoutUrl = extractKoraCheckoutUrl(response)

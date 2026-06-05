@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentScheduled }) {
+  const { addError } = useError()
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(null)
   const [selectedTime, setSelectedTime] = useState(null)
@@ -126,15 +128,18 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
         body: JSON.stringify(appointmentData),
       })
 
+      const result = await response.clone().json().catch(async () => {
+        const text = await response.text().catch(() => '')
+        return { error: text || 'Failed to schedule appointment' }
+      })
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to schedule appointment')
+        throw new Error(result.error || result.message || 'Failed to schedule appointment')
       }
 
-      const result = await response.json()
       onAppointmentScheduled(result.appointment)
+      addError('Appointment scheduled successfully.', 'success')
     } catch (error) {
-      alert('Failed to schedule appointment: ' + error.message)
+      addError('Failed to schedule appointment: ' + error.message, 'error')
     }
   }
 

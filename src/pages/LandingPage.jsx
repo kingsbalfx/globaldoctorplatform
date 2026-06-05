@@ -6,6 +6,7 @@ import AnnouncementBanner from '../components/AnnouncementBanner'
 import LanguageSelector from '../components/LanguageSelector'
 import ProfileAvatar, { getGenderLabel } from '../components/ProfileAvatar'
 import { LandingAdArt, TelehealthHeroArt } from '../components/TelehealthArt'
+import { useError } from '../components/ErrorHandler'
 
 const specialties = [
   'Cardiology',
@@ -48,6 +49,7 @@ const specialtyKey = (value) => {
 
 function LandingPage() {
   const { t } = useTranslation()
+  const { addError } = useError()
   const [query, setQuery] = useState('')
   const [specialty, setSpecialty] = useState('')
   const [language, setLanguage] = useState('')
@@ -170,7 +172,7 @@ function LandingPage() {
       }))
       window.location.href = '/patient'
     } catch (error) {
-      alert('Could not prepare review handoff: ' + error.message)
+      addError('Could not prepare review handoff: ' + error.message, 'error')
     }
   }
 
@@ -189,7 +191,7 @@ function LandingPage() {
       }))
       window.location.href = '/patient'
     } catch (error) {
-      alert('Could not prepare booking handoff: ' + error.message)
+      addError('Could not prepare booking handoff: ' + error.message, 'error')
     } finally {
       setProcessingPayment(false)
     }

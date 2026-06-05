@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 function PatientFileManager({ patientId }) {
+  const { addError } = useError()
   const [files, setFiles] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -55,10 +57,11 @@ function PatientFileManager({ patientId }) {
         }
         await loadFiles()
         setSelectedFile(null)
+        addError('File uploaded successfully.', 'success')
       }
       reader.readAsDataURL(selectedFile)
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     } finally {
       setUploading(false)
     }
@@ -81,7 +84,7 @@ function PatientFileManager({ patientId }) {
       anchor.remove()
       URL.revokeObjectURL(url)
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     }
   }
 

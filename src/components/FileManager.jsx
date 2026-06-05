@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 function FileManager() {
+  const { addError } = useError()
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [filter, setFilter] = useState('all')
+  const [deleteFileId, setDeleteFileId] = useState('')
 
   const handleFileUpload = async (event) => {
     const uploadedFiles = event.target.files
@@ -26,17 +29,15 @@ function FileManager() {
       if (!response.ok) throw new Error('Upload failed')
       const result = await response.json()
       setFiles([...files, ...result.files])
-      alert('Files uploaded successfully!')
+      addError('Files uploaded successfully.', 'success')
     } catch (error) {
-      alert('Upload error: ' + error.message)
+      addError('Upload error: ' + error.message, 'error')
     } finally {
       setUploading(false)
     }
   }
 
   const handleDeleteFile = async (fileId) => {
-    if (!window.confirm('Delete this file?')) return
-
     try {
       const response = await apiFetch(`/api/admin/files/${fileId}`, {
         method: 'DELETE',
@@ -44,9 +45,10 @@ function FileManager() {
 
       if (!response.ok) throw new Error('Delete failed')
       setFiles(files.filter(f => f.id !== fileId))
-      alert('File deleted!')
+      setDeleteFileId('')
+      addError('File deleted.', 'success')
     } catch (error) {
-      alert('Error: ' + error.message)
+      addError('Error: ' + error.message, 'error')
     }
   }
 
@@ -109,12 +111,21 @@ function FileManager() {
               <div className="flex items-start justify-between mb-3">
                 <div className="text-3xl">{getFileIcon(file.type)}</div>
                 <button
-                  onClick={() => handleDeleteFile(file.id)}
+                  onClick={() => setDeleteFileId(file.id)}
                   className="text-red-600 hover:text-red-700 text-lg"
                 >
                   ✕
                 </button>
               </div>
+              {deleteFileId === file.id && (
+                <div className="mb-3 rounded-2xl border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs font-bold text-red-800">Delete this file?</p>
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" onClick={() => handleDeleteFile(file.id)} className="rounded-full bg-red-700 px-3 py-1.5 text-xs font-bold text-white">Delete</button>
+                    <button type="button" onClick={() => setDeleteFileId('')} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-700 ring-1 ring-slate-200">Cancel</button>
+                  </div>
+                </div>
+              )}
               <p className="font-semibold text-slate-900 truncate">{file.name}</p>
               <p className="text-xs text-slate-600 mt-1">{file.size}</p>
               <p className="text-xs text-slate-500 mt-2">

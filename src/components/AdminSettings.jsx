@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 function AdminSettings() {
+  const { addError } = useError()
   const [settings, setSettings] = useState({ minimumSubscriptionUSD: 5 })
   const [onlineStatus, setOnlineStatus] = useState({ doctors: [], patients: [], emergencyRequests: [] })
   const [loading, setLoading] = useState(true)
@@ -48,11 +50,11 @@ function AdminSettings() {
         const error = await response.json()
         throw new Error(error.error || 'Failed to save settings')
       }
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
       setSettings(data.settings)
-      alert('Settings updated successfully')
+      addError('Settings updated successfully.', 'success')
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     }
   }
 

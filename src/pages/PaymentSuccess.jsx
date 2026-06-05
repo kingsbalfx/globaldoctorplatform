@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 
 function readPaymentMetadata(payment) {
@@ -18,6 +18,8 @@ function PaymentSuccess({ onNavigate }) {
   const [status, setStatus] = useState('Verifying payment...')
   const [error, setError] = useState('')
   const [tokens, setTokens] = useState(null)
+  const [verifyRun, setVerifyRun] = useState(0)
+  const retryTimerRef = useRef(null)
 
   const reference = useMemo(() => {
     const url = new URL(window.location.href)
@@ -30,10 +32,17 @@ function PaymentSuccess({ onNavigate }) {
 
   useEffect(() => {
     let redirectTimer
-    const maxAttempts = 8
+    const maxAttempts = 12
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+    setError('')
+    setTokens(null)
+    setStatus('Verifying payment...')
     const scheduleRetry = (attempt, message = 'Kora is still confirming your card payment...') => {
       setStatus(`${message} Attempt ${attempt + 1}/${maxAttempts}.`)
-      redirectTimer = window.setTimeout(() => {
+      retryTimerRef.current = window.setTimeout(() => {
         void verify(attempt + 1)
       }, 2500)
     }
@@ -101,8 +110,9 @@ function PaymentSuccess({ onNavigate }) {
     void verify()
     return () => {
       if (redirectTimer) window.clearTimeout(redirectTimer)
+      if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current)
     }
-  }, [onNavigate, reference])
+  }, [onNavigate, reference, verifyRun])
 
   return (
     <section className="mx-auto mt-16 max-w-2xl px-6 pb-20 sm:px-8">
@@ -122,7 +132,7 @@ function PaymentSuccess({ onNavigate }) {
           </button>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => setVerifyRun((value) => value + 1)}
             className="rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200"
           >
             Verify again

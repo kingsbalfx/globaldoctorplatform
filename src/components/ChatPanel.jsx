@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
+import { useError } from './ErrorHandler'
 
 function ChatPanel({ consultationId, userId, userType, recipientId, recipientType, patientId, doctorId }) {
+  const { addError } = useError()
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
@@ -55,7 +57,7 @@ function ChatPanel({ consultationId, userId, userType, recipientId, recipientTyp
       setDraft('')
       await loadMessages()
     } catch (error) {
-      alert(error.message)
+      addError(error.message, 'error')
     }
   }
 
