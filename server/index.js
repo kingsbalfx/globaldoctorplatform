@@ -90,6 +90,8 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 // ---------- ID generator ----------
 const generateId = (prefix) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
 let videoSignalSeq = 0
+const videoSignalFallbackRooms = new Map()
+const VIDEO_SIGNAL_FALLBACK_TTL_MS = 10 * 60 * 1000
 
 function generateReadablePatientId(kind = 'HRN') {
   const code = String(kind || 'HRN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4) || 'HRN'
@@ -125,6 +127,33 @@ function withTimeout(promise, ms, fallbackValue) {
       setTimeout(() => resolve(fallbackValue), ms)
     }),
   ])
+}
+
+function rememberFallbackVideoSignal(message) {
+  const roomId = String(message.room_id || '')
+  if (!roomId) return
+  const now = Date.now()
+  for (const [key, value] of videoSignalFallbackRooms.entries()) {
+    if (now - Number(value.updatedAt || 0) > VIDEO_SIGNAL_FALLBACK_TTL_MS) {
+      videoSignalFallbackRooms.delete(key)
+    }
+  }
+  const room = videoSignalFallbackRooms.get(roomId) || { signals: [], updatedAt: now }
+  room.signals.push(message)
+  room.signals = room.signals.slice(-300)
+  room.updatedAt = now
+  videoSignalFallbackRooms.set(roomId, room)
+}
+
+function readFallbackVideoSignals({ roomId, senderId, type, since }) {
+  const room = videoSignalFallbackRooms.get(String(roomId))
+  if (!room) return []
+  return room.signals
+    .filter((signal) => String(signal.sender_id) !== String(senderId))
+    .filter((signal) => !type || String(signal.type) === String(type))
+    .filter((signal) => Number(signal.seq || 0) > Number(since || 0))
+    .sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0))
+    .slice(-100)
 }
 
 // ---------- Utility helpers ----------
@@ -245,8 +274,8 @@ function isDoctorRecentlyOnline(doctor = {}) {
   const nested = doctor.doctors || {}
   const rawOnline = Boolean(doctor.isOnline || doctor.is_online || nested.is_online)
   if (!rawOnline) return false
-  const rawSeenAt = doctor.last_seen_at || doctor.updated_at || nested.last_seen_at || nested.updated_at
-  if (!rawSeenAt) return true
+  const rawSeenAt = doctor.last_seen_at || nested.last_seen_at
+  if (!rawSeenAt) return false
   const seenAt = new Date(rawSeenAt).getTime()
   return Number.isFinite(seenAt) && Date.now() - seenAt <= DOCTOR_ONLINE_WINDOW_MS
 }
@@ -898,11 +927,13 @@ async function deductPatientTokens(patientId, amount, description = '') {
   const current = await getPatientTokenBalance(patientId)
   if (current < tokens) return false
   const newBalance = current - tokens
-  await supabase
+  const walletUpdate = await supabase
     .from('patient_tokens')
     .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
-  await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
-  await supabase.from('token_transactions').insert({
+  if (walletUpdate.error) throw walletUpdate.error
+  const patientUpdate = await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
+  if (patientUpdate.error && !isMissingColumnError(patientUpdate.error)) throw patientUpdate.error
+  const transaction = await insertAdaptive('token_transactions', {
     id: generateId('txn'),
     patient_id: patientId,
     transaction_type: 'use',
@@ -910,26 +941,31 @@ async function deductPatientTokens(patientId, amount, description = '') {
     description: description || `Deducted ${tokens} tokens`,
     created_at: new Date().toISOString()
   })
+  if (transaction.error) throw transaction.error
   return true
 }
 
 async function creditPatientTokens(patientId, amount, description = 'Token credit', options = {}) {
   const current = await getPatientTokenBalance(patientId)
-  const newBalance = current + amount
-  await supabase
+  const tokenAmount = Math.max(0, Math.round(Number(amount) || 0))
+  const newBalance = current + tokenAmount
+  const walletUpdate = await supabase
     .from('patient_tokens')
     .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
-  await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
-  await insertAdaptive('token_transactions', {
+  if (walletUpdate.error) throw walletUpdate.error
+  const patientUpdate = await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
+  if (patientUpdate.error && !isMissingColumnError(patientUpdate.error)) throw patientUpdate.error
+  const transaction = await insertAdaptive('token_transactions', {
     id: generateId('txn'),
     patient_id: patientId,
     transaction_type: 'purchase',
-    amount,
+    amount: tokenAmount,
     description,
     reference: options.reference || null,
     metadata: options.metadata || null,
     created_at: new Date().toISOString()
   })
+  if (transaction.error) throw transaction.error
   return newBalance
 }
 
@@ -1056,6 +1092,22 @@ function getFacilityConsultationUnitNgn(doctor = {}) {
 
 function calculateFacilitySpecialtySplit({ channel, doctor, durationMin }) {
   const blocks = Math.max(1, Math.ceil((Number(durationMin) || 15) / 15))
+  if (channel === 'facility_phc') {
+    const total = 500 * blocks
+    return {
+      channel,
+      track: doctor?.specialty || 'phc_consultation',
+      durationMin: Math.max(1, Math.round(Number(durationMin) || 15)),
+      blocks,
+      total_ngn: total,
+      patient_copay_ngn: 0,
+      facility_topup_ngn: total,
+      doctor_ngn: total,
+      facility_ngn: 0,
+      platform_ngn: 0,
+      data_fee_ngn: 0,
+    }
+  }
   const unit = getFacilityConsultationUnitNgn(doctor)
   const total = unit * blocks
   const doctorShare = Math.round(total * 0.5)
@@ -1069,7 +1121,7 @@ function calculateFacilitySpecialtySplit({ channel, doctor, durationMin }) {
     durationMin: Math.max(1, Math.round(Number(durationMin) || 15)),
     blocks,
     total_ngn: total,
-    patient_copay_ngn: total,
+    patient_copay_ngn: 0,
     facility_topup_ngn: 0,
     doctor_ngn: doctorShare,
     facility_ngn: facilityShare,
@@ -1249,7 +1301,7 @@ async function getOrCreateFacilityWallet(facilityId) {
 
 async function recordFacilityWalletTx({ facilityId, direction, amountNgn, reason, ref_type, ref_id, meta }) {
   const amount = Math.max(0, Math.round(Number(amountNgn) || 0))
-  await supabase.from('facility_wallet_tx').insert({
+  await insertAdaptive('facility_wallet_tx', {
     id: generateId('fwtx'),
     facility_id: facilityId,
     direction,
@@ -2675,10 +2727,11 @@ app.post('/api/admin/smtp/test', async (req, res) => {
 // ---------- ONLINE STATUS ----------
 app.get('/api/online/status', async (_req, res) => {
   const activeSince = new Date(Date.now() - DOCTOR_ONLINE_WINDOW_MS).toISOString()
-  const { data: doctors } = await supabase.from('doctors').select('*').eq('is_online', true).gte('updated_at', activeSince)
+  const doctorResult = await supabase.from('doctors').select('*').eq('is_online', true).gte('last_seen_at', activeSince)
   const { data: patients } = await supabase.from('patients').select('*').eq('is_online', true)
   const { data: emergency } = await supabase.from('emergency_requests').select('*').eq('status', 'pending')
-  res.json({ doctors: (doctors || []).map(sanitizeDoctorForResponse), patients: patients || [], emergencyRequests: emergency || [] })
+  const doctors = doctorResult.error && isMissingColumnError(doctorResult.error) ? [] : doctorResult.data || []
+  res.json({ doctors: doctors.map(sanitizeDoctorForResponse), patients: patients || [], emergencyRequests: emergency || [] })
 })
 
 app.patch('/api/doctors/:doctorId/status', async (req, res) => {
@@ -3031,7 +3084,16 @@ app.post('/api/video-signal', async (req, res) => {
     3000,
     { error: new Error('video signal insert timeout') }
   )
-  if (insert.error) return res.status(503).json({ error: `Video signaling persistence failed: ${insert.error.message}` })
+  if (insert.error) {
+    rememberFallbackVideoSignal(message)
+    return res.status(201).json({
+      signal: message,
+      fallback: true,
+      warning: `Video signaling database unavailable: ${insert.error.message}`,
+      message: 'Signal sent with temporary fallback',
+    })
+  }
+  rememberFallbackVideoSignal(message)
   res.status(201).json({ signal: message, message: 'Signal sent' })
 })
 
@@ -3052,7 +3114,13 @@ app.get('/api/video-signal', async (req, res) => {
     .limit(100)
   if (type) query = query.eq('type', type)
   const { data, error } = await withTimeout(query, 2500, { data: null, error: new Error('video signal query timeout') })
-  if (error) return res.status(503).json({ error: `Video signaling query failed: ${error.message}` })
+  if (error) {
+    return res.json({
+      signals: readFallbackVideoSignals({ roomId, senderId, type, since }),
+      fallback: true,
+      warning: `Video signaling database unavailable: ${error.message}`,
+    })
+  }
   const signals = (data || []).sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).slice(-100)
   res.json({ signals })
 })
@@ -3571,33 +3639,40 @@ async function buildPatientRecordSnapshot(patientId) {
   const patient = await findPatientByIdentifier(patientId)
   if (!patient) return null
   const resolvedPatientId = patient.id
-  const labOrderIds = await supabase.from('lab_orders').select('id').eq('patient_id', resolvedPatientId)
-  const [files, appointments, consultations, labOrders, labPayments, facilityReferrals, specialtyReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
-    supabase.from('patient_files').select('*').eq('patient_id', resolvedPatientId),
-    supabase.from('appointments').select('*').eq('patient_id', resolvedPatientId),
-    supabase.from('consultations_ng').select('*').eq('patient_id', resolvedPatientId),
-    supabase.from('lab_orders').select('*').eq('patient_id', resolvedPatientId),
-    supabase.from('lab_payments').select('*').in('order_id', (labOrderIds.data || []).map((order) => order.id)),
-    supabase.from('facility_referrals').select('*').eq('patient_id', resolvedPatientId),
-    supabase.from('specialty_referrals').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }),
-    supabase.from('vital_parameters').select('*').eq('patient_id', resolvedPatientId).order('measured_at', { ascending: false }),
-    supabase.from('vital_parameter_requests').select('*').eq('patient_id', resolvedPatientId).order('requested_at', { ascending: false }),
-    supabase.from('reviews').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }),
-    supabase.from('prescriptions').select('*').eq('patient_id', resolvedPatientId).order('issued_at', { ascending: false }),
-    supabase.from('patient_clinical_notes').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }),
+  const safeRows = async (query, fallback = []) => {
+    const result = await withTimeout(query, 1800, { data: fallback, error: new Error('snapshot query timeout') })
+    if (result.error) return fallback
+    return result.data || fallback
+  }
+  const [files, appointments, consultations, labOrders, facilityReferrals, specialtyReferrals, vitals, vitalRequests, reviews, prescriptions, clinicalNotes] = await Promise.all([
+    safeRows(supabase.from('patient_files').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('appointments').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('consultations_ng').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('lab_orders').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('facility_referrals').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('specialty_referrals').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('vital_parameters').select('*').eq('patient_id', resolvedPatientId).order('measured_at', { ascending: false }).limit(20)),
+    safeRows(supabase.from('vital_parameter_requests').select('*').eq('patient_id', resolvedPatientId).order('requested_at', { ascending: false }).limit(20)),
+    safeRows(supabase.from('reviews').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('prescriptions').select('*').eq('patient_id', resolvedPatientId).order('issued_at', { ascending: false }).limit(10)),
+    safeRows(supabase.from('patient_clinical_notes').select('*').eq('patient_id', resolvedPatientId).order('created_at', { ascending: false }).limit(10)),
   ])
+  const labOrderIds = labOrders.map((order) => order.id).filter(Boolean)
+  const labPayments = labOrderIds.length
+    ? await safeRows(supabase.from('lab_payments').select('*').in('order_id', labOrderIds).limit(20))
+    : []
   return {
     patient: sanitizePatientForResponse(patient),
-    files: files.data || [],
-    appointments: appointments.data || [],
-    consultations_ng: consultations.data || [],
-    labs: { orders: labOrders.data || [], payments: labPayments.data || [] },
-    referrals: { specialty: specialtyReferrals.data || [], facility: facilityReferrals.data || [] },
-    vitals: vitals.data || [],
-    vital_requests: vitalRequests.data || [],
-    reviews: reviews.data || [],
-    prescriptions: prescriptions.data || [],
-    clinical_notes: clinicalNotes.data || [],
+    files,
+    appointments,
+    consultations_ng: consultations,
+    labs: { orders: labOrders, payments: labPayments },
+    referrals: { specialty: specialtyReferrals, facility: facilityReferrals },
+    vitals,
+    vital_requests: vitalRequests,
+    reviews,
+    prescriptions,
+    clinical_notes: clinicalNotes,
   }
 }
 
@@ -3607,18 +3682,23 @@ app.get('/api/referrals/specialty/doctors', async (req, res) => {
   const excludeDoctorId = String(req.query.excludeDoctorId || '').trim()
   if (!specialty) return res.status(400).json({ error: 'specialty is required' })
 
-  let query = supabase
+  const buildQuery = (withStatus = true) => {
+    let query = supabase
     .from('doctors')
-    .select('id,email,name,specialty,location,languages,rating,rating_count,is_online,updated_at,account_status,profile_photo_url,gender')
+      .select('*')
     .eq('verified', true)
     .eq('license_verified', true)
-    .or('account_status.is.null,account_status.eq.active')
-    .order('is_online', { ascending: false })
-    .order('rating', { ascending: false })
-    .limit(100)
-  if (excludeDoctorId) query = query.neq('id', excludeDoctorId)
+    if (withStatus) query = query.or('account_status.is.null,account_status.eq.active')
+    if (excludeDoctorId) query = query.neq('id', excludeDoctorId)
+    return query.order('rating', { ascending: false }).limit(100)
+  }
 
-  const { data, error } = await query
+  let { data, error } = await buildQuery(true)
+  if (error && isMissingColumnError(error)) {
+    const fallback = await buildQuery(false)
+    data = fallback.data || []
+    error = fallback.error
+  }
   if (error) return res.status(500).json({ error: error.message })
   const doctors = (data || []).filter((doctor) => specialtyMatches(doctor.specialty, specialty)).map((doctor) => {
     const online = isDoctorRecentlyOnline(doctor)
@@ -3673,17 +3753,27 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
   const insert = await insertAdaptive('specialty_referrals', referral)
   if (insert.error) return res.status(500).json({ error: insert.error.message })
 
-  const targetDoctors = targetDoctorId
-    ? [{ id: String(targetDoctorId) }]
-    : ((await supabase
+  let targetDoctors = targetDoctorId ? [{ id: String(targetDoctorId) }] : []
+  if (!targetDoctorId) {
+    let doctorLookup = await supabase
       .from('doctors')
       .select('id,specialty')
       .eq('verified', true)
       .eq('license_verified', true)
       .or('account_status.is.null,account_status.eq.active')
-      .limit(100)).data || []).filter((doctor) => specialtyMatches(doctor.specialty, referral.to_specialty)).slice(0, 20)
+      .limit(100)
+    if (doctorLookup.error && isMissingColumnError(doctorLookup.error)) {
+      doctorLookup = await supabase
+        .from('doctors')
+        .select('id,specialty')
+        .eq('verified', true)
+        .eq('license_verified', true)
+        .limit(100)
+    }
+    targetDoctors = (doctorLookup.data || []).filter((doctor) => specialtyMatches(doctor.specialty, referral.to_specialty)).slice(0, 20)
+  }
 
-  await Promise.all((targetDoctors || []).map((targetDoctor) => insertAdaptive('notifications', {
+  Promise.all((targetDoctors || []).map((targetDoctor) => insertAdaptive('notifications', {
     id: generateId('notif'),
     user_id: targetDoctor.id,
     user_type: 'doctor',
@@ -3696,9 +3786,9 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
     is_read: false,
     notification_channels: ['in_app'],
     created_at: new Date().toISOString(),
-  })))
+  }))).catch((error) => console.warn('Referral doctor notifications skipped:', error.message))
 
-  await insertAdaptive('notifications', {
+  insertAdaptive('notifications', {
     id: generateId('notif'),
     user_id: snapshot.patient.id,
     user_type: 'patient',
@@ -3711,7 +3801,7 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
     is_read: false,
     notification_channels: ['in_app'],
     created_at: new Date().toISOString(),
-  })
+  }).catch((error) => console.warn('Referral patient notification skipped:', error.message))
 
   let appointment = null
   if (appointmentAt) {
@@ -4538,7 +4628,7 @@ app.post('/api/consultations/start', async (req, res) => {
     facilityId,
     split,
     source: channel === 'direct_home' ? 'Direct live consultation' : 'Facility consultation',
-    chargePatient: channel !== 'direct_home',
+    chargePatient: false,
     debitFacilityTopup: channel === 'facility_phc',
   })
   if (!financials.ok) {

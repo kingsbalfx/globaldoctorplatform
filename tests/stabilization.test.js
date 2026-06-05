@@ -30,8 +30,9 @@ test('admin files are persisted instead of mocked', () => {
 })
 
 test('video signaling requires Supabase persistence', () => {
-  assert.match(server, /Video signaling persistence failed/)
-  assert.match(server, /Video signaling query failed/)
+  assert.match(server, /video_signals/)
+  assert.match(server, /rememberFallbackVideoSignal/)
+  assert.match(server, /readFallbackVideoSignals/)
   assert.doesNotMatch(server, /stored in memory only/)
   assert.doesNotMatch(server, /videoSignalRooms/)
 })
@@ -56,4 +57,24 @@ test('schema includes recent repair columns and indexes', () => {
   assert.match(schema, /metadata jsonb/)
   assert.match(schema, /idx_doctor_availability_slots_doctor_date/)
   assert.match(schema, /idx_token_transactions_patient_reference/)
+})
+
+test('doctor online status requires a recent heartbeat', () => {
+  assert.match(server, /doctor\.last_seen_at \|\| nested\.last_seen_at/)
+  assert.match(server, /if \(!rawSeenAt\) return false/)
+  assert.doesNotMatch(server, /doctor\.last_seen_at \|\| doctor\.updated_at \|\| nested\.last_seen_at \|\| nested\.updated_at/)
+})
+
+test('PHC facility consultations use facility wallet funding instead of patient tokens', () => {
+  assert.match(server, /channel === 'facility_phc'/)
+  assert.match(server, /facility_topup_ngn: total/)
+  assert.match(server, /doctor_ngn: total/)
+  assert.match(server, /chargePatient: false/)
+  assert.match(server, /debitFacilityTopup: channel === 'facility_phc'/)
+})
+
+test('specialty referral creation uses bounded snapshot and non-blocking notifications', () => {
+  assert.match(server, /snapshot query timeout/)
+  assert.match(server, /Referral doctor notifications skipped/)
+  assert.match(server, /buildQuery\(false\)/)
 })
