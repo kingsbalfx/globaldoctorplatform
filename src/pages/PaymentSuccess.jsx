@@ -21,16 +21,23 @@ function PaymentSuccess({ onNavigate }) {
 
   const reference = useMemo(() => {
     const url = new URL(window.location.href)
-    return url.searchParams.get('reference')
+    return url.searchParams.get('payment_reference')
+      || url.searchParams.get('reference')
       || url.searchParams.get('transaction_reference')
-      || url.searchParams.get('payment_reference')
       || url.searchParams.get('trxref')
       || ''
   }, [])
 
   useEffect(() => {
     let redirectTimer
-    const verify = async () => {
+    const maxAttempts = 8
+    const scheduleRetry = (attempt, message = 'Kora is still confirming your card payment...') => {
+      setStatus(`${message} Attempt ${attempt + 1}/${maxAttempts}.`)
+      redirectTimer = window.setTimeout(() => {
+        void verify(attempt + 1)
+      }, 2500)
+    }
+    const verify = async (attempt = 1) => {
       if (!reference) {
         setStatus('')
         setError('Payment reference was not found.')
@@ -40,7 +47,13 @@ function PaymentSuccess({ onNavigate }) {
       try {
         const response = await apiFetch(`/api/payments/kora/verify/${encodeURIComponent(reference)}`)
         const data = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(data.error || 'Payment verification failed')
+        if (!response.ok) {
+          if (attempt < maxAttempts && [404, 425, 429, 500, 502, 503, 504].includes(response.status)) {
+            scheduleRetry(attempt)
+            return
+          }
+          throw new Error(data.error || data.details || 'Payment verification failed')
+        }
 
         if (data.status === 'success') {
           let nextTokens = data.tokens ?? null
@@ -72,6 +85,11 @@ function PaymentSuccess({ onNavigate }) {
             onNavigate?.('patient')
           }, 1600)
         } else {
+          const nextStatus = String(data.status || 'pending').toLowerCase()
+          if (attempt < maxAttempts && ['pending', 'processing', 'unknown'].includes(nextStatus)) {
+            scheduleRetry(attempt, `Payment status is ${nextStatus}. Waiting for final confirmation...`)
+            return
+          }
           setStatus(`Payment status: ${data.status || 'pending'}. Please refresh in a moment.`)
         }
       } catch (err) {

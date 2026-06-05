@@ -215,7 +215,7 @@ function getKoraErrorMessage(error) {
 }
 
 function normalizeKoraStatus(payload) {
-  return String(payload?.data?.status || payload?.status || '').trim().toLowerCase()
+  return String(payload?.data?.status || payload?.data?.transaction_status || payload?.transaction_status || payload?.status || '').trim().toLowerCase()
 }
 
 function isKoraChargeSuccessful(payload) {
@@ -254,6 +254,31 @@ async function queryKoraCharge(reference) {
       error: error.response?.data?.message || error.message,
     }
   }
+}
+
+function getKoraReferenceCandidates(reference, payload) {
+  const data = payload?.data || {}
+  return [
+    reference,
+    data.payment_reference,
+    data.reference,
+    data.transaction_reference,
+    payload?.payment_reference,
+    payload?.reference,
+    payload?.transaction_reference,
+  ].filter(Boolean).map((value) => String(value).trim()).filter(Boolean)
+}
+
+async function findPaymentByReference(referenceOrReferences) {
+  const values = Array.isArray(referenceOrReferences) ? referenceOrReferences : [referenceOrReferences]
+  const candidates = [...new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean))]
+  for (const candidate of candidates) {
+    for (const column of ['reference', 'provider_reference', 'id']) {
+      const { data, error } = await supabase.from('payments').select('*').eq(column, candidate).maybeSingle()
+      if (!error && data) return data
+    }
+  }
+  return null
 }
 
 function parsePaymentMetadata(payment) {
@@ -4645,8 +4670,16 @@ app.post('/api/payments', (req, res) => {
 
 app.get('/api/payments/kora/verify/:reference', async (req, res) => {
   const { reference } = req.params
-  const { data: payment } = await supabase.from('payments').select('*').eq('reference', reference).maybeSingle()
-  if (!payment) return res.status(404).json({ error: 'Payment not found' })
+  let payment = await findPaymentByReference(reference)
+  let charge = null
+
+  if (!payment) {
+    charge = await queryKoraCharge(reference)
+    if (charge.ok) {
+      payment = await findPaymentByReference(getKoraReferenceCandidates(reference, charge.payload))
+    }
+  }
+  if (!payment) return res.status(404).json({ error: 'Payment not found', status: charge?.status || 'unknown' })
 
   if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
     const metadata = parsePaymentMetadata(payment)
@@ -4655,7 +4688,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
     return res.json({ status: 'success', credited: false, tokens, payment, message: 'Payment was already verified.' })
   }
 
-  const charge = await queryKoraCharge(reference)
+  if (!charge) charge = await queryKoraCharge(payment.reference || payment.provider_reference || reference)
   if (!charge.ok) {
     return res.status(502).json({
       status: charge.status,
