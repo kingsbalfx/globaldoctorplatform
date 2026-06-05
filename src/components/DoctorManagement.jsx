@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getSpecialtyInfo, getSpecialtyLogo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
@@ -11,6 +11,7 @@ const emptyForm = {
   email: '',
   password: '',
   name: '',
+  gender: '',
   specialty: 'General Practitioner',
   location: '',
   languages: 'English',
@@ -31,6 +32,7 @@ function doctorToForm(doctor) {
     email: doctor.email || '',
     password: '',
     name: doctor.name || '',
+    gender: doctor.gender || doctor.sex || '',
     specialty: doctor.specialty || 'General Practitioner',
     location: doctor.location || '',
     languages: Array.isArray(doctor.languages) ? doctor.languages.join(', ') : 'English',
@@ -54,6 +56,7 @@ function DoctorManagement({ adminHeaders }) {
   const [formData, setFormData] = useState(emptyForm)
   const [statusDraft, setStatusDraft] = useState(null)
   const [deleteDoctorId, setDeleteDoctorId] = useState('')
+  const formRef = useRef(null)
 
   const canManage = Boolean(adminHeaders)
   const pendingDoctors = useMemo(() => doctors.filter((doctor) => !doctor.verified), [doctors])
@@ -105,6 +108,7 @@ function DoctorManagement({ adminHeaders }) {
   const handleEdit = (doctor) => {
     setFormData(doctorToForm(doctor))
     setShowForm(true)
+    window.setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
   }
 
   const handleSubmitDoctor = async (event) => {
@@ -231,11 +235,17 @@ function DoctorManagement({ adminHeaders }) {
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmitDoctor} className="mt-6 rounded-3xl bg-slate-50 p-6">
+        <form ref={formRef} onSubmit={handleSubmitDoctor} className="mt-6 rounded-3xl bg-slate-50 p-6">
           <div className="grid gap-4 md:grid-cols-2">
             <input type="email" placeholder="Login email" value={formData.email} onChange={(e) => handleChange('email', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required={!formData.id} />
             <input type="text" placeholder={formData.id ? 'New password (optional)' : 'Login password'} value={formData.password} onChange={(e) => handleChange('password', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required={!formData.id} />
             <input type="text" placeholder="Full name" value={formData.name} onChange={(e) => handleChange('name', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required />
+            <select value={formData.gender} onChange={(e) => handleChange('gender', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500" required>
+              <option value="">Select sex</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="other">Other / prefer not to say</option>
+            </select>
             <select value={formData.specialty} onChange={(e) => handleChange('specialty', e.target.value)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-500">
               {specialties.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>

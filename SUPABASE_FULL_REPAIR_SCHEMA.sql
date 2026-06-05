@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS public.admins (
   updated_at timestamptz DEFAULT now()
 );
 
+ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS password text;
+ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS role text DEFAULT 'platform_admin';
+ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+ALTER TABLE public.admins ALTER COLUMN role SET DEFAULT 'platform_admin';
+
 CREATE TABLE IF NOT EXISTS public.server_settings (
   key text PRIMARY KEY,
   value text,

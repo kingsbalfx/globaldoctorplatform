@@ -52,6 +52,11 @@ const KORA_SECRET_KEY = String(process.env.KORA_SECRET_KEY || '').trim()
 const KORA_BASE_URL = String(process.env.KORA_BASE_URL || 'https://api.korapay.com').trim().replace(/\/+$/, '')
 const KORA_CHARGE_CURRENCY = String(process.env.KORA_CHARGE_CURRENCY || 'NGN').trim().toUpperCase()
 const KORA_USD_EXCHANGE_RATE = Number(process.env.KORA_USD_EXCHANGE_RATE || 1600)
+const TOKEN_PURCHASE_SPLIT = Object.freeze({
+  doctorsPool: 0.5,
+  adminManagement: 0.4,
+  platform: 0.1,
+})
 
 // ---------- STARTUP DIAGNOSTICS ----------
 ;(async () => {
@@ -844,10 +849,10 @@ async function getPatientTokenBalance(patientId) {
   const { data: patient } = await supabase.from('patients').select('tokens').eq('id', patientId).maybeSingle()
   const fallbackBalance = Number(patient?.tokens || 0) || 0
   if (patient) {
-    await supabase
+    const { error } = await supabase
       .from('patient_tokens')
       .upsert({ patient_id: patientId, balance: fallbackBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
-      .catch(() => null)
+    if (error) console.warn('Patient token wallet repair skipped:', error.message)
   }
   return fallbackBalance
 }
@@ -1168,18 +1173,22 @@ async function recordTokenRevenueSplit(payment, metadata = {}) {
   const amountNgn = Number(payment?.amount || 0)
   const baseAmount = amountNgn > 0 ? amountNgn : Math.round(amountUsd * KORA_USD_EXCHANGE_RATE)
   if (!baseAmount) return
+  const doctorsPoolNgn = Math.round(baseAmount * TOKEN_PURCHASE_SPLIT.doctorsPool)
+  const adminNgn = Math.round(baseAmount * TOKEN_PURCHASE_SPLIT.adminManagement)
+  const companyNgn = baseAmount - doctorsPoolNgn - adminNgn
   await insertAdaptive('token_revenue_splits', {
     id: generateId('trsplit'),
     payment_id: payment.id,
     patient_id: payment.patient_id || metadata.patientId || null,
     amount_ngn: baseAmount,
-    doctors_pool_ngn: Math.round(baseAmount * 0.5),
-    admin_ngn: Math.round(baseAmount * 0.4),
-    company_ngn: baseAmount - Math.round(baseAmount * 0.5) - Math.round(baseAmount * 0.4),
+    doctors_pool_ngn: doctorsPoolNgn,
+    admin_ngn: adminNgn,
+    company_ngn: companyNgn,
     status: 'pending_distribution',
     metadata: {
       source: 'token_purchase',
-      rule: '50% doctors by specialty/time, 40% admin, 10% company',
+      rule: '50% doctors pool, 40% admin/management, 10% platform',
+      split: TOKEN_PURCHASE_SPLIT,
       tokensExpected: metadata.tokensExpected || null,
     },
     created_at: new Date().toISOString(),

@@ -62,6 +62,10 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
   useEffect(() => {
     void fetchDoctors()
     void fetchPatientTokens()
+    const timer = window.setInterval(() => {
+      void fetchDoctors()
+    }, 60 * 1000)
+    return () => window.clearInterval(timer)
   }, [])
 
   const fetchDoctors = async () => {

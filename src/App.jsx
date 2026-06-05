@@ -88,12 +88,20 @@ function assistantPortalFromView(view) {
   return ''
 }
 
+function normalizeDoctorSession(authData) {
+  const doctor = authData?.doctor && typeof authData.doctor === 'object' ? authData.doctor : authData
+  if (!doctor?.id) return null
+  return { type: authData?.type || 'login', ...doctor }
+}
+
 function App() {
   const [currentView, setCurrentView] = useState(() => viewFromPath(window.location.pathname))
   const [authDoctor, setAuthDoctor] = useState(null)
   const [authAdmin, setAuthAdmin] = useState(null)
   const [activePortal, setActivePortal] = useState(() => {
     try {
+      const pathPortal = portalFromView(viewFromPath(window.location.pathname))
+      if (pathPortal) return pathPortal
       return window.localStorage.getItem('gd_active_portal') || ''
     } catch {
       return ''
@@ -252,10 +260,20 @@ function App() {
     }
 
     if (authData.type === 'login' || authData.type === 'register') {
-      setAuthDoctor(authData)
+      const doctorSession = normalizeDoctorSession(authData)
+      if (!doctorSession) return
+      setAuthDoctor(doctorSession)
       setAuthAdmin(null)
       setPortalSession('doctor')
       setCurrentView('admin')
+      try {
+        window.localStorage.setItem('gd_doctor_session', JSON.stringify(doctorSession))
+        window.localStorage.removeItem('gd_patient_session')
+        window.localStorage.removeItem('gd_facility_session_active')
+        window.localStorage.removeItem('gd_pending_patient_profile')
+      } catch {
+        // ignore
+      }
       try {
         window.history.pushState({ view: 'admin' }, '', '/doctor/dashboard')
       } catch {

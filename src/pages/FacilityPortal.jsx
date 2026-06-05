@@ -257,6 +257,16 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
   }, [step, facility?.id])
 
   useEffect(() => {
+    if (step !== 'dashboard') return undefined
+    if (facility?.type !== 'phc' && facility?.type !== 'private_clinic') return undefined
+    const timer = window.setInterval(() => {
+      void loadOnlineDoctors()
+    }, 60 * 1000)
+    return () => window.clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, facility?.id, facility?.type])
+
+  useEffect(() => {
     if (step !== 'dashboard' || !facility?.id) return
     const timer = window.setTimeout(() => {
       void loadFacilityPatients(patientListLimit, patientSearch)
