@@ -46,6 +46,23 @@ ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAUL
 ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 ALTER TABLE public.admins ALTER COLUMN role SET DEFAULT 'platform_admin';
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'admins'
+      AND column_name = 'id'
+      AND data_type IN ('integer', 'bigint')
+  ) THEN
+    ALTER TABLE public.admins ALTER COLUMN id DROP DEFAULT;
+    ALTER TABLE public.admins ALTER COLUMN id TYPE text USING id::text;
+    ALTER TABLE public.admins
+      ALTER COLUMN id SET DEFAULT ('admin-' || extract(epoch from clock_timestamp())::bigint || '-' || encode(gen_random_bytes(4), 'hex'));
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.server_settings (
   key text PRIMARY KEY,
   value text,
