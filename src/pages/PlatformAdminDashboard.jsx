@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import DoctorManagement from '../components/DoctorManagement'
@@ -68,6 +68,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
 
   const [facilities, setFacilities] = useState([])
   const [facilityFilter, setFacilityFilter] = useState('')
+  const [facilityStatusDraft, setFacilityStatusDraft] = useState(null)
   const [facilityForm, setFacilityForm] = useState({
     id: '',
     type: 'phc',
@@ -83,6 +84,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const [funding, setFunding] = useState({ facilityId: '', amount_ngn: '' })
 
   const [auditLogs, setAuditLogs] = useState([])
+  const [payoutStatusDraft, setPayoutStatusDraft] = useState(null)
 
   const headers = useMemo(() => {
     if (!credentials?.email || !credentials?.password) return null
@@ -401,12 +403,20 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     }
   }
 
-  const updateFacilityStatus = async (facility, active) => {
+  const openFacilityStatusPanel = (facility, active) => {
+    if (active) {
+      void updateFacilityStatus(facility, active, '')
+      return
+    }
+    setFacilityStatusDraft({
+      facilityId: facility.id,
+      active,
+      reason: facility.suspension_reason || 'Facility paused pending platform admin review.',
+    })
+  }
+
+  const updateFacilityStatus = async (facility, active, reason = '') => {
     if (!headers) return
-    const reason = active
-      ? ''
-      : window.prompt('Reason/query to show this facility:', facility.suspension_reason || 'Facility paused pending platform admin review.')
-    if (!active && reason === null) return
     setLoading(true)
     try {
       const response = await apiFetch(`/api/admin/facilities/${encodeURIComponent(facility.id)}`, {
@@ -420,6 +430,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to update facility status')
       setFacilities((current) => current.map((item) => item.id === facility.id ? { ...item, ...data.facility } : item))
+      setFacilityStatusDraft(null)
       addError(active ? 'Facility resumed.' : 'Facility paused.', 'success')
     } catch (err) {
       addError(err.message, 'error')
@@ -444,12 +455,19 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
     }
   }
 
-  const updatePayoutStatus = async (payout, status) => {
+  const openPayoutStatusPanel = (payout, status) => {
+    const needsFailureReason = ['rejected', 'failed'].includes(status)
+    setPayoutStatusDraft({
+      payoutId: payout.id,
+      status,
+      note: needsFailureReason
+        ? payout.admin_note || 'Payout could not be completed.'
+        : payout.provider_reference || payout.admin_note || '',
+    })
+  }
+
+  const updatePayoutStatus = async (payout, status, note = '') => {
     if (!headers) return
-    const note = ['rejected', 'failed'].includes(status)
-      ? window.prompt('Reason to record for this payout:', payout.admin_note || 'Payout could not be completed.')
-      : window.prompt('Admin note or provider reference:', payout.provider_reference || '')
-    if (note === null) return
 
     setLoading(true)
     try {
@@ -464,6 +482,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to update payout')
+      setPayoutStatusDraft(null)
       await loadPayouts()
       addError(data.message || 'Payout updated.', 'success')
     } catch (err) {
@@ -1162,7 +1181,8 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {facilities.slice(0, 100).map((f) => (
-                        <tr key={f.id} className="bg-white">
+                        <Fragment key={f.id}>
+                        <tr className="bg-white">
                           <td className="px-4 py-3 font-semibold text-slate-900">{f.name}</td>
                           <td className="px-4 py-3 text-slate-700">{String(f.type || '').replace(/_/g, ' ')}</td>
                           <td className="px-4 py-3 font-semibold text-slate-900">₦{f.wallet_balance_ngn ?? 0}</td>
@@ -1186,7 +1206,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                             </button>
                             <button
                               type="button"
-                              onClick={() => updateFacilityStatus(f, f.is_active === false)}
+                              onClick={() => openFacilityStatusPanel(f, f.is_active === false)}
                               className={`rounded-full px-3 py-2 text-xs font-semibold text-white ${f.is_active === false ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}
                             >
                               {f.is_active === false ? 'Resume' : 'Pause'}
@@ -1194,6 +1214,45 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                             </div>
                           </td>
                         </tr>
+                        {facilityStatusDraft?.facilityId === f.id && (
+                          <tr className="bg-amber-50/50">
+                            <td colSpan={6} className="px-4 py-4">
+                              <div className="overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-lg shadow-amber-900/10">
+                                <div className="bg-gradient-to-r from-amber-600 to-orange-500 px-5 py-3 text-white">
+                                  <p className="text-xs font-black uppercase tracking-[0.18em]">Pause facility access</p>
+                                  <p className="mt-1 text-sm font-semibold">{f.name} review message</p>
+                                </div>
+                                <div className="space-y-3 p-5">
+                                  <p className="text-sm text-slate-600">This message will appear when the facility tries to sign in or work inside the portal.</p>
+                                  <textarea
+                                    value={facilityStatusDraft.reason}
+                                    onChange={(event) => setFacilityStatusDraft({ ...facilityStatusDraft, reason: event.target.value })}
+                                    className="min-h-[104px] w-full rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-slate-900 outline-none focus:bg-white focus:border-amber-500"
+                                    placeholder="Explain why this facility is paused..."
+                                  />
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={loading || !facilityStatusDraft.reason.trim()}
+                                      onClick={() => updateFacilityStatus(f, false, facilityStatusDraft.reason)}
+                                      className="rounded-full bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {loading ? 'Saving...' : 'Confirm pause'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFacilityStatusDraft(null)}
+                                      className="rounded-full bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -1296,8 +1355,11 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                     const doctor = payout.doctor || {}
                     const destination = payout.destination || {}
                     const method = payout.payout_method || doctor.payout_method || 'bank_account'
+                    const activeDraft = payoutStatusDraft?.payoutId === payout.id ? payoutStatusDraft : null
+                    const draftIsFailure = ['rejected', 'failed'].includes(String(activeDraft?.status || '').toLowerCase())
                     return (
-                      <tr key={payout.id} className="bg-white align-top">
+                      <Fragment key={payout.id}>
+                      <tr className="bg-white align-top">
                         <td className="px-4 py-3">
                           <p className="font-semibold text-slate-900">{doctor.name || payout.doctor_id || 'Unknown doctor'}</p>
                           <p className="mt-1 text-xs text-slate-500">{doctor.email || 'No email'} {doctor.specialty ? `- ${doctor.specialty}` : ''}</p>
@@ -1339,7 +1401,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
-                              onClick={() => updatePayoutStatus(payout, 'processing')}
+                              onClick={() => openPayoutStatusPanel(payout, 'processing')}
                               disabled={loading || ['paid', 'completed', 'rejected', 'failed'].includes(String(payout.status || '').toLowerCase())}
                               className="rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
                             >
@@ -1347,7 +1409,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                             </button>
                             <button
                               type="button"
-                              onClick={() => updatePayoutStatus(payout, 'paid')}
+                              onClick={() => openPayoutStatusPanel(payout, 'paid')}
                               disabled={loading || ['paid', 'completed', 'rejected', 'failed'].includes(String(payout.status || '').toLowerCase())}
                               className="rounded-full bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
                             >
@@ -1355,7 +1417,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                             </button>
                             <button
                               type="button"
-                              onClick={() => updatePayoutStatus(payout, 'rejected')}
+                              onClick={() => openPayoutStatusPanel(payout, 'rejected')}
                               disabled={loading || ['paid', 'completed', 'rejected', 'failed'].includes(String(payout.status || '').toLowerCase())}
                               className="rounded-full bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-40"
                             >
@@ -1364,6 +1426,51 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                           </div>
                         </td>
                       </tr>
+                      {activeDraft && (
+                        <tr className={draftIsFailure ? 'bg-red-50/50' : 'bg-emerald-50/50'}>
+                          <td colSpan={5} className="px-4 py-4">
+                            <div className={`overflow-hidden rounded-3xl border bg-white shadow-lg ${draftIsFailure ? 'border-red-200 shadow-red-900/10' : 'border-emerald-200 shadow-emerald-900/10'}`}>
+                              <div className={`px-5 py-3 text-white ${draftIsFailure ? 'bg-gradient-to-r from-red-600 to-rose-500' : 'bg-gradient-to-r from-emerald-600 to-teal-500'}`}>
+                                <p className="text-xs font-black uppercase tracking-[0.18em]">
+                                  {draftIsFailure ? 'Reject and refund payout' : activeDraft.status === 'paid' ? 'Mark payout paid' : 'Move payout to processing'}
+                                </p>
+                                <p className="mt-1 text-sm font-semibold">{doctor.name || payout.doctor_id || 'Doctor payout'} - {Number(payout.amount_tokens || 0).toLocaleString()} tokens</p>
+                              </div>
+                              <div className="space-y-3 p-5">
+                                <p className="text-sm text-slate-600">
+                                  {draftIsFailure
+                                    ? 'Record the reason for rejecting this payout. Pending tokens will be returned automatically.'
+                                    : 'Record the provider reference or admin note for this payout update.'}
+                                </p>
+                                <textarea
+                                  value={activeDraft.note}
+                                  onChange={(event) => setPayoutStatusDraft({ ...activeDraft, note: event.target.value })}
+                                  className={`min-h-[104px] w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none focus:bg-white ${draftIsFailure ? 'border-red-200 bg-red-50 focus:border-red-500' : 'border-emerald-200 bg-emerald-50 focus:border-emerald-500'}`}
+                                  placeholder={draftIsFailure ? 'Why is this payout rejected?' : 'Provider reference or admin note'}
+                                />
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={loading || !activeDraft.note.trim()}
+                                    onClick={() => updatePayoutStatus(payout, activeDraft.status, activeDraft.note)}
+                                    className={`rounded-full px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50 ${draftIsFailure ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                                  >
+                                    {loading ? 'Saving...' : draftIsFailure ? 'Confirm reject/refund' : 'Confirm update'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPayoutStatusDraft(null)}
+                                    className="rounded-full bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     )
                   })}
                 </tbody>

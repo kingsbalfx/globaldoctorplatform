@@ -219,7 +219,20 @@ function normalizeKoraStatus(payload) {
 }
 
 function isKoraChargeSuccessful(payload) {
-  return ['success', 'successful', 'completed'].includes(normalizeKoraStatus(payload))
+  return ['success', 'successful', 'completed', 'paid', 'succeeded', 'approved', 'captured'].includes(normalizeKoraStatus(payload))
+}
+
+const doctorOnlineWindowSeconds = Number(process.env.DOCTOR_ONLINE_WINDOW_SECONDS || 300)
+const DOCTOR_ONLINE_WINDOW_MS = Math.max(60, Number.isFinite(doctorOnlineWindowSeconds) ? doctorOnlineWindowSeconds : 300) * 1000
+
+function isDoctorRecentlyOnline(doctor = {}) {
+  const nested = doctor.doctors || {}
+  const rawOnline = Boolean(doctor.isOnline || doctor.is_online || nested.is_online)
+  if (!rawOnline) return false
+  const rawSeenAt = doctor.last_seen_at || doctor.updated_at || nested.last_seen_at || nested.updated_at
+  if (!rawSeenAt) return false
+  const seenAt = new Date(rawSeenAt).getTime()
+  return Number.isFinite(seenAt) && Date.now() - seenAt <= DOCTOR_ONLINE_WINDOW_MS
 }
 
 async function queryKoraCharge(reference) {
@@ -516,7 +529,7 @@ function sanitizePatientForResponse(patient) {
 function sanitizeDoctorForResponse(doctor) {
   if (!doctor) return null
   const { password, doctors, ...rest } = doctor
-  const isOnline = Boolean(doctor.isOnline || doctor.is_online || doctors?.is_online)
+  const isOnline = isDoctorRecentlyOnline(doctor)
   const earningsTokens = Number(doctor.earningsTokens ?? doctor.earnings_tokens ?? doctors?.earnings_tokens ?? 0) || 0
   const gender = doctor.gender || doctor.sex || doctors?.gender || ''
   const profilePhotoUrl = doctor.profilePhotoUrl || doctor.profile_photo_url || doctors?.profile_photo_url || doctor.passportDataUrl || doctor.passport_data_url || doctors?.passport_data_url || ''
@@ -782,7 +795,16 @@ async function blockIfPlatformPaused(req, res) {
 
 async function getPatientTokenBalance(patientId) {
   const { data } = await supabase.from('patient_tokens').select('balance').eq('patient_id', patientId).maybeSingle()
-  return data?.balance || 0
+  if (Number.isFinite(Number(data?.balance))) return Number(data.balance)
+  const { data: patient } = await supabase.from('patients').select('tokens').eq('id', patientId).maybeSingle()
+  const fallbackBalance = Number(patient?.tokens || 0) || 0
+  if (patient) {
+    await supabase
+      .from('patient_tokens')
+      .upsert({ patient_id: patientId, balance: fallbackBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
+      .catch(() => null)
+  }
+  return fallbackBalance
 }
 
 async function deductPatientTokens(patientId, amount, description = '') {
@@ -1293,8 +1315,9 @@ app.post('/api/doctors/login', async (req, res) => {
         accountPaused: true,
       })
     }
-    await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true }).eq('id', String(doctor.id))
-    res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: String(doctor.id), verified: true, license_verified: true, is_online: true }), message: 'Login successful' })
+    const onlineAt = new Date().toISOString()
+    await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true, updated_at: onlineAt }).eq('id', String(doctor.id))
+    res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: String(doctor.id), verified: true, license_verified: true, is_online: true, updated_at: onlineAt }), message: 'Login successful' })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1522,9 +1545,10 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
             message: 'Your doctor account is waiting for platform admin approval.',
           })
         }
-        if (profile) await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true }).eq('id', profileId)
+        const onlineAt = new Date().toISOString()
+        if (profile) await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true, updated_at: onlineAt }).eq('id', profileId)
         return res.json({
-          doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: profileId, verified: true, license_verified: true, is_online: true }),
+          doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: profileId, verified: true, license_verified: true, is_online: true, updated_at: onlineAt }),
           message: 'Doctor session ready',
         })
       }
@@ -1539,6 +1563,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           specialty: doctorProfile.specialty,
           location: doctorProfile.location,
           is_online: doctor.verified ? true : false,
+          updated_at: new Date().toISOString(),
           license_number: doctorProfile.license_number,
           license_issuer: doctorProfile.license_issuer,
           license_expiry: doctorProfile.license_expiry,
@@ -2222,6 +2247,7 @@ app.get('/api/admin/overview', async (req, res) => {
   startOfDay.setHours(0, 0, 0, 0)
   const startOfWeek = new Date(now)
   startOfWeek.setDate(now.getDate() - 7)
+  const doctorActiveSince = new Date(Date.now() - DOCTOR_ONLINE_WINDOW_MS).toISOString()
 
   const countRows = async (table, apply = (query) => query) => {
     try {
@@ -2279,7 +2305,7 @@ app.get('/api/admin/overview', async (req, res) => {
     countRows('doctors_auth'),
     countRows('doctors', (query) => query.eq('verified', true).eq('license_verified', true)),
     countRows('doctors_auth', (query) => query.eq('verified', false)),
-    countRows('doctors', (query) => query.eq('is_online', true)),
+    countRows('doctors', (query) => query.eq('is_online', true).gte('updated_at', doctorActiveSince)),
     countRows('doctors', (query) => query.in('account_status', ['paused', 'stopped'])),
     countRows('facilities'),
     countRows('facilities', (query) => query.eq('is_active', true)),
@@ -2524,11 +2550,11 @@ app.post('/api/admin/smtp/test', async (req, res) => {
 
 // ---------- ONLINE STATUS ----------
 app.get('/api/online/status', async (_req, res) => {
-  const activeSince = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+  const activeSince = new Date(Date.now() - DOCTOR_ONLINE_WINDOW_MS).toISOString()
   const { data: doctors } = await supabase.from('doctors').select('*').eq('is_online', true).gte('updated_at', activeSince)
   const { data: patients } = await supabase.from('patients').select('*').eq('is_online', true)
   const { data: emergency } = await supabase.from('emergency_requests').select('*').eq('status', 'pending')
-  res.json({ doctors: doctors || [], patients: patients || [], emergencyRequests: emergency || [] })
+  res.json({ doctors: (doctors || []).map(sanitizeDoctorForResponse), patients: patients || [], emergencyRequests: emergency || [] })
 })
 
 app.patch('/api/doctors/:doctorId/status', async (req, res) => {
@@ -2536,7 +2562,7 @@ app.patch('/api/doctors/:doctorId/status', async (req, res) => {
   if ((doctor?.account_status === 'paused' || doctor?.account_status === 'stopped') && Boolean(req.body.isOnline)) {
     return res.status(403).json({ error: doctor.suspension_reason || 'Doctor account is paused by platform admin.' })
   }
-  await supabase.from('doctors').update({ is_online: Boolean(req.body.isOnline) }).eq('id', req.params.doctorId)
+  await supabase.from('doctors').update({ is_online: Boolean(req.body.isOnline), updated_at: new Date().toISOString() }).eq('id', req.params.doctorId)
   res.json({ message: 'Status updated' })
 })
 
@@ -2551,9 +2577,6 @@ app.get('/api/doctors', async (req, res) => {
     let query = supabase.from('doctors').select('*').eq('verified', true).eq('license_verified', true)
     if (withStatus) query = query.or('account_status.is.null,account_status.eq.active')
     if (req.query.minRating) query = query.gte('rating', Number(req.query.minRating))
-    if (req.query.online !== undefined && req.query.online !== '') {
-      query = query.eq('is_online', req.query.online === 'true')
-    }
     return query.order('rating', { ascending: false })
   }
   let { data, error } = await buildQuery(true)
@@ -2564,9 +2587,12 @@ app.get('/api/doctors', async (req, res) => {
   }
   if (error) return res.status(500).json({ error: error.message })
   const specialty = String(req.query.specialty || '').trim()
+  const wantsOnlineFilter = req.query.online !== undefined && req.query.online !== ''
+  const requiredOnline = req.query.online === 'true'
   const doctors = (data || [])
     .filter((doctor) => specialtyMatches(doctor.specialty, specialty))
     .map(sanitizeDoctorForResponse)
+    .filter((doctor) => !wantsOnlineFilter || Boolean(doctor.isOnline) === requiredOnline)
   res.json({ doctors })
 })
 
@@ -3310,7 +3336,6 @@ app.get('/api/referrals/specialty/doctors', async (req, res) => {
   const excludeDoctorId = String(req.query.excludeDoctorId || '').trim()
   if (!specialty) return res.status(400).json({ error: 'specialty is required' })
 
-  const activeSince = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
   let query = supabase
     .from('doctors')
     .select('id,email,name,specialty,location,languages,rating,rating_count,is_online,updated_at,account_status,profile_photo_url,gender')
@@ -3325,11 +3350,11 @@ app.get('/api/referrals/specialty/doctors', async (req, res) => {
   const { data, error } = await query
   if (error) return res.status(500).json({ error: error.message })
   const doctors = (data || []).filter((doctor) => specialtyMatches(doctor.specialty, specialty)).map((doctor) => {
-    const recentlySeen = doctor.updated_at ? new Date(doctor.updated_at).getTime() >= new Date(activeSince).getTime() : false
+    const online = isDoctorRecentlyOnline(doctor)
     return sanitizeDoctorForResponse({
       ...doctor,
-      is_online: Boolean(doctor.is_online && recentlySeen),
-      availability_status: doctor.is_online && recentlySeen ? 'online' : 'offline',
+      is_online: online,
+      availability_status: online ? 'online' : 'offline',
     })
   })
   res.json({ doctors })

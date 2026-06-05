@@ -52,6 +52,7 @@ function DoctorManagement({ adminHeaders }) {
   const [doctors, setDoctors] = useState([])
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState(emptyForm)
+  const [statusDraft, setStatusDraft] = useState(null)
 
   const canManage = Boolean(adminHeaders)
   const pendingDoctors = useMemo(() => doctors.filter((doctor) => !doctor.verified), [doctors])
@@ -170,12 +171,19 @@ function DoctorManagement({ adminHeaders }) {
     }
   }
 
-  const handleDoctorStatus = async (doctor, status) => {
-    const paused = status !== 'active'
-    const reason = paused
-      ? window.prompt('Reason/query to show this doctor on their dashboard:', doctor.suspension_reason || doctor.suspensionReason || 'Account paused pending platform admin review.')
-      : ''
-    if (paused && reason === null) return
+  const openDoctorStatusPanel = (doctor, status) => {
+    if (status === 'active') {
+      void submitDoctorStatus(doctor, status, '')
+      return
+    }
+    setStatusDraft({
+      doctorId: doctor.id,
+      status,
+      reason: doctor.suspension_reason || doctor.suspensionReason || 'Account paused pending platform admin review.',
+    })
+  }
+
+  const submitDoctorStatus = async (doctor, status, reason) => {
     setLoading(true)
     try {
       const response = await apiFetch(`/api/admin/doctors/${encodeURIComponent(doctor.id)}/account-status`, {
@@ -186,7 +194,8 @@ function DoctorManagement({ adminHeaders }) {
       const result = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(result.error || 'Failed to update doctor account status')
       setDoctors((current) => current.map((item) => item.id === doctor.id ? result.doctor : item))
-      addError(status === 'active' ? 'Doctor resumed.' : 'Doctor paused and query message saved.', 'success')
+      setStatusDraft(null)
+      addError(status === 'active' ? 'Doctor resumed.' : status === 'stopped' ? 'Doctor stopped and query message saved.' : 'Doctor paused and query message saved.', 'success')
     } catch (error) {
       addError(error.message, 'error')
     } finally {
@@ -262,13 +271,35 @@ function DoctorManagement({ adminHeaders }) {
         </form>
       )}
 
-      <DoctorGrid title={`Pending review (${pendingDoctors.length})`} doctors={pendingDoctors} onApprove={handleApproveDoctor} onEdit={handleEdit} onDelete={handleDeleteDoctor} onStatus={handleDoctorStatus} />
-      <DoctorGrid title={`Approved doctors (${approvedDoctors.length})`} doctors={approvedDoctors} onApprove={handleApproveDoctor} onEdit={handleEdit} onDelete={handleDeleteDoctor} onStatus={handleDoctorStatus} />
+      <DoctorGrid
+        title={`Pending review (${pendingDoctors.length})`}
+        doctors={pendingDoctors}
+        statusDraft={statusDraft}
+        onStatusDraftChange={setStatusDraft}
+        onApprove={handleApproveDoctor}
+        onEdit={handleEdit}
+        onDelete={handleDeleteDoctor}
+        onStatus={openDoctorStatusPanel}
+        onSubmitStatus={submitDoctorStatus}
+        loading={loading}
+      />
+      <DoctorGrid
+        title={`Approved doctors (${approvedDoctors.length})`}
+        doctors={approvedDoctors}
+        statusDraft={statusDraft}
+        onStatusDraftChange={setStatusDraft}
+        onApprove={handleApproveDoctor}
+        onEdit={handleEdit}
+        onDelete={handleDeleteDoctor}
+        onStatus={openDoctorStatusPanel}
+        onSubmitStatus={submitDoctorStatus}
+        loading={loading}
+      />
     </div>
   )
 }
 
-function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete, onStatus }) {
+function DoctorGrid({ title, doctors, statusDraft, onStatusDraftChange, onApprove, onEdit, onDelete, onStatus, onSubmitStatus, loading }) {
   return (
     <div className="mt-8">
       <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
@@ -280,6 +311,7 @@ function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete, onStatus }) {
             const specialtyInfo = getSpecialtyInfo(doctor.specialty)
             const accountStatus = doctor.account_status || doctor.accountStatus || 'active'
             const isPaused = accountStatus === 'paused' || accountStatus === 'stopped'
+            const activeDraft = statusDraft?.doctorId === doctor.id ? statusDraft : null
             return (
               <div key={doctor.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="mb-3 flex items-start justify-between gap-3">
@@ -325,6 +357,47 @@ function DoctorGrid({ title, doctors, onApprove, onEdit, onDelete, onStatus }) {
                     Delete
                   </button>
                 </div>
+                {activeDraft && (
+                  <div
+                    className="mt-4 overflow-hidden rounded-3xl border bg-white shadow-lg"
+                    style={{ borderColor: `${specialtyInfo.color}55`, boxShadow: `0 18px 40px ${specialtyInfo.color}18` }}
+                  >
+                    <div className="px-4 py-3 text-white" style={{ background: `linear-gradient(135deg, ${specialtyInfo.color}, #0f172a)` }}>
+                      <p className="text-xs font-black uppercase tracking-[0.18em]">{activeDraft.status === 'stopped' ? 'Stop doctor access' : 'Pause doctor access'}</p>
+                      <p className="mt-1 text-sm font-semibold">{specialtyInfo.name} account control</p>
+                    </div>
+                    <div className="space-y-3 p-4">
+                      <p className="text-sm text-slate-600">
+                        This message will appear on Dr. {doctor.name}'s dashboard as the query or review reason.
+                      </p>
+                      <textarea
+                        value={activeDraft.reason}
+                        onChange={(event) => onStatusDraftChange({ ...activeDraft, reason: event.target.value })}
+                        className="min-h-[104px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:bg-white"
+                        style={{ '--tw-ring-color': specialtyInfo.color }}
+                        placeholder="Explain why this account is being paused or stopped..."
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={loading || !activeDraft.reason.trim()}
+                          onClick={() => onSubmitStatus(doctor, activeDraft.status, activeDraft.reason)}
+                          className="rounded-full px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          style={{ backgroundColor: specialtyInfo.color }}
+                        >
+                          {loading ? 'Saving...' : activeDraft.status === 'stopped' ? 'Confirm stop' : 'Confirm pause'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onStatusDraftChange(null)}
+                          className="rounded-full bg-slate-100 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

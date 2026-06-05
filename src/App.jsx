@@ -16,7 +16,7 @@ import Contact from './pages/Contact'
 import Footer from './components/Footer'
 import HumanoidAssistant from './components/ai/HumanoidAssistant'
 import { ErrorProvider } from './components/ErrorHandler'
-import { apiFetch } from './lib/apiFetch'
+import { apiFetch, getApiBaseCandidates } from './lib/apiFetch'
 import './lib/i18n' // Initialize i18n
 
 function viewFromPath(pathname) {
@@ -200,6 +200,37 @@ function App() {
       // ignore
     }
   }, [])
+
+  useEffect(() => {
+    if (!authDoctor?.id || currentView !== 'admin') return undefined
+    const statusPath = `/api/doctors/${encodeURIComponent(authDoctor.id)}/status`
+    const markOnline = () => {
+      void apiFetch(statusPath, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOnline: true }),
+      }).catch(() => null)
+    }
+    const markOfflineOnExit = () => {
+      const body = JSON.stringify({ isOnline: false })
+      const [base = ''] = getApiBaseCandidates()
+      void fetch(`${base}${statusPath}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => null)
+    }
+    markOnline()
+    const timer = window.setInterval(markOnline, 60 * 1000)
+    window.addEventListener('pagehide', markOfflineOnExit)
+    window.addEventListener('beforeunload', markOfflineOnExit)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('pagehide', markOfflineOnExit)
+      window.removeEventListener('beforeunload', markOfflineOnExit)
+    }
+  }, [authDoctor?.id, currentView])
 
   const handleAuth = (authData) => {
     if (authData.type === 'admin-login') {

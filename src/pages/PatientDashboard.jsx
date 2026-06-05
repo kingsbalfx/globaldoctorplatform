@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import AppointmentScheduler from '../components/AppointmentScheduler'
 import PatientFileManager from '../components/PatientFileManager'
@@ -117,6 +117,26 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     onLoggedOut?.()
   }
 
+  const refreshPatientTokens = useCallback(async (patientId) => {
+    if (!patientId) return null
+    const response = await apiFetch(`/api/patients/${encodeURIComponent(patientId)}/tokens`)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data.error || 'Unable to refresh token balance')
+    const nextBalance = Number(data.tokens ?? data.balance ?? 0) || 0
+    setTokens(nextBalance)
+    setPatient((currentPatient) => {
+      if (!currentPatient || String(currentPatient.id) !== String(patientId)) return currentPatient
+      const nextPatient = { ...currentPatient, tokens: nextBalance }
+      try {
+        window.localStorage.setItem('gd_patient_session', JSON.stringify(nextPatient))
+      } catch {
+        // ignore
+      }
+      return nextPatient
+    })
+    return nextBalance
+  }, [])
+
   useEffect(() => {
     if (patient && currentStep === 'dashboard') {
       loadOverview()
@@ -160,6 +180,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         setTokens(parsed.tokens || 0)
         setCurrentStep(returnToDashboard ? 'dashboard' : 'doctor')
         if (returnToDashboard) setActiveTab('tokens')
+        void refreshPatientTokens(parsed.id).catch(() => null)
         onSessionChange?.('patient')
       } else {
         // Clear corrupted / incomplete session
@@ -168,7 +189,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     } catch {
       // ignore
     }
-  }, [currentStep])
+  }, [currentStep, refreshPatientTokens])
 
   const loadOverview = async () => {
     setLoading(true)
@@ -177,6 +198,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         apiFetch(`/api/appointments?patientId=${encodeURIComponent(patient.id)}`),
         apiFetch(`/api/patients/files?patientId=${encodeURIComponent(patient.id)}`),
         apiFetch(`/api/notifications?userId=${encodeURIComponent(patient.id)}&userType=patient`),
+        refreshPatientTokens(patient.id).catch(() => null),
       ])
 
       const [appointmentsData, filesData, notificationsData] = await Promise.all([
@@ -208,6 +230,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       setTokens(authResult.patient.tokens || 0)
     }
     setPatient(nextPatient)
+    void refreshPatientTokens(nextPatient.id).catch(() => null)
     try {
       window.localStorage.setItem('gd_patient_session', JSON.stringify(nextPatient))
     } catch {
@@ -289,7 +312,18 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   }
 
   const handleTokensUpdated = (newTokenBalance) => {
-    setTokens(newTokenBalance)
+    const nextBalance = Number(newTokenBalance || 0)
+    setTokens(nextBalance)
+    setPatient((currentPatient) => {
+      if (!currentPatient) return currentPatient
+      const nextPatient = { ...currentPatient, tokens: nextBalance }
+      try {
+        window.localStorage.setItem('gd_patient_session', JSON.stringify(nextPatient))
+      } catch {
+        // ignore
+      }
+      return nextPatient
+    })
   }
 
   const handleEmergencyCall = async () => {
