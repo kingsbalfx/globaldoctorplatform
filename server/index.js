@@ -290,13 +290,15 @@ function getKoraReferenceCandidates(reference, payload) {
 async function findPaymentByReference(referenceOrReferences) {
   const values = Array.isArray(referenceOrReferences) ? referenceOrReferences : [referenceOrReferences]
   const candidates = [...new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean))]
-  for (const candidate of candidates) {
-    for (const column of ['reference', 'provider_reference', 'id']) {
-      const { data, error } = await supabase.from('payments').select('*').eq(column, candidate).maybeSingle()
-      if (!error && data) return data
-    }
-  }
-  return null
+  if (candidates.length === 0) return null
+  const clauses = candidates.flatMap((candidate) => [
+    `reference.eq.${candidate}`,
+    `provider_reference.eq.${candidate}`,
+    `id.eq.${candidate}`,
+  ])
+  const { data, error } = await supabase.from('payments').select('*').or(clauses.join(',')).limit(1)
+  if (error) return null
+  return (data || [])[0] || null
 }
 
 function parsePaymentMetadata(payment) {
@@ -1864,8 +1866,15 @@ app.post('/api/patients/facility/login', async (req, res) => {
 
 // ---------- TOKENS ----------
 app.get('/api/patients/:patientId/tokens', async (req, res) => {
-  const balance = await getPatientTokenBalance(req.params.patientId)
-  res.json({ tokens: balance })
+  try {
+    const balance = await getPatientTokenBalance(req.params.patientId)
+    res.json({ tokens: balance })
+  } catch (error) {
+    res.status(503).json({
+      error: error.name === 'AbortError' ? 'Token balance service timed out. Please retry.' : error.message || 'Could not load token balance',
+      tokens: null,
+    })
+  }
 })
 
 app.get('/api/patients/:patientId/tokens/history', async (req, res) => {
@@ -2699,9 +2708,10 @@ app.post('/api/appointments', async (req, res) => {
     }
     const appointmentInsert = await insertAdaptive('appointments', appointment)
     if (appointmentInsert.error) throw new Error(appointmentInsert.error.message)
+    deductedTokens = 0
 
     const date = new Date(scheduledDate)
-    await insertAdaptive('appointment_reminders', [
+    void insertAdaptive('appointment_reminders', [
       {
         id: generateId('rem24'), appointment_id: id, reminder_type: '24_hours',
         should_send_to: ['doctor', 'patient'], notification_channels: ['in_app', 'email'],
@@ -2714,9 +2724,9 @@ app.post('/api/appointments', async (req, res) => {
         scheduled_send_time: new Date(date.getTime() - 60 * 60 * 1000).toISOString(),
         is_sent: false, created_at: new Date().toISOString()
       }
-    ])
+    ]).catch((error) => console.warn('Appointment reminder creation skipped:', error.message))
 
-    await insertAdaptive('notifications', [
+    void insertAdaptive('notifications', [
       {
         id: generateId('notif'), user_id: patientId, user_type: 'patient',
         notification_type: 'appointment_confirmed', title: 'Appointment confirmed',
@@ -2731,7 +2741,7 @@ app.post('/api/appointments', async (req, res) => {
         related_resource_type: 'appointment', related_resource_id: id,
         is_read: false, notification_channels: ['in_app', 'email'], created_at: new Date().toISOString()
       }
-    ])
+    ]).catch((error) => console.warn('Appointment notification creation skipped:', error.message))
 
     return res.status(201).json({ appointment, message: 'Appointment scheduled' })
   } catch (error) {
@@ -4699,71 +4709,79 @@ app.post('/api/payments', (req, res) => {
 
 app.get('/api/payments/kora/verify/:reference', async (req, res) => {
   const { reference } = req.params
-  let payment = await findPaymentByReference(reference)
-  let charge = null
+  try {
+    let payment = await findPaymentByReference(reference)
+    let charge = null
 
-  if (!payment) {
-    charge = await queryKoraCharge(reference)
-    if (charge.ok) {
-      payment = await findPaymentByReference(getKoraReferenceCandidates(reference, charge.payload))
+    if (!payment) {
+      charge = await queryKoraCharge(reference)
+      if (charge.ok) {
+        payment = await findPaymentByReference(getKoraReferenceCandidates(reference, charge.payload))
+      }
     }
-  }
-  if (!payment) return res.status(404).json({ error: 'Payment not found', status: charge?.status || 'unknown' })
+    if (!payment) return res.status(404).json({ error: 'Payment not found', status: charge?.status || 'unknown' })
 
-  if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
-    const metadata = parsePaymentMetadata(payment)
-    const patientId = payment.patient_id || metadata.patientId
-    const tokens = patientId ? await getPatientTokenBalance(patientId) : null
-    return res.json({ status: 'success', credited: false, tokens, payment, message: 'Payment was already verified.' })
-  }
+    if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
+      const metadata = parsePaymentMetadata(payment)
+      const patientId = payment.patient_id || metadata.patientId
+      const tokens = patientId ? await getPatientTokenBalance(patientId) : null
+      return res.json({ status: 'success', credited: false, tokens, payment, message: 'Payment was already verified.' })
+    }
 
-  if (!charge) charge = await queryKoraCharge(payment.reference || payment.provider_reference || reference)
-  if (!charge.ok) {
-    return res.status(502).json({
-      status: charge.status,
+    if (!charge) charge = await queryKoraCharge(payment.reference || payment.provider_reference || reference)
+    if (!charge.ok) {
+      return res.status(502).json({
+        status: charge.status,
+        credited: false,
+        error: 'Could not verify payment with Kora',
+        details: charge.error,
+        payment,
+      })
+    }
+
+    if (!isKoraChargeSuccessful(charge.payload)) {
+      await supabase.from('payments').update({ status: charge.status || 'pending' }).eq('id', payment.id)
+      return res.json({
+        status: charge.status || 'pending',
+        credited: false,
+        payment,
+        message: 'Payment is not successful yet.',
+      })
+    }
+
+    if ((payment.type || payment.payment_type) === 'token_purchase') {
+      const result = await creditTokenPurchasePayment(payment, 'Kora')
+      const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
+      return res.json({
+        status: 'success',
+        credited: result.credited,
+        tokens: result.tokens,
+        payment: refreshedPayment || payment,
+        message: result.reason,
+      })
+    }
+
+    if ((payment.type || payment.payment_type) === 'subscription') {
+      const result = await creditSubscriptionPayment(payment, 'Kora')
+      const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
+      return res.json({
+        status: 'success',
+        credited: result.credited,
+        tokens: result.tokens,
+        payment: refreshedPayment || payment,
+        message: result.reason,
+      })
+    }
+
+    await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+    return res.json({ status: 'success', credited: false, payment, message: 'Payment verified.' })
+  } catch (error) {
+    return res.status(503).json({
+      status: 'unknown',
       credited: false,
-      error: 'Could not verify payment with Kora',
-      details: charge.error,
-      payment,
+      error: error.name === 'AbortError' ? 'Payment verification timed out. Please retry.' : error.message || 'Payment verification failed',
     })
   }
-
-  if (!isKoraChargeSuccessful(charge.payload)) {
-    await supabase.from('payments').update({ status: charge.status || 'pending' }).eq('id', payment.id)
-    return res.json({
-      status: charge.status || 'pending',
-      credited: false,
-      payment,
-      message: 'Payment is not successful yet.',
-    })
-  }
-
-  if ((payment.type || payment.payment_type) === 'token_purchase') {
-    const result = await creditTokenPurchasePayment(payment, 'Kora')
-    const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
-    return res.json({
-      status: 'success',
-      credited: result.credited,
-      tokens: result.tokens,
-      payment: refreshedPayment || payment,
-      message: result.reason,
-    })
-  }
-
-  if ((payment.type || payment.payment_type) === 'subscription') {
-    const result = await creditSubscriptionPayment(payment, 'Kora')
-    const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
-    return res.json({
-      status: 'success',
-      credited: result.credited,
-      tokens: result.tokens,
-      payment: refreshedPayment || payment,
-      message: result.reason,
-    })
-  }
-
-  await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
-  res.json({ status: 'success', credited: false, payment, message: 'Payment verified.' })
 })
 
 app.post('/api/webhooks/kora', async (req, res) => {
