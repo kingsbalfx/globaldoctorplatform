@@ -121,6 +121,16 @@ function AdminDashboard({ doctor, onLogout }) {
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load financials')
       setFinancials(data)
+      if (data.doctor && activeTab !== 'wallet') {
+        setPayoutDetails((prev) => ({
+          payoutMethod: data.doctor.payoutMethod || data.doctor.payout_method || prev.payoutMethod || 'bank_account',
+          bankCode: data.doctor.bankCode || data.doctor.bank_code || prev.bankCode || '',
+          bankAccount: data.doctor.bankAccount || data.doctor.bank_account || prev.bankAccount || '',
+          currency: data.doctor.currency || prev.currency || '',
+          mobileMoneyOperator: data.doctor.mobileMoneyOperator || data.doctor.mobile_money_operator || prev.mobileMoneyOperator || '',
+          mobileMoneyNumber: data.doctor.mobileMoneyNumber || data.doctor.mobile_money_number || prev.mobileMoneyNumber || '',
+        }))
+      }
     } catch (err) {
       addError(err.message, 'error')
     }
@@ -152,7 +162,7 @@ function AdminDashboard({ doctor, onLogout }) {
     }, 15000)
     return () => window.clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doctor?.id])
+  }, [doctor?.id, activeTab])
 
   useEffect(() => {
     if (hasAutoOpenedPatients.current || activeTab !== 'overview') return
@@ -193,6 +203,16 @@ function AdminDashboard({ doctor, onLogout }) {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Failed to save payout details')
+      if (data.doctor) {
+        setPayoutDetails((prev) => ({
+          payoutMethod: data.doctor.payoutMethod || data.doctor.payout_method || prev.payoutMethod,
+          bankCode: data.doctor.bankCode || data.doctor.bank_code || prev.bankCode,
+          bankAccount: data.doctor.bankAccount || data.doctor.bank_account || prev.bankAccount,
+          currency: data.doctor.currency || prev.currency,
+          mobileMoneyOperator: data.doctor.mobileMoneyOperator || data.doctor.mobile_money_operator || prev.mobileMoneyOperator,
+          mobileMoneyNumber: data.doctor.mobileMoneyNumber || data.doctor.mobile_money_number || prev.mobileMoneyNumber,
+        }))
+      }
       addError('Payout details saved.', 'success')
     } catch (err) {
       addError(err.message, 'error')
@@ -222,7 +242,7 @@ function AdminDashboard({ doctor, onLogout }) {
       const response = await apiFetch(`/api/doctors/${doctor.id}/withdraw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokens })
+        body: JSON.stringify({ tokens, payoutDetails })
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Withdrawal request failed')

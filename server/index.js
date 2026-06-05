@@ -2202,15 +2202,34 @@ app.patch('/api/doctors/:doctorId/payout-details', async (req, res) => {
   const { doctorId } = req.params
   const { payoutMethod, bankCode, bankAccount, currency, mobileMoneyOperator, mobileMoneyNumber } = req.body
   const updates = {}
-  if (payoutMethod) updates.payout_method = payoutMethod
-  if (bankCode) updates.bank_code = bankCode
-  if (bankAccount) updates.bank_account = bankAccount
-  if (currency) updates.currency = currency
-  if (mobileMoneyOperator) updates.mobile_money_operator = mobileMoneyOperator
-  if (mobileMoneyNumber) updates.mobile_money_number = mobileMoneyNumber
-  await supabase.from('doctors').update(updates).eq('id', String(doctorId))
-  res.json({ message: 'Payout details updated' })
+  if (payoutMethod !== undefined) updates.payout_method = String(payoutMethod || 'bank_account')
+  if (bankCode !== undefined) updates.bank_code = String(bankCode || '').trim()
+  if (bankAccount !== undefined) updates.bank_account = String(bankAccount || '').trim()
+  if (currency !== undefined) updates.currency = String(currency || '').trim().toUpperCase()
+  if (mobileMoneyOperator !== undefined) updates.mobile_money_operator = String(mobileMoneyOperator || '').trim()
+  if (mobileMoneyNumber !== undefined) updates.mobile_money_number = String(mobileMoneyNumber || '').trim()
+  const update = await updateAdaptive('doctors', updates, (query) => query.eq('id', String(doctorId)))
+  if (update.error) return res.status(500).json({ error: update.error.message })
+  res.json({ message: 'Payout details updated', doctor: sanitizeDoctorForResponse(update.data) })
 })
+
+function normalizePayoutDetailsFromBody(body = {}) {
+  const updates = {}
+  const payoutMethod = body.payoutMethod ?? body.payout_method
+  const bankCode = body.bankCode ?? body.bank_code
+  const bankAccount = body.bankAccount ?? body.bank_account
+  const currency = body.currency
+  const mobileMoneyOperator = body.mobileMoneyOperator ?? body.mobile_money_operator
+  const mobileMoneyNumber = body.mobileMoneyNumber ?? body.mobile_money_number
+
+  if (payoutMethod !== undefined) updates.payout_method = String(payoutMethod || 'bank_account')
+  if (bankCode !== undefined) updates.bank_code = String(bankCode || '').trim()
+  if (bankAccount !== undefined) updates.bank_account = String(bankAccount || '').trim()
+  if (currency !== undefined) updates.currency = String(currency || '').trim().toUpperCase()
+  if (mobileMoneyOperator !== undefined) updates.mobile_money_operator = String(mobileMoneyOperator || '').trim()
+  if (mobileMoneyNumber !== undefined) updates.mobile_money_number = String(mobileMoneyNumber || '').trim()
+  return updates
+}
 
 function validateDoctorPayoutDetails(doctor = {}) {
   const method = doctor.payout_method || doctor.payoutMethod || 'bank_account'
@@ -2233,7 +2252,14 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
   const { tokens: requestedTokens } = req.body
   const ledger = await reconcileDoctorEarnings(doctorId)
   if (!ledger?.doctor) return res.status(404).json({ error: 'Doctor not found' })
-  const payoutValidation = validateDoctorPayoutDetails(ledger.doctor)
+  const payoutUpdates = normalizePayoutDetailsFromBody(req.body?.payoutDetails || req.body)
+  const doctorForPayout = { ...ledger.doctor, ...payoutUpdates }
+  if (Object.keys(payoutUpdates).length > 0) {
+    const update = await updateAdaptive('doctors', payoutUpdates, (query) => query.eq('id', String(doctorId)))
+    if (update.error) return res.status(500).json({ error: update.error.message })
+    if (update.data) Object.assign(doctorForPayout, update.data)
+  }
+  const payoutValidation = validateDoctorPayoutDetails(doctorForPayout)
   if (payoutValidation) return res.status(400).json({ error: payoutValidation })
 
   const available = Number(ledger.earningsTokens) || 0
@@ -2253,13 +2279,13 @@ app.post('/api/doctors/:doctorId/withdraw', async (req, res) => {
     amount_usd: tokensToWithdraw / settings.tokenToUSD,
     status: 'pending',
     reference,
-    payout_method: ledger.doctor.payout_method || 'bank_account',
-    currency: ledger.doctor.currency || 'USD',
+    payout_method: doctorForPayout.payout_method || 'bank_account',
+    currency: doctorForPayout.currency || 'USD',
     destination: {
-      bank_code: ledger.doctor.bank_code || null,
-      bank_account: ledger.doctor.bank_account || null,
-      mobile_money_operator: ledger.doctor.mobile_money_operator || null,
-      mobile_money_number: ledger.doctor.mobile_money_number || null,
+      bank_code: doctorForPayout.bank_code || null,
+      bank_account: doctorForPayout.bank_account || null,
+      mobile_money_operator: doctorForPayout.mobile_money_operator || null,
+      mobile_money_number: doctorForPayout.mobile_money_number || null,
     },
     created_at: new Date().toISOString()
   })
