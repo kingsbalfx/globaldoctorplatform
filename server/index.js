@@ -89,7 +89,6 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT;
 
 // ---------- ID generator ----------
 const generateId = (prefix) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
-const videoSignalRooms = new Map()
 let videoSignalSeq = 0
 
 function generateReadablePatientId(kind = 'HRN') {
@@ -103,12 +102,6 @@ function getPatientIdPrefixForFacilityType(type) {
   if (String(type || '').toLowerCase() === 'phc') return 'PHC'
   if (String(type || '').toLowerCase() === 'private_clinic') return 'CLC'
   return 'FAC'
-}
-
-function getVideoSignalRoom(roomId) {
-  const key = String(roomId || '').trim()
-  if (!videoSignalRooms.has(key)) videoSignalRooms.set(key, [])
-  return videoSignalRooms.get(key)
 }
 
 function buildVideoIceServers() {
@@ -1358,6 +1351,7 @@ app.get('/api/config', async (req, res) => {
       kora: Boolean(KORA_SECRET_KEY),
       agora: Boolean(AGORA_APP_ID && AGORA_APP_CERTIFICATE),
       turn: VIDEO_TURN_URLS.length > 0 && Boolean(VIDEO_TURN_USERNAME && VIDEO_TURN_CREDENTIAL),
+      smtp: Boolean((process.env.SMTP_USER || process.env.EMAIL_USER || process.env.GMAIL_USER) && (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.GMAIL_APP_PASSWORD)),
       adminEnv: Boolean(process.env.ADMIN_EMAIL || process.env.ADMIN_PASSWORD),
     },
   })
@@ -2014,10 +2008,9 @@ app.post('/api/patients/:patientId/tokens/purchase/initialize', async (req, res)
   if (paymentInsertError) return res.status(500).json({ error: `Could not create payment record: ${paymentInsertError.message}` })
 
   if (!KORA_SECRET_KEY) {
-    return res.json({
+    return res.status(503).json({
+      error: 'Kora payment is not configured on the server. Add KORA_SECRET_KEY in production environment variables.',
       reference, tokensExpected, rate,
-      checkout_url: `https://kora-pay.com/pay/${reference}`,
-      message: 'Payment initialized (mock - no KORA key)'
     })
   }
 
@@ -2138,12 +2131,11 @@ app.post('/api/subscriptions', async (req, res) => {
   if (paymentInsertError) return res.status(500).json({ error: `Could not create subscription payment: ${paymentInsertError.message}` })
 
   if (!KORA_SECRET_KEY) {
-    return res.status(201).json({
+    return res.status(503).json({
+      error: 'Kora subscription payment is not configured on the server. Add KORA_SECRET_KEY in production environment variables.',
       reference,
       tokensExpected: normalizedTokens,
       tokensIncluded: normalizedTokens,
-      checkout_url: `https://kora-pay.com/pay/${reference}`,
-      message: 'Subscription payment initialized (mock - no KORA key)',
     })
   }
 
@@ -2736,18 +2728,98 @@ app.get('/api/doctors', async (req, res) => {
   res.json({ doctors })
 })
 
-// ---------- DOCTOR AVAILABILITY (mock) ----------
-app.get('/api/doctors/:doctorId/availability', (_req, res) => {
+function buildDefaultAvailabilitySlots(date) {
   const slots = {}
-  const day = new Date().getDay()
+  const day = date.getDay()
   if (day >= 1 && day <= 5) {
-    for (let h = 9; h < 17; h++) {
+    for (let h = 9; h < 17; h += 1) {
       for (let m = 0; m < 60; m += 30) {
-        slots[`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`] = Math.random() > 0.3
+        slots[`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`] = true
       }
     }
   }
-  res.json({ slots })
+  return slots
+}
+
+function normalizeSlotTime(value) {
+  return String(value || '').slice(0, 5)
+}
+
+async function getDoctorAvailabilityForDate(doctorId, dateStr) {
+  const date = new Date(`${dateStr}T00:00:00`)
+  if (!doctorId || Number.isNaN(date.getTime())) {
+    return { slots: {}, source: 'invalid' }
+  }
+  const slots = buildDefaultAvailabilitySlots(date)
+
+  const slotResult = await supabase
+    .from('doctor_availability_slots')
+    .select('*')
+    .eq('doctor_id', String(doctorId))
+    .eq('slot_date', dateStr)
+  if (!slotResult.error) {
+    for (const slot of slotResult.data || []) {
+      const time = normalizeSlotTime(slot.slot_time)
+      if (time) slots[time] = Boolean(slot.is_available)
+    }
+  } else if (!isMissingColumnError(slotResult.error)) {
+    throw slotResult.error
+  }
+
+  const start = `${dateStr}T00:00:00.000Z`
+  const end = `${dateStr}T23:59:59.999Z`
+  const appointmentResult = await supabase
+    .from('appointments')
+    .select('scheduled_date,status')
+    .eq('doctor_id', String(doctorId))
+    .gte('scheduled_date', start)
+    .lte('scheduled_date', end)
+    .not('status', 'in', '("cancelled","canceled","completed","rejected")')
+  if (!appointmentResult.error) {
+    for (const appointment of appointmentResult.data || []) {
+      const time = new Date(appointment.scheduled_date).toISOString().slice(11, 16)
+      if (time) slots[time] = false
+    }
+  } else {
+    throw appointmentResult.error
+  }
+
+  return { slots, source: slotResult.error ? 'default' : 'database' }
+}
+
+// ---------- DOCTOR AVAILABILITY ----------
+app.get('/api/doctors/:doctorId/availability', async (req, res) => {
+  const dateStr = String(req.query.date || new Date().toISOString().slice(0, 10)).trim()
+  try {
+    const availability = await getDoctorAvailabilityForDate(req.params.doctorId, dateStr)
+    return res.json({ ...availability, date: dateStr })
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Failed to load doctor availability' })
+  }
+})
+
+app.patch('/api/doctors/:doctorId/availability', async (req, res) => {
+  const { doctorId } = req.params
+  const dateStr = String(req.body?.date || req.body?.slotDate || '').trim()
+  const slots = req.body?.slots || {}
+  if (!dateStr || typeof slots !== 'object') return res.status(400).json({ error: 'date and slots are required' })
+  const rows = Object.entries(slots).map(([time, available]) => ({
+    id: generateId('slot'),
+    doctor_id: String(doctorId),
+    slot_date: dateStr,
+    slot_time: `${normalizeSlotTime(time)}:00`,
+    is_available: Boolean(available),
+    source: 'doctor',
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  })).filter((row) => /^\d{2}:\d{2}:00$/.test(row.slot_time))
+  if (rows.length === 0) return res.status(400).json({ error: 'At least one valid slot is required' })
+  const { error } = await supabase
+    .from('doctor_availability_slots')
+    .upsert(rows, { onConflict: 'doctor_id,slot_date,slot_time' })
+  if (error) return res.status(500).json({ error: error.message })
+  const availability = await getDoctorAvailabilityForDate(doctorId, dateStr)
+  res.json({ ...availability, date: dateStr, message: 'Availability updated' })
 })
 
 // ---------- REVIEWS ----------
@@ -2776,6 +2848,12 @@ app.post('/api/appointments', async (req, res) => {
     patientId = req.body.patientId
     const scheduledDate = req.body.scheduledDate || (req.body.date && req.body.time ? new Date(`${req.body.date}T${req.body.time}:00`).toISOString() : '')
     if (!patientId || !doctorId || !scheduledDate || !consultationType) return res.status(400).json({ error: 'Missing fields' })
+    const scheduled = new Date(scheduledDate)
+    if (Number.isNaN(scheduled.getTime())) return res.status(400).json({ error: 'Invalid appointment date' })
+    const slotDate = scheduled.toISOString().slice(0, 10)
+    const slotTime = scheduled.toISOString().slice(11, 16)
+    const availability = await getDoctorAvailabilityForDate(doctorId, slotDate)
+    if (!availability.slots?.[slotTime]) return res.status(409).json({ error: 'Selected appointment slot is no longer available.' })
 
     const requiredTokens = tokensRequired || (consultationType === 'referral' ? 15 : 20)
     const balance = await getPatientTokenBalance(patientId)
@@ -2932,7 +3010,7 @@ app.post('/api/patients/:patientId/clinical-notes', async (req, res) => {
   res.status(201).json({ note, message: 'Clinical note saved' })
 })
 
-app.post('/api/video-signal', (req, res) => {
+app.post('/api/video-signal', async (req, res) => {
   const { roomId, senderId, senderType, type, payload } = req.body || {}
   if (!roomId || !senderId || !type || !payload) {
     return res.status(400).json({ error: 'roomId, senderId, type, and payload are required' })
@@ -2948,16 +3026,12 @@ app.post('/api/video-signal', (req, res) => {
     payload,
     created_at: new Date().toISOString(),
   }
-  const room = getVideoSignalRoom(roomId)
-  room.push(message)
-  if (room.length > 300) room.splice(0, room.length - 300)
-
-  supabase.from('video_signals').insert(message).then(({ error }) => {
-    if (error) console.warn('Video signal stored in memory only:', error.message)
-  }).catch((error) => {
-    console.warn('Video signal Supabase write timed out or failed:', error.message)
-  })
-
+  const insert = await withTimeout(
+    supabase.from('video_signals').insert(message),
+    3000,
+    { error: new Error('video signal insert timeout') }
+  )
+  if (insert.error) return res.status(503).json({ error: `Video signaling persistence failed: ${insert.error.message}` })
   res.status(201).json({ signal: message, message: 'Signal sent' })
 })
 
@@ -2978,14 +3052,8 @@ app.get('/api/video-signal', async (req, res) => {
     .limit(100)
   if (type) query = query.eq('type', type)
   const { data, error } = await withTimeout(query, 2500, { data: null, error: new Error('video signal query timeout') })
-
-  const memorySignals = getVideoSignalRoom(roomId)
-    .filter((message) => message.seq > since && message.sender_id !== senderId && (!type || message.type === type))
-  const merged = new Map()
-  ;[...(data || []), ...memorySignals].forEach((message) => {
-    if (message?.id) merged.set(message.id, message)
-  })
-  const signals = [...merged.values()].sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).slice(-100)
+  if (error) return res.status(503).json({ error: `Video signaling query failed: ${error.message}` })
+  const signals = (data || []).sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).slice(-100)
   res.json({ signals })
 })
 
@@ -3168,43 +3236,94 @@ app.post('/api/tokens/deduct', async (req, res) => {
   res.json({ balance, tokens: balance, message: 'Tokens deducted' })
 })
 
-app.get('/api/referrals/pending/:userId/:consultationId', (req, res) => {
-  res.json({ referral: null, referrals: [], userId: req.params.userId, consultationId: req.params.consultationId })
+app.get('/api/referrals/pending/:userId/:consultationId', async (req, res) => {
+  const { userId, consultationId } = req.params
+  let query = supabase
+    .from('specialty_referrals')
+    .select('*')
+    .in('status', ['pending', 'pending_doctor_approval', 'pending_patient_approval'])
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (consultationId && consultationId !== 'none') query = query.eq('source_consultation_id', consultationId)
+  if (userId) query = query.or(`patient_id.eq.${userId},from_doctor_id.eq.${userId},target_doctor_id.eq.${userId}`)
+  const { data, error } = await query
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ referral: data?.[0] || null, referrals: data || [], userId, consultationId })
 })
 
-app.post('/api/referrals/request', (req, res) => {
-  res.status(201).json({
-    referral: {
-      id: generateId('refreq'),
-      ...req.body,
-      status: 'pending_doctor_approval',
-      created_at: new Date().toISOString(),
-    },
-    message: 'Referral request submitted',
-  })
+app.post('/api/referrals/request', async (req, res) => {
+  const patientId = req.body?.patientId || req.body?.userId
+  const toSpecialty = req.body?.toSpecialty || req.body?.specialty || req.body?.targetSpecialty
+  const reason = req.body?.reason || req.body?.message || 'Patient requested specialty referral'
+  if (!patientId || !toSpecialty) return res.status(400).json({ error: 'patientId and specialty are required' })
+  const snapshot = await buildPatientRecordSnapshot(patientId)
+  if (!snapshot?.patient) return res.status(404).json({ error: 'Patient not found' })
+  const referral = {
+    id: generateId('sref'),
+    patient_id: patientId,
+    from_doctor_id: req.body?.doctorId || null,
+    from_specialty: req.body?.fromSpecialty || null,
+    to_specialty: toSpecialty,
+    target_doctor_id: req.body?.targetDoctorId || null,
+    source_consultation_id: req.body?.consultationId || null,
+    reason,
+    notes: req.body?.notes || null,
+    patient_snapshot: snapshot.patient,
+    record_snapshot: snapshot,
+    status: 'pending_doctor_approval',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  const insert = await insertAdaptive('specialty_referrals', referral)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
+  res.status(201).json({ referral, message: 'Referral request submitted' })
 })
 
-app.post('/api/referrals/initiate', (req, res) => {
-  res.status(201).json({
-    referral: {
-      id: generateId('refinit'),
-      ...req.body,
-      status: 'pending_patient_approval',
-      created_at: new Date().toISOString(),
-    },
-    message: 'Referral initiated',
-  })
+app.post('/api/referrals/initiate', async (req, res) => {
+  const patientId = req.body?.patientId
+  const doctorId = req.body?.doctorId || req.body?.fromDoctorId
+  const toSpecialty = req.body?.toSpecialty || req.body?.specialty || req.body?.targetSpecialty
+  const reason = req.body?.reason || 'Doctor initiated specialty referral'
+  if (!patientId || !doctorId || !toSpecialty) return res.status(400).json({ error: 'patientId, doctorId, and target specialty are required' })
+  const doctor = await getDoctorProfile(doctorId)
+  const snapshot = await buildPatientRecordSnapshot(patientId)
+  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+  if (!snapshot?.patient) return res.status(404).json({ error: 'Patient not found' })
+  const referral = {
+    id: generateId('sref'),
+    patient_id: patientId,
+    from_doctor_id: doctorId,
+    from_doctor_name: doctor.name,
+    from_specialty: doctor.specialty,
+    to_specialty: toSpecialty,
+    target_doctor_id: req.body?.targetDoctorId || null,
+    source_consultation_id: req.body?.consultationId || null,
+    reason,
+    notes: req.body?.notes || null,
+    patient_snapshot: snapshot.patient,
+    record_snapshot: snapshot,
+    status: 'pending_patient_approval',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  const insert = await insertAdaptive('specialty_referrals', referral)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
+  res.status(201).json({ referral, message: 'Referral initiated' })
 })
 
-app.patch('/api/referrals/:referralId/respond', (req, res) => {
-  res.json({
-    referral: {
-      id: req.params.referralId,
-      status: req.body?.accepted === false ? 'rejected' : 'accepted',
-      responded_at: new Date().toISOString(),
-    },
-    message: 'Referral response recorded',
-  })
+app.patch('/api/referrals/:referralId/respond', async (req, res) => {
+  const status = req.body?.accepted === false ? 'rejected' : 'pending'
+  const updates = {
+    status,
+    updated_at: new Date().toISOString(),
+  }
+  const update = await updateAdaptive(
+    'specialty_referrals',
+    updates,
+    (query) => query.eq('id', req.params.referralId)
+  )
+  if (update.error) return res.status(500).json({ error: update.error.message })
+  res.json({ referral: update.data || { id: req.params.referralId, ...updates }, message: 'Referral response recorded' })
 })
 
 // ---------- ADMIN: DOCTOR MANAGEMENT ----------
@@ -3807,23 +3926,60 @@ app.get('/api/admin/referrals', async (req, res) => {
 // ---------- ADMIN: FILES ----------
 app.post('/api/admin/files/upload', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  const mockFiles = [{
-    id: `file-${Date.now()}`,
-    name: 'Sample Document.pdf',
-    size: '2.4 MB',
-    type: 'application/pdf',
-    uploadedAt: new Date().toISOString()
-  }]
-  res.status(201).json({ files: mockFiles, message: 'Files uploaded' })
+  const files = Array.isArray(req.body?.files) ? req.body.files : req.body?.file ? [req.body.file] : []
+  if (files.length === 0) return res.status(400).json({ error: 'No files supplied. Send JSON with files: [{ name, mimeType, size, contentBase64 }].' })
+  const now = new Date().toISOString()
+  const rows = files.map((file) => ({
+    id: generateId('afile'),
+    name: String(file.name || file.fileName || 'Uploaded file').trim(),
+    file_name: String(file.fileName || file.name || 'Uploaded file').trim(),
+    file_type: String(file.fileType || file.type || file.mimeType || '').trim(),
+    mime_type: String(file.mimeType || file.type || '').trim(),
+    file_size: String(file.size || file.fileSize || ''),
+    content_base64: String(file.contentBase64 || file.content_base64 || ''),
+    url: file.url ? String(file.url) : null,
+    uploaded_by: String(req.headers['x-admin-email'] || req.body?.uploadedBy || ''),
+    uploaded_at: now,
+    created_at: now,
+    updated_at: now,
+  })).filter((file) => file.content_base64 || file.url)
+  if (rows.length === 0) return res.status(400).json({ error: 'Each file needs contentBase64 or url.' })
+  const insert = await insertAdaptive('admin_files', rows)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
+  const responseFiles = rows.map((file) => ({
+    id: file.id,
+    name: file.name,
+    size: file.file_size,
+    type: file.mime_type || file.file_type,
+    uploadedAt: file.uploaded_at,
+    url: file.url,
+  }))
+  res.status(201).json({ files: responseFiles, message: 'Files uploaded' })
 })
 
 app.get('/api/admin/files', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
-  res.json({ files: [], total: 0 })
+  const { data, error } = await supabase
+    .from('admin_files')
+    .select('*')
+    .order('uploaded_at', { ascending: false })
+    .limit(300)
+  if (error) return res.status(500).json({ error: error.message })
+  const files = (data || []).map((file) => ({
+    id: file.id,
+    name: file.name || file.file_name,
+    size: file.file_size,
+    type: file.mime_type || file.file_type || '',
+    uploadedAt: file.uploaded_at || file.created_at,
+    url: file.url,
+  }))
+  res.json({ files, total: files.length })
 })
 
 app.delete('/api/admin/files/:fileId', async (req, res) => {
   if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+  const { error } = await supabase.from('admin_files').delete().eq('id', req.params.fileId)
+  if (error) return res.status(500).json({ error: error.message })
   res.json({ message: 'File deleted' })
 })
 
@@ -4745,10 +4901,9 @@ app.post('/api/payments/kora/initialize', async (req, res) => {
   if (paymentInsertError) return res.status(500).json({ error: `Could not create payment record: ${paymentInsertError.message}` })
 
   if (!KORA_SECRET_KEY) {
-    return res.json({
+    return res.status(503).json({
+      error: 'Kora payment is not configured on the server. Add KORA_SECRET_KEY in production environment variables.',
       reference,
-      checkout_url: `https://kora-pay.com/pay/${reference}`,
-      message: 'Payment request queued. Add KORA_SECRET_KEY on the server to enable live checkout.',
     })
   }
 

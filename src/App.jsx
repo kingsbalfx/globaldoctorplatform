@@ -1,23 +1,24 @@
-import { useEffect, useState } from 'react'
-import LandingPageEnhanced from './pages/LandingPageEnhanced'
-import AdminDashboard from './pages/AdminDashboard'
-import PatientDashboard from './pages/PatientDashboard'
-import PlatformAdminDashboard from './pages/PlatformAdminDashboard'
-import SupportDashboard from './pages/SupportDashboard'
-import RequestTracker from './pages/RequestTracker'
-import FacilityPortal from './pages/FacilityPortal'
-import AuthCallback from './pages/AuthCallback'
-import PaymentSuccess from './pages/PaymentSuccess'
-import ResetPassword from './pages/ResetPassword'
-import DoctorAuth from './components/DoctorAuth'
-import TermsOfService from './pages/TermsOfService'
-import PrivacyPolicy from './pages/PrivacyPolicy'
-import Contact from './pages/Contact'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import Footer from './components/Footer'
 import HumanoidAssistant from './components/ai/HumanoidAssistant'
 import { ErrorProvider } from './components/ErrorHandler'
 import { apiFetch, getApiBaseCandidates } from './lib/apiFetch'
 import './lib/i18n' // Initialize i18n
+
+const LandingPageEnhanced = lazy(() => import('./pages/LandingPageEnhanced'))
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
+const PatientDashboard = lazy(() => import('./pages/PatientDashboard'))
+const PlatformAdminDashboard = lazy(() => import('./pages/PlatformAdminDashboard'))
+const SupportDashboard = lazy(() => import('./pages/SupportDashboard'))
+const RequestTracker = lazy(() => import('./pages/RequestTracker'))
+const FacilityPortal = lazy(() => import('./pages/FacilityPortal'))
+const AuthCallback = lazy(() => import('./pages/AuthCallback'))
+const PaymentSuccess = lazy(() => import('./pages/PaymentSuccess'))
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
+const DoctorAuth = lazy(() => import('./components/DoctorAuth'))
+const TermsOfService = lazy(() => import('./pages/TermsOfService'))
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'))
+const Contact = lazy(() => import('./pages/Contact'))
 
 function viewFromPath(pathname) {
   const path = String(pathname || '/')
@@ -394,20 +395,22 @@ function App() {
         </div>
       </nav>
 
-      {currentView === 'landing' && <LandingPageEnhanced />}
-      {currentView === 'request-tracker' && <RequestTracker />}
-      {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
-      {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
-      {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
-      {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
-      {currentView === 'platform-admin-support' && <SupportDashboard adminSession={authAdmin} />}
-      {currentView === 'facility' && <FacilityPortal logoutSignal={facilityLogoutSignal} onSessionChange={setPortalSession} />}
-      {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
-      {currentView === 'payment-success' && <PaymentSuccess onNavigate={navigate} />}
-      {currentView === 'reset-password' && <ResetPassword />}
-      {currentView === 'terms' && <TermsOfService onNavigate={navigate} />}
-      {currentView === 'privacy' && <PrivacyPolicy onNavigate={navigate} />}
-      {currentView === 'contact' && <Contact onNavigate={navigate} />}
+      <Suspense fallback={<div className="mx-auto mt-16 max-w-3xl rounded-3xl bg-white p-8 text-center text-sm font-semibold text-slate-600 shadow-lg">Loading workspace...</div>}>
+        {currentView === 'landing' && <LandingPageEnhanced />}
+        {currentView === 'request-tracker' && <RequestTracker />}
+        {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
+        {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
+        {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
+        {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
+        {currentView === 'platform-admin-support' && <SupportDashboard adminSession={authAdmin} />}
+        {currentView === 'facility' && <FacilityPortal logoutSignal={facilityLogoutSignal} onSessionChange={setPortalSession} />}
+        {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
+        {currentView === 'payment-success' && <PaymentSuccess onNavigate={navigate} />}
+        {currentView === 'reset-password' && <ResetPassword />}
+        {currentView === 'terms' && <TermsOfService onNavigate={navigate} />}
+        {currentView === 'privacy' && <PrivacyPolicy onNavigate={navigate} />}
+        {currentView === 'contact' && <Contact onNavigate={navigate} />}
+      </Suspense>
 
       {assistantPortal && <HumanoidAssistant portal={assistantPortal} />}
 

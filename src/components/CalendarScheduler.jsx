@@ -22,35 +22,15 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
     try {
       const dateStr = date.toISOString().split('T')[0]
       const response = await apiFetch(`/api/doctors/${doctor.id}/availability?date=${dateStr}`)
-      if (response.ok) {
-        const data = await response.json()
-        setAvailableSlots(data.slots || {})
-      } else {
-        // Mock availability if API fails
-        generateMockSlots(date)
-      }
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Unable to load availability')
+      setAvailableSlots(data.slots || {})
     } catch (error) {
-      console.error('Failed to fetch slots:', error)
-      generateMockSlots(date)
+      setAvailableSlots({})
+      addError(error.message || 'Failed to fetch available appointment slots.', 'error')
     } finally {
       setLoading(false)
     }
-  }
-
-  const generateMockSlots = (date) => {
-    const slots = {}
-    const dayOfWeek = date.getDay() // 0 = Sunday, 6 = Saturday
-
-    // Doctors work Monday-Friday, 9 AM - 5 PM
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-      for (let hour = 9; hour < 17; hour++) {
-        for (let minute = 0; minute < 60; minute += 30) {
-          const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-          slots[timeStr] = Math.random() > 0.3 // 70% availability
-        }
-      }
-    }
-    setAvailableSlots(slots)
   }
 
   const getDaysInMonth = (date) => {

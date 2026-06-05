@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../lib/apiFetch'
 import DoctorCommunityChat from '../components/DoctorCommunityChat'
 import DoctorManagement from '../components/DoctorManagement'
+import FileManager from '../components/FileManager'
 import { useError } from '../components/ErrorHandler'
 import { PortalArtBanner } from '../components/TelehealthArt'
 
@@ -47,7 +48,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [loginLoading, setLoginLoading] = useState(false)
 
-  const [activeSection, setActiveSection] = useState('overview') // overview | doctors | broadcasts | facilities | payouts | community | audit
+  const [activeSection, setActiveSection] = useState('overview') // overview | doctors | broadcasts | facilities | payouts | files | community | audit
 
   const [selectedAudience, setSelectedAudience] = useState('landing')
   const [severity, setSeverity] = useState('info')
@@ -603,6 +604,7 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
           { id: 'broadcasts', label: 'Broadcasts' },
           { id: 'facilities', label: 'Facilities' },
           { id: 'payouts', label: 'Payouts' },
+          { id: 'files', label: 'Files' },
           { id: 'community', label: 'Doctor Community' },
           { id: 'audit', label: 'Audit Logs' },
         ].map((tab) => (
@@ -799,6 +801,8 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
       )}
 
       {activeSection === 'doctors' && <DoctorManagement adminHeaders={headers} />}
+
+      {activeSection === 'files' && <FileManager headers={headers} />}
 
       {activeSection === 'broadcasts' && (
         <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">

@@ -614,6 +614,33 @@ CREATE TABLE IF NOT EXISTS public.video_signals (
   created_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.doctor_availability_slots (
+  id text PRIMARY KEY,
+  doctor_id text REFERENCES public.doctors(id) ON DELETE CASCADE,
+  slot_date date NOT NULL,
+  slot_time time NOT NULL,
+  is_available boolean DEFAULT true,
+  source text DEFAULT 'doctor',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (doctor_id, slot_date, slot_time)
+);
+
+CREATE TABLE IF NOT EXISTS public.admin_files (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  file_name text,
+  file_type text,
+  mime_type text,
+  file_size text,
+  content_base64 text,
+  url text,
+  uploaded_by text,
+  uploaded_at timestamptz DEFAULT now(),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
   id text PRIMARY KEY,
   user_email text NOT NULL,
@@ -973,6 +1000,24 @@ ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS type text;
 ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS payload jsonb;
 ALTER TABLE public.video_signals ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
 
+ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS doctor_id text;
+ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS slot_date date;
+ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS slot_time time;
+ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS is_available boolean DEFAULT true;
+ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS source text DEFAULT 'doctor';
+ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS file_name text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS file_type text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS mime_type text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS file_size text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS content_base64 text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS url text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS uploaded_by text;
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS uploaded_at timestamptz DEFAULT now();
+ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
 ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS payment_id text;
 ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS patient_id text;
 ALTER TABLE public.token_revenue_splits ADD COLUMN IF NOT EXISTS amount_ngn integer DEFAULT 0;
@@ -1048,6 +1093,8 @@ CREATE INDEX IF NOT EXISTS idx_vitals_consultation ON public.vital_parameters(co
 CREATE INDEX IF NOT EXISTS idx_vitals_patient ON public.vital_parameters(patient_id);
 CREATE INDEX IF NOT EXISTS idx_vitals_doctor ON public.vital_parameters(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_video_signals_room_seq ON public.video_signals(room_id, seq);
+CREATE INDEX IF NOT EXISTS idx_doctor_availability_slots_doctor_date ON public.doctor_availability_slots(doctor_id, slot_date);
+CREATE INDEX IF NOT EXISTS idx_admin_files_uploaded_at ON public.admin_files(uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_token_transactions_patient_reference ON public.token_transactions(patient_id, reference);
 CREATE INDEX IF NOT EXISTS idx_token_transactions_patient_type ON public.token_transactions(patient_id, transaction_type);
 CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_payment ON public.token_revenue_splits(payment_id);

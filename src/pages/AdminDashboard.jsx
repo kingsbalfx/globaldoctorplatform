@@ -13,6 +13,7 @@ import VitalParametersMonitor from '../components/VitalParametersMonitor'
 import DoctorSpecialtyReferralPanel from '../components/DoctorSpecialtyReferralPanel'
 import SpecialtyReferralInbox from '../components/SpecialtyReferralInbox'
 import DoctorPatientNotes from '../components/DoctorPatientNotes'
+import DoctorAvailabilityManager from '../components/DoctorAvailabilityManager'
 import { PortalArtBanner } from '../components/TelehealthArt'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
 import { apiFetch } from '../lib/apiFetch'
@@ -401,6 +402,7 @@ function AdminDashboard({ doctor, onLogout }) {
           { id: 'community', label: 'Community', icon: 'Chat' },
           { id: 'referrals', label: 'Referrals', icon: 'Flow' },
           { id: 'patients', label: 'Patients', icon: 'Records' },
+          { id: 'availability', label: 'Availability', icon: 'Calendar' },
           { id: 'wallet', label: 'Financials', icon: 'Wallet' },
           { id: 'manuals', label: 'Manuals & Guides', icon: 'Guides' },
           { id: 'notifications', label: 'Notifications', icon: 'Alerts' },
@@ -725,6 +727,8 @@ function AdminDashboard({ doctor, onLogout }) {
       )}
 
       {activeTab === 'manuals' && <ManualDownload userType="doctor" />}
+
+      {activeTab === 'availability' && <DoctorAvailabilityManager doctor={doctor} />}
 
       {activeTab === 'community' && (
         <DoctorCommunityChat
