@@ -81,7 +81,7 @@ function PaymentSuccess({ onNavigate }) {
           if (patientId) {
             try {
               const stored = JSON.parse(window.localStorage.getItem('gd_patient_session') || 'null')
-              if (stored?.id === patientId) {
+              if (String(stored?.id || '') === String(patientId)) {
                 const nextPatient = { ...stored, tokens: nextTokens ?? stored.tokens ?? 0 }
                 window.localStorage.setItem('gd_patient_session', JSON.stringify(nextPatient))
                 window.localStorage.setItem('gd_active_portal', 'patient')

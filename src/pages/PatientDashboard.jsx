@@ -144,6 +144,20 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   }, [patient, currentStep])
 
   useEffect(() => {
+    if (!patient?.id) return
+    const refreshAfterPayment = () => {
+      void refreshPatientTokens(patient.id).catch(() => null)
+    }
+    refreshAfterPayment()
+    window.addEventListener('focus', refreshAfterPayment)
+    document.addEventListener('visibilitychange', refreshAfterPayment)
+    return () => {
+      window.removeEventListener('focus', refreshAfterPayment)
+      document.removeEventListener('visibilitychange', refreshAfterPayment)
+    }
+  }, [patient?.id, refreshPatientTokens])
+
+  useEffect(() => {
     if (logoutSignal > 0) cleanLogout('manual')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logoutSignal])
@@ -180,7 +194,9 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         setTokens(parsed.tokens || 0)
         setCurrentStep(returnToDashboard ? 'dashboard' : 'doctor')
         if (returnToDashboard) setActiveTab('tokens')
-        void refreshPatientTokens(parsed.id).catch(() => null)
+        void refreshPatientTokens(parsed.id).then((nextBalance) => {
+          if (returnToDashboard && Number.isFinite(Number(nextBalance))) setTokens(Number(nextBalance))
+        }).catch(() => null)
         onSessionChange?.('patient')
       } else {
         // Clear corrupted / incomplete session

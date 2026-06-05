@@ -253,7 +253,7 @@ function isDoctorRecentlyOnline(doctor = {}) {
   const rawOnline = Boolean(doctor.isOnline || doctor.is_online || nested.is_online)
   if (!rawOnline) return false
   const rawSeenAt = doctor.last_seen_at || doctor.updated_at || nested.last_seen_at || nested.updated_at
-  if (!rawSeenAt) return false
+  if (!rawSeenAt) return true
   const seenAt = new Date(rawSeenAt).getTime()
   return Number.isFinite(seenAt) && Date.now() - seenAt <= DOCTOR_ONLINE_WINDOW_MS
 }
@@ -334,20 +334,32 @@ function parsePaymentMetadata(payment) {
 
 async function creditTokenPurchasePayment(payment, source = 'kora') {
   if (!payment) return { credited: false, tokens: null, reason: 'Payment not found' }
-  if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
-    const patientId = payment.patient_id || parsePaymentMetadata(payment).patientId
-    const tokens = patientId ? await getPatientTokenBalance(patientId) : null
-    return { credited: false, tokens, reason: 'Payment already credited' }
-  }
-
   const metadata = parsePaymentMetadata(payment)
   const patientId = payment.patient_id || metadata.patientId
   const tokensExpected = Math.round(Number(metadata.tokensExpected || 0))
+  const paymentReference = payment.reference || payment.provider_reference || payment.id || ''
   if (!patientId || tokensExpected <= 0) {
     return { credited: false, tokens: null, reason: 'Payment metadata is incomplete' }
   }
 
-  const tokens = await creditPatientTokens(patientId, tokensExpected, `Token purchase via ${source}`)
+  const alreadyCredited = paymentReference ? await hasTokenCreditForPayment(patientId, paymentReference) : false
+  if (alreadyCredited) {
+    const tokens = await getPatientTokenBalance(patientId)
+    if (!['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
+      await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+    }
+    return { credited: false, tokens, reason: 'Payment already credited' }
+  }
+
+  const tokens = await creditPatientTokens(patientId, tokensExpected, `Token purchase via ${source} (${paymentReference})`, {
+    reference: paymentReference,
+    metadata: {
+      paymentId: payment.id,
+      provider: payment.provider || payment.payment_provider || 'kora',
+      source,
+      tokensExpected,
+    },
+  })
   await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
   await recordTokenRevenueSplit(payment, metadata).catch((error) => console.warn('Token revenue split skipped:', error.message))
   return { credited: true, tokens, reason: 'Tokens credited' }
@@ -857,6 +869,37 @@ async function getPatientTokenBalance(patientId) {
   return fallbackBalance
 }
 
+async function hasTokenCreditForPayment(patientId, paymentReference) {
+  const reference = String(paymentReference || '').trim()
+  if (!patientId || !reference) return false
+
+  const byReference = await supabase
+    .from('token_transactions')
+    .select('id')
+    .eq('patient_id', patientId)
+    .eq('transaction_type', 'purchase')
+    .eq('reference', reference)
+    .limit(1)
+  if (!byReference.error) return Boolean(byReference.data?.length)
+  if (!isMissingColumnError(byReference.error)) {
+    console.warn('Token credit reference check skipped:', byReference.error.message)
+    return false
+  }
+
+  const { data, error } = await supabase
+    .from('token_transactions')
+    .select('id')
+    .eq('patient_id', patientId)
+    .eq('transaction_type', 'purchase')
+    .ilike('description', `%${reference}%`)
+    .limit(1)
+  if (error) {
+    console.warn('Token credit idempotency check skipped:', error.message)
+    return false
+  }
+  return Boolean(data?.length)
+}
+
 async function deductPatientTokens(patientId, amount, description = '') {
   const tokens = Math.max(0, Math.round(Number(amount) || 0))
   const current = await getPatientTokenBalance(patientId)
@@ -877,19 +920,21 @@ async function deductPatientTokens(patientId, amount, description = '') {
   return true
 }
 
-async function creditPatientTokens(patientId, amount, description = 'Token credit') {
+async function creditPatientTokens(patientId, amount, description = 'Token credit', options = {}) {
   const current = await getPatientTokenBalance(patientId)
   const newBalance = current + amount
   await supabase
     .from('patient_tokens')
     .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
   await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
-  await supabase.from('token_transactions').insert({
+  await insertAdaptive('token_transactions', {
     id: generateId('txn'),
     patient_id: patientId,
     transaction_type: 'purchase',
     amount,
     description,
+    reference: options.reference || null,
+    metadata: options.metadata || null,
     created_at: new Date().toISOString()
   })
   return newBalance
@@ -2619,12 +2664,20 @@ app.get('/api/online/status', async (_req, res) => {
 })
 
 app.patch('/api/doctors/:doctorId/status', async (req, res) => {
-  const { data: doctor } = await supabase.from('doctors').select('account_status, suspension_reason').eq('id', req.params.doctorId).maybeSingle()
+  const { data: doctor } = await supabase.from('doctors').select('*').eq('id', req.params.doctorId).maybeSingle()
   if ((doctor?.account_status === 'paused' || doctor?.account_status === 'stopped') && Boolean(req.body.isOnline)) {
     return res.status(403).json({ error: doctor.suspension_reason || 'Doctor account is paused by platform admin.' })
   }
-  await supabase.from('doctors').update({ is_online: Boolean(req.body.isOnline), updated_at: new Date().toISOString() }).eq('id', req.params.doctorId)
-  res.json({ message: 'Status updated' })
+  const isOnline = Boolean(req.body.isOnline)
+  const seenAt = new Date().toISOString()
+  const update = await updateAdaptive(
+    'doctors',
+    { is_online: isOnline, updated_at: seenAt, last_seen_at: seenAt },
+    (query) => query.eq('id', req.params.doctorId),
+    { select: '*', maybeSingle: true }
+  )
+  if (update.error) return res.status(500).json({ error: update.error.message })
+  res.json({ message: 'Status updated', doctor: sanitizeDoctorForResponse(update.data || { ...doctor, is_online: isOnline, updated_at: seenAt }) })
 })
 
 app.patch('/api/patients/:patientId/status', async (req, res) => {
@@ -4730,15 +4783,10 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
     }
     if (!payment) return res.status(404).json({ error: 'Payment not found', status: charge?.status || 'unknown' })
 
-    if (['success', 'completed'].includes(String(payment.status || '').toLowerCase())) {
-      const metadata = parsePaymentMetadata(payment)
-      const patientId = payment.patient_id || metadata.patientId
-      const tokens = patientId ? await getPatientTokenBalance(patientId) : null
-      return res.json({ status: 'success', credited: false, tokens, payment, message: 'Payment was already verified.' })
-    }
-
-    if (!charge) charge = await queryKoraCharge(payment.reference || payment.provider_reference || reference)
-    if (!charge.ok) {
+    const paymentStatus = String(payment.status || '').toLowerCase()
+    const alreadyMarkedSuccessful = ['success', 'completed'].includes(paymentStatus)
+    if (!alreadyMarkedSuccessful && !charge) charge = await queryKoraCharge(payment.reference || payment.provider_reference || reference)
+    if (!alreadyMarkedSuccessful && !charge.ok) {
       return res.status(502).json({
         status: charge.status,
         credited: false,
@@ -4748,7 +4796,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
       })
     }
 
-    if (!isKoraChargeSuccessful(charge.payload)) {
+    if (!alreadyMarkedSuccessful && !isKoraChargeSuccessful(charge.payload)) {
       await supabase.from('payments').update({ status: charge.status || 'pending' }).eq('id', payment.id)
       return res.json({
         status: charge.status || 'pending',

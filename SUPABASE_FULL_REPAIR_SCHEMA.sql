@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   mobile_money_number text,
   account_status text DEFAULT 'active',
   suspension_reason text,
+  last_seen_at timestamptz,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -183,6 +184,8 @@ CREATE TABLE IF NOT EXISTS public.token_transactions (
   transaction_type text,
   amount integer DEFAULT 0,
   description text,
+  reference text,
+  metadata jsonb,
   created_at timestamptz DEFAULT now()
 );
 
@@ -703,6 +706,9 @@ ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS facility_type text;
 ALTER TABLE public.patients ALTER COLUMN email DROP NOT NULL;
 ALTER TABLE public.patients ALTER COLUMN date_of_birth DROP NOT NULL;
 
+ALTER TABLE public.token_transactions ADD COLUMN IF NOT EXISTS reference text;
+ALTER TABLE public.token_transactions ADD COLUMN IF NOT EXISTS metadata jsonb;
+
 -- Facility-created patients sign in with PID plus their 6-digit portal PIN.
 -- Backfill older facility rows that saved the PIN but left password empty.
 UPDATE public.patients
@@ -724,6 +730,7 @@ ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS availability text DEFAULT 'A
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS consultation_fee numeric(12,2) DEFAULT 35;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS price jsonb DEFAULT '{"basic":50,"premium":100}'::jsonb;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS is_online boolean DEFAULT false;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS earnings_tokens numeric(14,2) DEFAULT 0;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS bank_code text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS bank_account text;
@@ -1012,6 +1019,7 @@ CREATE INDEX IF NOT EXISTS idx_patients_email ON public.patients(email);
 CREATE INDEX IF NOT EXISTS idx_patients_facility_id ON public.patients(facility_id);
 CREATE INDEX IF NOT EXISTS idx_patients_portal_pin ON public.patients(portal_pin);
 CREATE INDEX IF NOT EXISTS idx_doctors_online ON public.doctors(is_online);
+CREATE INDEX IF NOT EXISTS idx_doctors_last_seen_at ON public.doctors(last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_doctors_specialty ON public.doctors(specialty);
 CREATE INDEX IF NOT EXISTS idx_consultations_ng_patient ON public.consultations_ng(patient_id);
 CREATE INDEX IF NOT EXISTS idx_consultations_ng_doctor ON public.consultations_ng(doctor_id);
@@ -1040,6 +1048,8 @@ CREATE INDEX IF NOT EXISTS idx_vitals_consultation ON public.vital_parameters(co
 CREATE INDEX IF NOT EXISTS idx_vitals_patient ON public.vital_parameters(patient_id);
 CREATE INDEX IF NOT EXISTS idx_vitals_doctor ON public.vital_parameters(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_video_signals_room_seq ON public.video_signals(room_id, seq);
+CREATE INDEX IF NOT EXISTS idx_token_transactions_patient_reference ON public.token_transactions(patient_id, reference);
+CREATE INDEX IF NOT EXISTS idx_token_transactions_patient_type ON public.token_transactions(patient_id, transaction_type);
 CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_payment ON public.token_revenue_splits(payment_id);
 CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_patient ON public.token_revenue_splits(patient_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(created_at DESC);

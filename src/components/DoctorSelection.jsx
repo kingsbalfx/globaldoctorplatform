@@ -63,31 +63,52 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
     void fetchDoctors()
     void fetchPatientTokens()
     const timer = window.setInterval(() => {
-      void fetchDoctors()
-    }, 60 * 1000)
-    return () => window.clearInterval(timer)
+      void fetchDoctors({ silent: true })
+    }, 15 * 1000)
+    const handleVisibility = () => {
+      if (!document.hidden) void fetchDoctors({ silent: true })
+    }
+    window.addEventListener('focus', handleVisibility)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleVisibility)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [])
 
-  const fetchDoctors = async () => {
-    setLoading(true)
+  const normalizeDoctorStatus = (doctor) => ({
+    ...doctor,
+    isOnline: Boolean(doctor.isOnline ?? doctor.is_online),
+    is_online: Boolean(doctor.isOnline ?? doctor.is_online),
+  })
+
+  const fetchDoctors = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     try {
       const response = await apiFetch(`/api/doctors`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load doctors')
-      const sortedDoctors = (data.doctors || []).sort((a, b) => Number(Boolean(b.isOnline)) - Number(Boolean(a.isOnline)))
+      const sortedDoctors = (data.doctors || [])
+        .map(normalizeDoctorStatus)
+        .sort((a, b) => Number(Boolean(b.isOnline)) - Number(Boolean(a.isOnline)))
       setDoctors(sortedDoctors)
+      setSelectedDoctor((current) => {
+        if (!current?.id) return current
+        return sortedDoctors.find((doctor) => String(doctor.id) === String(current.id)) || current
+      })
       try {
         const stored = JSON.parse(window.localStorage.getItem('gd_landing_selected_doctor') || 'null')
         const selected = stored?.doctorId ? sortedDoctors.find((doctor) => String(doctor.id) === String(stored.doctorId)) : null
-        if (selected) setSelectedDoctor(selected)
+        if (selected) setSelectedDoctor((current) => current || selected)
       } catch {
         // ignore
       }
     } catch (error) {
       console.error('Failed to fetch doctors:', error)
-      setDoctors([])
+      if (!silent) setDoctors([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 

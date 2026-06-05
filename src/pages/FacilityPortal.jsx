@@ -192,22 +192,30 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
     }
   }
 
-  const loadOnlineDoctors = async () => {
-    setDoctorLoading(true)
+  const normalizeDoctorStatus = (doctor) => ({
+    ...doctor,
+    isOnline: Boolean(doctor.isOnline ?? doctor.is_online),
+    is_online: Boolean(doctor.isOnline ?? doctor.is_online),
+  })
+
+  const loadOnlineDoctors = async ({ silent = false } = {}) => {
+    if (!silent) setDoctorLoading(true)
     try {
       const response = await apiFetch(`/api/doctors?online=true`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Failed to load online doctors')
-      const list = Array.isArray(data.doctors) ? data.doctors : Array.isArray(data) ? data : []
+      const list = (Array.isArray(data.doctors) ? data.doctors : Array.isArray(data) ? data : []).map(normalizeDoctorStatus)
       setDoctors(list)
       if (!selectedDoctorId && list.length > 0) setSelectedDoctorId(list[0].id)
       if (list.length === 0) setSelectedDoctorId('')
     } catch (err) {
-      setDoctors([])
-      setSelectedDoctorId('')
-      setError(err.message)
+      if (!silent) {
+        setDoctors([])
+        setSelectedDoctorId('')
+        setError(err.message)
+      }
     } finally {
-      setDoctorLoading(false)
+      if (!silent) setDoctorLoading(false)
     }
   }
 
@@ -260,8 +268,8 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
     if (step !== 'dashboard') return undefined
     if (facility?.type !== 'phc' && facility?.type !== 'private_clinic') return undefined
     const timer = window.setInterval(() => {
-      void loadOnlineDoctors()
-    }, 60 * 1000)
+      void loadOnlineDoctors({ silent: true })
+    }, 15 * 1000)
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, facility?.id, facility?.type])

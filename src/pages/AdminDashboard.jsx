@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import FacilityReferralManager from '../components/FacilityReferralManager'
 import NotificationCenter from '../components/NotificationCenter'
 import PatientRecordReview from '../components/PatientRecordReview'
@@ -77,6 +77,7 @@ function AdminDashboard({ doctor, onLogout }) {
   const [workspacePanel, setWorkspacePanel] = useState('')
   const [activeConsultTool, setActiveConsultTool] = useState('chat')
   const [financials, setFinancials] = useState(null)
+  const hasAutoOpenedPatients = useRef(false)
   const earningsTokens = Number(financials?.earningsTokens ?? doctor?.earningsTokens ?? doctor?.earnings_tokens ?? 0) || 0
   const estimatedUsd = financials?.estimatedUsd ?? (earningsTokens / 10)
   const tokenToUsd = Number(financials?.settings?.tokenToUSD || 10)
@@ -154,10 +155,12 @@ function AdminDashboard({ doctor, onLogout }) {
   }, [doctor?.id])
 
   useEffect(() => {
+    if (hasAutoOpenedPatients.current || activeTab !== 'overview') return
     if (consultationPatients.some((patient) => patient.latest_consultation?.status === 'in_progress')) {
+      hasAutoOpenedPatients.current = true
       setActiveTab('patients')
     }
-  }, [consultationPatients])
+  }, [activeTab, consultationPatients])
 
   const selectedConsultation = selectedConsultationPatient?.latest_consultation || null
 

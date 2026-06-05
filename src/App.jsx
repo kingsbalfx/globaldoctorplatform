@@ -190,11 +190,34 @@ function App() {
       if (parsed?.id) {
         setAuthDoctor({ type: 'login', ...parsed })
         setPortalSession('doctor')
+        window.localStorage.removeItem('gd_patient_session')
+        window.localStorage.removeItem('gd_facility_session_active')
+        window.localStorage.removeItem('gd_pending_patient_profile')
       }
     } catch {
       // ignore
     }
   }, [])
+
+  useEffect(() => {
+    if (!authDoctor?.id) return
+    if (activePortal !== 'doctor') setPortalSession('doctor')
+    if (currentView !== 'admin' && currentView !== 'doctor-auth') {
+      setCurrentView('admin')
+      try {
+        window.history.replaceState({ view: 'admin' }, '', '/doctor/dashboard')
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      window.localStorage.removeItem('gd_patient_session')
+      window.localStorage.removeItem('gd_facility_session_active')
+      window.localStorage.removeItem('gd_pending_patient_profile')
+    } catch {
+      // ignore
+    }
+  }, [authDoctor?.id, activePortal, currentView])
 
   useEffect(() => {
     try {
@@ -217,7 +240,19 @@ function App() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isOnline: true }),
-      }).catch(() => null)
+      })
+        .then((response) => response.json().catch(() => ({})))
+        .then((data) => {
+          if (data?.doctor?.id) {
+            setAuthDoctor((current) => current?.id ? { ...current, ...data.doctor } : current)
+            try {
+              window.localStorage.setItem('gd_doctor_session', JSON.stringify({ type: 'login', ...data.doctor }))
+            } catch {
+              // ignore
+            }
+          }
+        })
+        .catch(() => null)
     }
     const markOfflineOnExit = () => {
       const body = JSON.stringify({ isOnline: false })
