@@ -733,6 +733,9 @@ ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS facility_type text;
 ALTER TABLE public.patients ALTER COLUMN email DROP NOT NULL;
 ALTER TABLE public.patients ALTER COLUMN date_of_birth DROP NOT NULL;
 
+ALTER TABLE public.patient_tokens ADD COLUMN IF NOT EXISTS balance integer DEFAULT 0;
+ALTER TABLE public.patient_tokens ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
 ALTER TABLE public.token_transactions ADD COLUMN IF NOT EXISTS reference text;
 ALTER TABLE public.token_transactions ADD COLUMN IF NOT EXISTS metadata jsonb;
 

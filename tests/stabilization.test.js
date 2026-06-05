@@ -45,6 +45,23 @@ test('Kora payment initialization does not return fake checkout success without 
   assert.doesNotMatch(server, /Payment request queued\. Add KORA_SECRET_KEY/)
 })
 
+test('patient token wallet writes tolerate older schema cache', () => {
+  assert.match(server, /async function upsertPatientTokenBalance/)
+  assert.match(server, /getMissingColumnName\(result\.error\) === 'updated_at'/)
+  assert.match(server, /mode: 'without_updated_at'/)
+  assert.match(server, /const walletUpdate = await upsertPatientTokenBalance\(patientId, newBalance\)/)
+})
+
+test('Kora verification records actual payment method details', () => {
+  assert.match(server, /function extractKoraPaymentMethod/)
+  assert.match(server, /paymentMethod/)
+  assert.match(server, /bank_transfer/)
+  assert.match(server, /bank_deposit/)
+  assert.match(server, /async function annotatePaymentFromKora/)
+  assert.match(server, /koraPaymentMethod/)
+  assert.match(server, /payment_method: method\.paymentMethod/)
+})
+
 test('doctor withdrawal sends current payout form details', () => {
   assert.match(adminDashboard, /JSON\.stringify\(\{ tokens, payoutDetails \}\)/)
   assert.match(server, /normalizePayoutDetailsFromBody/)
@@ -53,6 +70,7 @@ test('doctor withdrawal sends current payout form details', () => {
 
 test('schema includes recent repair columns and indexes', () => {
   assert.match(schema, /last_seen_at timestamptz/)
+  assert.match(schema, /ALTER TABLE public\.patient_tokens ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now\(\)/)
   assert.match(schema, /reference text/)
   assert.match(schema, /metadata jsonb/)
   assert.match(schema, /idx_doctor_availability_slots_doctor_date/)

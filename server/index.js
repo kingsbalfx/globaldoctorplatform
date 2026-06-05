@@ -263,6 +263,60 @@ function normalizeKoraStatus(payload) {
   return String(payload?.transaction_status || payload?.payment_status || payload?.charge_status || payload?.status || '').trim().toLowerCase()
 }
 
+function normalizePaymentMethodName(value) {
+  const method = String(value || '').trim().toLowerCase().replace(/[_-]+/g, ' ')
+  if (!method) return ''
+  if (method.includes('card')) return 'card'
+  if (method.includes('bank transfer') || method.includes('transfer')) return 'bank_transfer'
+  if (method.includes('bank') || method.includes('deposit')) return 'bank_deposit'
+  if (method.includes('ussd')) return 'ussd'
+  if (method.includes('mobile') || method.includes('wallet')) return 'mobile_money'
+  return method.replace(/\s+/g, '_')
+}
+
+function extractKoraPaymentMethod(payload) {
+  const data = payload?.data || {}
+  const methodCandidate =
+    data.payment_method ||
+    data.paymentMethod ||
+    data.channel ||
+    data.payment_channel ||
+    data.payment_type ||
+    data.paymentType ||
+    data.authorization?.channel ||
+    data.source?.type ||
+    payload?.payment_method ||
+    payload?.paymentMethod ||
+    payload?.channel ||
+    payload?.payment_channel
+  const bankCandidate = data.bank?.name || data.bank_name || data.transfer?.bank_name || data.bank || ''
+  const bankName = typeof bankCandidate === 'string' ? bankCandidate : bankCandidate?.name || ''
+  const cardBrand = data.card?.brand || data.authorization?.card_type || data.authorization?.brand || ''
+  const paymentMethod = normalizePaymentMethodName(methodCandidate) || (cardBrand ? 'card' : bankName ? 'bank_transfer' : 'unknown')
+  return {
+    paymentMethod,
+    rawMethod: methodCandidate || '',
+    bankName,
+    cardBrand: String(cardBrand || ''),
+  }
+}
+
+function getKoraProviderReference(payload, fallback = '') {
+  const data = payload?.data || {}
+  return String(
+    data.transaction_reference ||
+    data.transaction_id ||
+    data.payment_reference ||
+    data.reference ||
+    data.id ||
+    payload?.transaction_reference ||
+    payload?.payment_reference ||
+    payload?.reference ||
+    fallback ||
+    ''
+  ).trim()
+}
+
 function isKoraChargeSuccessful(payload) {
   return ['success', 'successful', 'completed', 'paid', 'succeeded', 'approved', 'captured'].includes(normalizeKoraStatus(payload))
 }
@@ -326,6 +380,34 @@ async function findPaymentByReference(referenceOrReferences) {
   const { data, error } = await supabase.from('payments').select('*').or(clauses.join(',')).limit(1)
   if (error) return null
   return (data || [])[0] || null
+}
+
+async function annotatePaymentFromKora(payment, payload) {
+  if (!payment?.id || !payload) return payment
+  const data = payload?.data || {}
+  const method = extractKoraPaymentMethod(payload)
+  const metadata = parsePaymentMetadata(payment)
+  const providerReference = getKoraProviderReference(payload, payment.provider_reference || payment.reference || payment.id)
+  const providerTransactionId = String(data.transaction_reference || data.transaction_id || data.id || payload?.transaction_reference || '').trim() || null
+  const updates = {
+    provider_reference: providerReference || payment.provider_reference || payment.reference || payment.id,
+    provider_transaction_id: providerTransactionId,
+    payment_method: method.paymentMethod,
+    metadata: {
+      ...metadata,
+      koraPaymentMethod: method.paymentMethod,
+      koraPaymentMethodRaw: method.rawMethod || null,
+      koraBankName: method.bankName || null,
+      koraCardBrand: method.cardBrand || null,
+      koraStatus: normalizeKoraStatus(payload) || null,
+    },
+  }
+  const result = await updateAdaptive('payments', updates, (query) => query.eq('id', payment.id), { select: '*', maybeSingle: true })
+  if (result.error) {
+    console.warn('Payment Kora annotation skipped:', result.error.message)
+    return { ...payment, ...updates }
+  }
+  return result.data || { ...payment, ...updates }
 }
 
 function parsePaymentMetadata(payment) {
@@ -883,12 +965,29 @@ async function getPatientTokenBalance(patientId) {
   const { data: patient } = await supabase.from('patients').select('tokens').eq('id', patientId).maybeSingle()
   const fallbackBalance = Number(patient?.tokens || 0) || 0
   if (patient) {
-    const { error } = await supabase
-      .from('patient_tokens')
-      .upsert({ patient_id: patientId, balance: fallbackBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
+    const { error } = await upsertPatientTokenBalance(patientId, fallbackBalance)
     if (error) console.warn('Patient token wallet repair skipped:', error.message)
   }
   return fallbackBalance
+}
+
+async function upsertPatientTokenBalance(patientId, balance) {
+  const normalizedBalance = Math.max(0, Math.round(Number(balance) || 0))
+  const row = {
+    patient_id: patientId,
+    balance: normalizedBalance,
+    updated_at: new Date().toISOString(),
+  }
+  let result = await supabase.from('patient_tokens').upsert(row, { onConflict: 'patient_id' })
+  if (!result.error) return { error: null, balance: normalizedBalance, mode: 'full' }
+
+  if (isMissingColumnError(result.error) && getMissingColumnName(result.error) === 'updated_at') {
+    const { updated_at: _updatedAt, ...fallbackRow } = row
+    result = await supabase.from('patient_tokens').upsert(fallbackRow, { onConflict: 'patient_id' })
+    if (!result.error) return { error: null, balance: normalizedBalance, mode: 'without_updated_at' }
+  }
+
+  return { error: result.error, balance: normalizedBalance, mode: 'failed' }
 }
 
 async function hasTokenCreditForPayment(patientId, paymentReference) {
@@ -927,9 +1026,7 @@ async function deductPatientTokens(patientId, amount, description = '') {
   const current = await getPatientTokenBalance(patientId)
   if (current < tokens) return false
   const newBalance = current - tokens
-  const walletUpdate = await supabase
-    .from('patient_tokens')
-    .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
+  const walletUpdate = await upsertPatientTokenBalance(patientId, newBalance)
   if (walletUpdate.error) throw walletUpdate.error
   const patientUpdate = await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
   if (patientUpdate.error && !isMissingColumnError(patientUpdate.error)) throw patientUpdate.error
@@ -949,9 +1046,7 @@ async function creditPatientTokens(patientId, amount, description = 'Token credi
   const current = await getPatientTokenBalance(patientId)
   const tokenAmount = Math.max(0, Math.round(Number(amount) || 0))
   const newBalance = current + tokenAmount
-  const walletUpdate = await supabase
-    .from('patient_tokens')
-    .upsert({ patient_id: patientId, balance: newBalance, updated_at: new Date().toISOString() }, { onConflict: 'patient_id' })
+  const walletUpdate = await upsertPatientTokenBalance(patientId, newBalance)
   if (walletUpdate.error) throw walletUpdate.error
   const patientUpdate = await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
   if (patientUpdate.error && !isMissingColumnError(patientUpdate.error)) throw patientUpdate.error
@@ -1578,7 +1673,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         }
         const { error: insertErr } = await insertAdaptive('patients', newPatient)
         if (insertErr) return res.status(500).json({ error: 'Failed to create patient: ' + insertErr.message })
-        await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+        await upsertPatientTokenBalance(id, 0)
         await recordAuditLog(req, {
           userId: id,
           userType: 'patient',
@@ -1591,7 +1686,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
       }
       const { data: updatedPatient, error: updateErr } = await updateAdaptive('patients', patientProfile, (query) => query.eq('id', patient.id))
       if (updateErr) return res.status(500).json({ error: 'Failed to update patient: ' + updateErr.message })
-      await supabase.from('patient_tokens').upsert({ patient_id: patient.id, balance: 0 }, { onConflict: 'patient_id', ignoreDuplicates: true })
+      await getPatientTokenBalance(patient.id)
       await recordAuditLog(req, {
         userId: patient.id,
         userType: 'patient',
@@ -1807,7 +1902,7 @@ app.post('/api/patients/register', async (req, res) => {
       .eq('patient_id', existing.id)
       .maybeSingle()
     if (!existingTokenRow) {
-      await supabase.from('patient_tokens').insert({ patient_id: existing.id, balance: Number(existing.tokens || 0) })
+      await upsertPatientTokenBalance(existing.id, Number(existing.tokens || 0))
     }
     await recordAuditLog(req, {
       userId: existing.id,
@@ -1832,7 +1927,7 @@ app.post('/api/patients/register', async (req, res) => {
   }
   const { error: patientInsertError } = await insertAdaptive('patients', newPatient)
   if (patientInsertError) return res.status(500).json({ error: patientInsertError.message })
-  await supabase.from('patient_tokens').upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+  await upsertPatientTokenBalance(id, 0)
   await recordAuditLog(req, {
     userId: id,
     userType: 'patient',
@@ -1914,9 +2009,7 @@ app.post('/api/patients/facility/register', async (req, res) => {
   const { data: savedPatient } = insertError ? { data: null } : await supabase.from('patients').select('*').eq('id', id).maybeSingle()
   if (insertError) return res.status(500).json({ error: insertError.message })
 
-  const { error: tokenError } = await supabase
-    .from('patient_tokens')
-    .upsert({ patient_id: id, balance: 0 }, { onConflict: 'patient_id' })
+  const { error: tokenError } = await upsertPatientTokenBalance(id, 0)
   if (tokenError) console.error('Failed to create patient token row:', tokenError.message)
 
   await recordAuditLog(req, {
@@ -5077,6 +5170,10 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
       })
     }
 
+    if (charge?.payload) {
+      payment = await annotatePaymentFromKora(payment, charge.payload)
+    }
+
     if ((payment.type || payment.payment_type) === 'token_purchase') {
       const result = await creditTokenPurchasePayment(payment, 'Kora')
       const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
@@ -5128,17 +5225,19 @@ app.post('/api/webhooks/kora', async (req, res) => {
     return res.json({ received: true, credited: false })
   }
 
-  if ((payment.type || payment.payment_type) === 'token_purchase') {
-    const result = await creditTokenPurchasePayment(payment, 'Kora webhook')
+  const annotatedPayment = await annotatePaymentFromKora(payment, { data })
+
+  if ((annotatedPayment.type || annotatedPayment.payment_type) === 'token_purchase') {
+    const result = await creditTokenPurchasePayment(annotatedPayment, 'Kora webhook')
     return res.json({ received: true, credited: result.credited, tokens: result.tokens })
   }
 
-  if ((payment.type || payment.payment_type) === 'subscription') {
-    const result = await creditSubscriptionPayment(payment, 'Kora webhook')
+  if ((annotatedPayment.type || annotatedPayment.payment_type) === 'subscription') {
+    const result = await creditSubscriptionPayment(annotatedPayment, 'Kora webhook')
     return res.json({ received: true, credited: result.credited, tokens: result.tokens })
   }
 
-  await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
+  await supabase.from('payments').update({ status: 'success' }).eq('id', annotatedPayment.id)
   res.json({ received: true, credited: false })
 })
 

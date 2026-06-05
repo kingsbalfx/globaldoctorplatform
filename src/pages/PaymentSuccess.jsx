@@ -40,7 +40,7 @@ function PaymentSuccess({ onNavigate }) {
     setError('')
     setTokens(null)
     setStatus('Verifying payment...')
-    const scheduleRetry = (attempt, message = 'Kora is still confirming your card payment...') => {
+    const scheduleRetry = (attempt, message = 'Kora is still confirming your payment...') => {
       setStatus(`${message} Attempt ${attempt + 1}/${maxAttempts}.`)
       retryTimerRef.current = window.setTimeout(() => {
         void verify(attempt + 1)
