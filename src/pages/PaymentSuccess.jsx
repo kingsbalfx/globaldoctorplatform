@@ -55,7 +55,8 @@ function PaymentSuccess({ onNavigate }) {
           throw new Error(data.error || data.details || 'Payment verification failed')
         }
 
-        if (data.status === 'success') {
+        const normalizedStatus = String(data.status || '').toLowerCase()
+        if (['success', 'successful', 'completed', 'paid', 'succeeded', 'approved', 'captured'].includes(normalizedStatus)) {
           let nextTokens = data.tokens ?? null
           setStatus(data.credited ? 'Payment verified and tokens credited.' : 'Payment verified.')
           const metadata = readPaymentMetadata(data.payment)
@@ -85,9 +86,8 @@ function PaymentSuccess({ onNavigate }) {
             onNavigate?.('patient')
           }, 1600)
         } else {
-          const nextStatus = String(data.status || 'pending').toLowerCase()
-          if (attempt < maxAttempts && ['pending', 'processing', 'unknown'].includes(nextStatus)) {
-            scheduleRetry(attempt, `Payment status is ${nextStatus}. Waiting for final confirmation...`)
+          if (attempt < maxAttempts && ['pending', 'processing', 'unknown'].includes(normalizedStatus || 'pending')) {
+            scheduleRetry(attempt, `Payment status is ${normalizedStatus || 'pending'}. Waiting for final confirmation...`)
             return
           }
           setStatus(`Payment status: ${data.status || 'pending'}. Please refresh in a moment.`)

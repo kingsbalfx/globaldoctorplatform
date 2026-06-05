@@ -215,7 +215,12 @@ function getKoraErrorMessage(error) {
 }
 
 function normalizeKoraStatus(payload) {
-  return String(payload?.data?.status || payload?.data?.transaction_status || payload?.transaction_status || payload?.status || '').trim().toLowerCase()
+  const data = payload?.data || {}
+  const nestedStatus = data.status || data.transaction_status || data.payment_status || data.charge_status
+  if (nestedStatus) return String(nestedStatus).trim().toLowerCase()
+  if (payload?.status === true || payload?.success === true || data.success === true) return 'success'
+  if (payload?.status === false || payload?.success === false || data.success === false) return 'failed'
+  return String(payload?.transaction_status || payload?.payment_status || payload?.charge_status || payload?.status || '').trim().toLowerCase()
 }
 
 function isKoraChargeSuccessful(payload) {
