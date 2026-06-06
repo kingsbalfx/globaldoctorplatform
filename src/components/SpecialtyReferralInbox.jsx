@@ -34,8 +34,10 @@ function SpecialtyReferralInbox({ doctor, onAcceptReferral }) {
 
   useEffect(() => {
     void loadReferrals()
+    const interval = window.setInterval(loadReferrals, 10000)
+    return () => window.clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doctor?.specialty])
+  }, [doctor?.id, doctor?.specialty])
 
   const record = selected?.record_snapshot || {}
   const patient = selected?.patient_snapshot || record.patient || {}
@@ -52,7 +54,7 @@ function SpecialtyReferralInbox({ doctor, onAcceptReferral }) {
         body: JSON.stringify({ doctorId: doctor.id }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.error || 'Failed to accept referral')
+      if (!response.ok) throw new Error(data.error || data.details || 'Failed to accept referral')
       setSelected(data.referral || selected)
       setReferrals((rows) => rows.map((row) => row.id === selected.id ? (data.referral || row) : row))
       onAcceptReferral?.({

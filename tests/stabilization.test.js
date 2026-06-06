@@ -9,6 +9,9 @@ const adminDashboard = readFileSync(new URL('../src/pages/AdminDashboard.jsx', i
 const platformAdminDashboard = readFileSync(new URL('../src/pages/PlatformAdminDashboard.jsx', import.meta.url), 'utf8')
 const doctorAvailabilityManager = readFileSync(new URL('../src/components/DoctorAvailabilityManager.jsx', import.meta.url), 'utf8')
 const fileManager = readFileSync(new URL('../src/components/FileManager.jsx', import.meta.url), 'utf8')
+const doctorDashboard = readFileSync(new URL('../src/pages/AdminDashboard.jsx', import.meta.url), 'utf8')
+const chatPanel = readFileSync(new URL('../src/components/ChatPanel.jsx', import.meta.url), 'utf8')
+const communityChat = readFileSync(new URL('../src/components/DoctorCommunityChat.jsx', import.meta.url), 'utf8')
 
 test('doctor availability is deterministic and database-backed', () => {
   assert.match(server, /doctor_availability_slots/)
@@ -95,4 +98,32 @@ test('specialty referral creation uses bounded snapshot and non-blocking notific
   assert.match(server, /snapshot query timeout/)
   assert.match(server, /Referral doctor notifications skipped/)
   assert.match(server, /buildQuery\(false\)/)
+})
+
+test('specialty referral acceptance is idempotent and opens room without charging patient again', () => {
+  assert.match(server, /Existing consultation room reopened/)
+  assert.match(server, /source: 'specialty_referral',[\s\S]*chargePatient: false/)
+  assert.match(server, /Referral accepted and consultation room opened/)
+  assert.match(server, /targetDoctorId[\s\S]*return !referral\.target_doctor_id/)
+})
+
+test('patient token balance reconciles wallet and patient mirrors', () => {
+  assert.match(server, /const reconciledBalance = ledgerRows\.length > 0/)
+  assert.match(server, /token_transactions'\)\.select\('amount'\)/)
+  assert.match(server, /ledgerRows\.reduce/)
+  assert.match(server, /Patient token mirror repair skipped/)
+})
+
+test('doctor dashboard uses waiting-room alert without forced tab navigation', () => {
+  assert.match(doctorDashboard, /Patient waiting now/)
+  assert.match(doctorDashboard, /animate-ping/)
+  assert.doesNotMatch(doctorDashboard, /hasAutoOpenedPatients/)
+})
+
+test('chat panels show six recent messages inside fixed scroll areas', () => {
+  assert.match(chatPanel, /useState\(6\)/)
+  assert.match(chatPanel, /h-\[420px\] overflow-y-auto/)
+  assert.match(chatPanel, /Load \{Math\.min\(6, hiddenMessageCount\)\} older messages/)
+  assert.match(communityChat, /useState\(6\)/)
+  assert.match(communityChat, /h-\[420px\]/)
 })

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { BellRing } from 'lucide-react'
 import FacilityReferralManager from '../components/FacilityReferralManager'
 import NotificationCenter from '../components/NotificationCenter'
 import PatientRecordReview from '../components/PatientRecordReview'
@@ -78,7 +79,6 @@ function AdminDashboard({ doctor, onLogout }) {
   const [workspacePanel, setWorkspacePanel] = useState('')
   const [activeConsultTool, setActiveConsultTool] = useState('chat')
   const [financials, setFinancials] = useState(null)
-  const hasAutoOpenedPatients = useRef(false)
   const earningsTokens = Number(financials?.earningsTokens ?? doctor?.earningsTokens ?? doctor?.earnings_tokens ?? 0) || 0
   const estimatedUsd = financials?.estimatedUsd ?? (earningsTokens / 10)
   const tokenToUsd = Number(financials?.settings?.tokenToUSD || 10)
@@ -164,14 +164,6 @@ function AdminDashboard({ doctor, onLogout }) {
     return () => window.clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doctor?.id, activeTab])
-
-  useEffect(() => {
-    if (hasAutoOpenedPatients.current || activeTab !== 'overview') return
-    if (consultationPatients.some((patient) => patient.latest_consultation?.status === 'in_progress')) {
-      hasAutoOpenedPatients.current = true
-      setActiveTab('patients')
-    }
-  }, [activeTab, consultationPatients])
 
   const selectedConsultation = selectedConsultationPatient?.latest_consultation || null
 
@@ -416,10 +408,41 @@ function AdminDashboard({ doctor, onLogout }) {
                 : 'bg-white text-slate-700 border border-slate-200 hover:border-brand-300'
             }`}
           >
-            {tab.label}
+            <span className="inline-flex items-center gap-2">
+              {tab.label}
+              {tab.id === 'patients' && waitingConsultationPatients.length > 0 && (
+                <span className="flex h-6 min-w-6 animate-pulse items-center justify-center rounded-full bg-amber-400 px-1.5 text-xs font-black text-slate-950">
+                  {waitingConsultationPatients.length}
+                </span>
+              )}
+            </span>
           </button>
         ))}
       </div>
+
+      {waitingConsultationPatients.length > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('patients')
+            setWorkspacePanel('patients')
+          }}
+          className="mb-8 flex w-full items-center gap-4 rounded-3xl border border-amber-300 bg-gradient-to-r from-amber-50 via-white to-emerald-50 p-5 text-left shadow-xl shadow-amber-200/40 transition hover:-translate-y-0.5 hover:shadow-2xl"
+        >
+          <span className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-amber-400 text-slate-950 shadow-lg shadow-amber-300/60">
+            <span className="absolute inset-0 animate-ping rounded-full bg-amber-300 opacity-60" />
+            <BellRing className="relative h-7 w-7 animate-pulse" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-black uppercase tracking-[0.18em] text-amber-700">Patient waiting now</span>
+            <span className="mt-1 block text-lg font-black text-slate-950">
+              {waitingConsultationPatients.length} patient{waitingConsultationPatients.length === 1 ? ' is' : 's are'} waiting in a video room
+            </span>
+            <span className="mt-1 block text-sm font-semibold text-slate-600">Open the waiting list and accept the consultation when ready.</span>
+          </span>
+          <span className="hidden rounded-full bg-slate-950 px-4 py-2 text-sm font-bold text-white sm:inline-flex">Open rooms</span>
+        </button>
+      )}
 
       {/* Overview Tab */}
       {activeTab === 'overview' && (

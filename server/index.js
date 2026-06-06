@@ -960,15 +960,29 @@ async function blockIfPlatformPaused(req, res) {
 }
 
 async function getPatientTokenBalance(patientId) {
-  const { data } = await supabase.from('patient_tokens').select('balance').eq('patient_id', patientId).maybeSingle()
-  if (Number.isFinite(Number(data?.balance))) return Number(data.balance)
-  const { data: patient } = await supabase.from('patients').select('tokens').eq('id', patientId).maybeSingle()
-  const fallbackBalance = Number(patient?.tokens || 0) || 0
-  if (patient) {
-    const { error } = await upsertPatientTokenBalance(patientId, fallbackBalance)
+  const [walletResult, patientResult, ledgerResult] = await Promise.all([
+    supabase.from('patient_tokens').select('balance').eq('patient_id', patientId).maybeSingle(),
+    supabase.from('patients').select('tokens').eq('id', patientId).maybeSingle(),
+    supabase.from('token_transactions').select('amount').eq('patient_id', patientId).limit(1000),
+  ])
+  const walletBalance = Number(walletResult.data?.balance)
+  const patientBalance = Number(patientResult.data?.tokens)
+  const validBalances = [walletBalance, patientBalance].filter(Number.isFinite)
+  const ledgerRows = Array.isArray(ledgerResult.data) ? ledgerResult.data : []
+  const ledgerBalance = ledgerRows.reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0)
+  const reconciledBalance = ledgerRows.length > 0
+    ? Math.max(0, Math.round(ledgerBalance))
+    : validBalances.length > 0 ? Math.max(0, ...validBalances) : 0
+
+  if (patientResult.data && (!Number.isFinite(walletBalance) || walletBalance !== reconciledBalance)) {
+    const { error } = await upsertPatientTokenBalance(patientId, reconciledBalance)
     if (error) console.warn('Patient token wallet repair skipped:', error.message)
   }
-  return fallbackBalance
+  if (patientResult.data && (!Number.isFinite(patientBalance) || patientBalance !== reconciledBalance)) {
+    const update = await supabase.from('patients').update({ tokens: reconciledBalance }).eq('id', patientId)
+    if (update.error && !isMissingColumnError(update.error)) console.warn('Patient token mirror repair skipped:', update.error.message)
+  }
+  return reconciledBalance
 }
 
 async function upsertPatientTokenBalance(patientId, balance) {
@@ -1065,8 +1079,13 @@ async function creditPatientTokens(patientId, amount, description = 'Token credi
 }
 
 async function getDoctorProfile(id) {
-  const { data } = await supabase.from('doctors').select('*').eq('id', id).maybeSingle()
-  return data
+  const profileResult = await supabase.from('doctors').select('*').eq('id', id).maybeSingle()
+  if (profileResult.data) return profileResult.data
+
+  const authResult = await supabase.from('doctors_auth').select('*').eq('id', id).maybeSingle()
+  if (!authResult.data?.email) return authResult.data || null
+  const byEmail = await supabase.from('doctors').select('*').eq('email', authResult.data.email).maybeSingle()
+  return byEmail.data ? { ...authResult.data, ...byEmail.data, id: byEmail.data.id } : authResult.data
 }
 
 async function updateDoctorEarnings(doctorId, tokens) {
@@ -1106,11 +1125,12 @@ async function chargePatientTokensForNgn({ patientId, amountNgn, description }) 
 async function reconcileDoctorEarnings(doctorId) {
   const doctor = await getDoctorProfile(doctorId)
   if (!doctor) return null
+  const resolvedDoctorId = String(doctor.id || doctorId)
 
   const { data: consultations, error: consultError } = await supabase
     .from('consultations_ng')
     .select('*')
-    .eq('doctor_id', String(doctorId))
+    .eq('doctor_id', resolvedDoctorId)
     .order('created_at', { ascending: false })
     .limit(1000)
   if (consultError) throw consultError
@@ -1150,7 +1170,7 @@ async function reconcileDoctorEarnings(doctorId) {
     doctorNgn += Number(computedSplit.doctor_ngn) || 0
   }
 
-  const { data: payouts } = await supabase.from('payouts').select('*').eq('doctor_id', String(doctorId))
+  const { data: payouts } = await supabase.from('payouts').select('*').eq('doctor_id', resolvedDoctorId)
   const paidOutTokens = (payouts || []).reduce((sum, payout) => {
     const status = String(payout.status || 'pending').toLowerCase()
     if (['rejected', 'failed', 'cancelled', 'canceled'].includes(status)) return sum
@@ -1162,7 +1182,7 @@ async function reconcileDoctorEarnings(doctorId) {
   const currentBalance = Number(doctor.earnings_tokens) || 0
   const reconciledBalance = Math.max(currentBalance, expectedBalance)
   if (reconciledBalance !== currentBalance) {
-    await supabase.from('doctors').update({ earnings_tokens: reconciledBalance }).eq('id', String(doctorId))
+    await supabase.from('doctors').update({ earnings_tokens: reconciledBalance }).eq('id', resolvedDoctorId)
   }
 
   return {
@@ -1268,7 +1288,7 @@ async function recordConsultationFinancials({
   }
 
   let tokensCharged = 0
-  const patientChargeNgn = Number(normalizedSplit.patient_copay_ngn || normalizedSplit.total_ngn || 0)
+  const patientChargeNgn = Number(normalizedSplit.patient_copay_ngn ?? normalizedSplit.total_ngn ?? 0)
   let requiredPatientTokens = 0
   if (chargePatient && patientId && patientChargeNgn > 0) {
     requiredPatientTokens = await convertNgnToPatientTokens(patientChargeNgn)
@@ -2455,7 +2475,7 @@ app.get('/api/doctors/:doctorId/financials', async (req, res) => {
   const { data: payouts } = await supabase
     .from('payouts')
     .select('*')
-    .eq('doctor_id', String(doctorId))
+    .eq('doctor_id', String(ledger.doctor.id || doctorId))
     .order('created_at', { ascending: false })
     .limit(50)
 
@@ -2828,20 +2848,30 @@ app.get('/api/online/status', async (_req, res) => {
 })
 
 app.patch('/api/doctors/:doctorId/status', async (req, res) => {
-  const { data: doctor } = await supabase.from('doctors').select('*').eq('id', req.params.doctorId).maybeSingle()
+  const doctor = await getDoctorProfile(req.params.doctorId)
   if ((doctor?.account_status === 'paused' || doctor?.account_status === 'stopped') && Boolean(req.body.isOnline)) {
     return res.status(403).json({ error: doctor.suspension_reason || 'Doctor account is paused by platform admin.' })
   }
   const isOnline = Boolean(req.body.isOnline)
   const seenAt = new Date().toISOString()
-  const update = await updateAdaptive(
-    'doctors',
-    { is_online: isOnline, updated_at: seenAt, last_seen_at: seenAt },
-    (query) => query.eq('id', req.params.doctorId),
-    { select: '*', maybeSingle: true }
-  )
+  const resolvedDoctorId = doctor?.id || req.params.doctorId
+  const statusUpdates = { is_online: isOnline, updated_at: seenAt, last_seen_at: seenAt }
+  const [update] = await Promise.all([
+    updateAdaptive(
+      'doctors',
+      statusUpdates,
+      (query) => query.eq('id', resolvedDoctorId),
+      { select: '*', maybeSingle: true }
+    ),
+    updateAdaptive(
+      'doctors_auth',
+      statusUpdates,
+      (query) => query.eq('id', req.params.doctorId),
+      { select: null, maybeSingle: false }
+    ).catch(() => ({ error: null })),
+  ])
   if (update.error) return res.status(500).json({ error: update.error.message })
-  res.json({ message: 'Status updated', doctor: sanitizeDoctorForResponse(update.data || { ...doctor, is_online: isOnline, updated_at: seenAt }) })
+  res.json({ message: 'Status updated', doctor: sanitizeDoctorForResponse(update.data || { ...doctor, is_online: isOnline, last_seen_at: seenAt, updated_at: seenAt }) })
 })
 
 app.patch('/api/patients/:patientId/status', async (req, res) => {
@@ -3116,9 +3146,9 @@ app.get('/api/chat/messages', async (req, res) => {
   } else {
     query = query.eq('consultation_id', consultationId)
   }
-  const { data, error } = await query.order('created_at', { ascending: true }).limit(300)
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(100)
   if (error) return res.status(500).json({ error: error.message })
-  res.json({ messages: data || [] })
+  res.json({ messages: (data || []).slice().reverse() })
 })
 
 app.get('/api/patients/:patientId/clinical-notes', async (req, res) => {
@@ -3939,11 +3969,16 @@ app.get('/api/referrals/specialty', async (req, res) => {
   let query = supabase.from('specialty_referrals').select('*').order('created_at', { ascending: false })
   if (req.query.patientId) query = query.eq('patient_id', req.query.patientId)
   if (req.query.doctorId) query = query.eq('from_doctor_id', req.query.doctorId)
-  if (req.query.targetDoctorId) query = query.or(`target_doctor_id.is.null,target_doctor_id.eq.${String(req.query.targetDoctorId).replace(/[,()]/g, '')}`)
   const { data, error } = await query.limit(100)
   if (error) return res.status(500).json({ error: error.message })
   const specialty = String(req.query.specialty || '').trim()
-  res.json({ referrals: (data || []).filter((referral) => specialtyMatches(referral.to_specialty, specialty)) })
+  const targetDoctorId = String(req.query.targetDoctorId || '').trim()
+  const referrals = (data || []).filter((referral) => {
+    if (!specialtyMatches(referral.to_specialty, specialty)) return false
+    if (!targetDoctorId) return true
+    return !referral.target_doctor_id || String(referral.target_doctor_id) === targetDoctorId
+  })
+  res.json({ referrals })
 })
 
 app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
@@ -3959,15 +3994,26 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
   if (referralError) return res.status(500).json({ error: referralError.message })
   if (!referral) return res.status(404).json({ error: 'Referral not found' })
   if (String(referral.status || '').toLowerCase() === 'accepted') {
-    return res.status(409).json({ error: 'Referral has already been accepted' })
+    const patient = await findPatientByIdentifier(referral.patient_id)
+    const { data: existingConsultation } = referral.consultation_id
+      ? await supabase.from('consultations_ng').select('*').eq('id', referral.consultation_id).maybeSingle()
+      : { data: null }
+    return res.json({
+      referral,
+      patient: sanitizePatientForResponse(patient),
+      consultation: existingConsultation,
+      tokensCharged: Number(existingConsultation?.patient_tokens_charged || 0),
+      message: 'Referral was already accepted. Existing consultation room reopened.',
+    })
   }
 
   const doctor = await getDoctorProfile(doctorId)
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+  const resolvedDoctorId = String(doctor.id || doctorId)
   if (!specialtyMatches(doctor.specialty, referral.to_specialty)) {
     return res.status(403).json({ error: 'This referral belongs to a different specialty' })
   }
-  if (referral.target_doctor_id && String(referral.target_doctor_id) !== doctorId) {
+  if (referral.target_doctor_id && ![doctorId, resolvedDoctorId].includes(String(referral.target_doctor_id))) {
     return res.status(403).json({ error: 'This referral was assigned to another specialist' })
   }
 
@@ -3982,7 +4028,7 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
   const consultation = {
     id: generateId('cng-ref'),
     patient_id: patient.id,
-    doctor_id: doctorId,
+    doctor_id: resolvedDoctorId,
     facility_id: patient.facility_id || null,
     channel: 'specialty_referral',
     track: doctor.specialty || referral.to_specialty || 'specialty',
@@ -3992,52 +4038,35 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
     status: 'in_progress',
     created_at: new Date().toISOString(),
   }
-  const { data: insertedConsultation, error: consultationError } = await supabase
-    .from('consultations_ng')
-    .insert(consultation)
-    .select('*')
-    .maybeSingle()
-  if (consultationError) return res.status(500).json({ error: consultationError.message })
-
-  const financials = await recordConsultationFinancials({
-    consultationId: insertedConsultation?.id || consultation.id,
-    patientId: patient.id,
-    doctorId,
-    facilityId: patient.facility_id || null,
-    split,
-    source: 'specialty_referral',
-    chargePatient: true,
-    debitFacilityTopup: false,
-  })
-  if (!financials.ok) {
-    await supabase.from('consultations_ng').update({ status: 'cancelled' }).eq('id', insertedConsultation?.id || consultation.id)
-    return res.status(402).json(financials)
-  }
+  const consultationInsert = await insertAdaptive('consultations_ng', consultation)
+  if (consultationInsert.error) return res.status(500).json({ error: consultationInsert.error.message })
+  const { data: insertedConsultation } = await supabase.from('consultations_ng').select('*').eq('id', consultation.id).maybeSingle()
 
   const acceptedAt = new Date().toISOString()
-  const { data: updatedReferral, error: updateError } = await supabase
-    .from('specialty_referrals')
-    .update({
+  const referralUpdate = await updateAdaptive(
+    'specialty_referrals',
+    {
       status: 'accepted',
-      accepted_by_doctor_id: doctorId,
+      accepted_by_doctor_id: resolvedDoctorId,
       accepted_at: acceptedAt,
       consultation_id: insertedConsultation?.id || consultation.id,
       updated_at: acceptedAt,
-    })
-    .eq('id', referralId)
-    .select('*')
-    .maybeSingle()
-  if (updateError) return res.status(500).json({ error: updateError.message })
+    },
+    (query) => query.eq('id', referralId)
+  )
+  if (referralUpdate.error) return res.status(500).json({ error: referralUpdate.error.message })
+  const updatedReferral = referralUpdate.data
 
   if (referral.source_consultation_id || (referral.consultation_id && referral.consultation_id !== (insertedConsultation?.id || consultation.id))) {
-    await supabase
-      .from('consultations_ng')
-      .update({ status: 'referred', completed_at: acceptedAt, updated_at: acceptedAt })
-      .eq('id', referral.source_consultation_id || referral.consultation_id)
-      .neq('id', insertedConsultation?.id || consultation.id)
+    void updateAdaptive(
+      'consultations_ng',
+      { status: 'referred', completed_at: acceptedAt, updated_at: acceptedAt },
+      (query) => query.eq('id', referral.source_consultation_id || referral.consultation_id).neq('id', insertedConsultation?.id || consultation.id),
+      { select: null, maybeSingle: false }
+    ).catch((error) => console.warn('Previous referral consultation close skipped:', error.message))
   }
 
-  await insertAdaptive('notifications', [
+  void insertAdaptive('notifications', [
     {
       id: generateId('notif'),
       user_id: patient.id,
@@ -4066,7 +4095,22 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
       notification_channels: ['in_app'],
       created_at: acceptedAt,
     },
-  ])
+  ]).catch((error) => console.warn('Referral acceptance notifications skipped:', error.message))
+
+  const financials = await withTimeout(
+    recordConsultationFinancials({
+      consultationId: insertedConsultation?.id || consultation.id,
+      patientId: patient.id,
+      doctorId: resolvedDoctorId,
+      facilityId: patient.facility_id || null,
+      split,
+      source: 'specialty_referral',
+      chargePatient: false,
+      debitFacilityTopup: false,
+    }),
+    3500,
+    { ok: true, split, tokensCharged: 0, settlementPending: true }
+  )
 
   res.json({
     referral: updatedReferral || referral,
@@ -4075,7 +4119,8 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
     split: financials.split,
     tokensCharged: financials.tokensCharged,
     doctor: sanitizeDoctorForResponse(doctor),
-    message: 'Referral accepted, patient tokens charged, and consultation room opened',
+    settlementPending: Boolean(financials.settlementPending),
+    message: 'Referral accepted and consultation room opened',
   })
 })
 
