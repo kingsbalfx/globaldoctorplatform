@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS public.patients (
   profile_photo_url text,
   tokens integer DEFAULT 0,
   is_online boolean DEFAULT false,
+  last_seen_at timestamptz,
   portal_pin text,
   registered_via text DEFAULT 'patient',
   facility_id text,
@@ -726,6 +727,7 @@ ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS tokens integer DEFAULT 0;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS gender text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS profile_photo_url text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS is_online boolean DEFAULT false;
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS portal_pin text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS registered_via text DEFAULT 'patient';
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS facility_id text;
@@ -1066,6 +1068,7 @@ WHERE fw.facility_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_patients_email ON public.patients(email);
 CREATE INDEX IF NOT EXISTS idx_patients_facility_id ON public.patients(facility_id);
 CREATE INDEX IF NOT EXISTS idx_patients_portal_pin ON public.patients(portal_pin);
+CREATE INDEX IF NOT EXISTS idx_patients_last_seen_at ON public.patients(last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_doctors_online ON public.doctors(is_online);
 CREATE INDEX IF NOT EXISTS idx_doctors_last_seen_at ON public.doctors(last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_doctors_specialty ON public.doctors(specialty);

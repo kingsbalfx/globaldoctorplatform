@@ -158,6 +158,21 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   }, [patient?.id, refreshPatientTokens])
 
   useEffect(() => {
+    if (!patient?.id || currentStep === 'auth') return undefined
+    const statusPath = `/api/patients/${encodeURIComponent(patient.id)}/status`
+    const markOnline = () => {
+      void apiFetch(statusPath, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOnline: true }),
+      }).catch(() => null)
+    }
+    markOnline()
+    const interval = window.setInterval(markOnline, 60 * 1000)
+    return () => window.clearInterval(interval)
+  }, [patient?.id, currentStep])
+
+  useEffect(() => {
     if (logoutSignal > 0) cleanLogout('manual')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logoutSignal])

@@ -323,6 +323,8 @@ function isKoraChargeSuccessful(payload) {
 
 const doctorOnlineWindowSeconds = Number(process.env.DOCTOR_ONLINE_WINDOW_SECONDS || 300)
 const DOCTOR_ONLINE_WINDOW_MS = Math.max(60, Number.isFinite(doctorOnlineWindowSeconds) ? doctorOnlineWindowSeconds : 300) * 1000
+const patientOnlineWindowSeconds = Number(process.env.PATIENT_ONLINE_WINDOW_SECONDS || 180)
+const PATIENT_ONLINE_WINDOW_MS = Math.max(60, Number.isFinite(patientOnlineWindowSeconds) ? patientOnlineWindowSeconds : 180) * 1000
 
 function isDoctorRecentlyOnline(doctor = {}) {
   const nested = doctor.doctors || {}
@@ -332,6 +334,14 @@ function isDoctorRecentlyOnline(doctor = {}) {
   if (!rawSeenAt) return false
   const seenAt = new Date(rawSeenAt).getTime()
   return Number.isFinite(seenAt) && Date.now() - seenAt <= DOCTOR_ONLINE_WINDOW_MS
+}
+
+function isPatientRecentlyOnline(patient = {}) {
+  if (!patient.is_online) return false
+  const rawSeenAt = patient.last_seen_at || patient.updated_at
+  if (!rawSeenAt) return false
+  const seenAt = new Date(rawSeenAt).getTime()
+  return Number.isFinite(seenAt) && Date.now() - seenAt <= PATIENT_ONLINE_WINDOW_MS
 }
 
 async function queryKoraCharge(reference) {
@@ -1680,16 +1690,18 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         gender: gender || req.body.sex || '',
         profile_photo_url: profilePhotoUrl || req.body.profile_photo_url || '',
         is_online: true,
+        last_seen_at: new Date().toISOString(),
       }
       let { data: patient, error: patientLookupError } = await supabase.from('patients').select('*').eq('email', patientEmail).maybeSingle()
       if (patientLookupError) return res.status(500).json({ error: 'Failed to load patient: ' + patientLookupError.message })
       if (!patient) {
         const id = generateReadablePatientId('HRN')
-        const newPatient = {
+      const newPatient = {
           id,
           ...patientProfile,
           tokens: 0,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          last_seen_at: new Date().toISOString(),
         }
         const { error: insertErr } = await insertAdaptive('patients', newPatient)
         if (insertErr) return res.status(500).json({ error: 'Failed to create patient: ' + insertErr.message })
@@ -1903,6 +1915,7 @@ app.post('/api/patients/register', async (req, res) => {
       gender,
       profile_photo_url: profilePhotoUrl,
       is_online: true,
+      last_seen_at: new Date().toISOString(),
     }
     const { data: savedPatient, error: updateError } = await updateAdaptive('patients', {
         password,
@@ -1914,6 +1927,7 @@ app.post('/api/patients/register', async (req, res) => {
         gender,
         profile_photo_url: profilePhotoUrl,
         is_online: true,
+        last_seen_at: new Date().toISOString(),
       }, (query) => query.eq('id', existing.id))
     if (updateError) return res.status(500).json({ error: updateError.message })
     const { data: existingTokenRow } = await supabase
@@ -1943,7 +1957,7 @@ app.post('/api/patients/register', async (req, res) => {
     id, email, password, name, date_of_birth: dateOfBirth,
     phone, country, language: language || 'English',
     gender, profile_photo_url: profilePhotoUrl,
-    tokens: 0, is_online: true, created_at: new Date().toISOString()
+    tokens: 0, is_online: true, last_seen_at: new Date().toISOString(), created_at: new Date().toISOString()
   }
   const { error: patientInsertError } = await insertAdaptive('patients', newPatient)
   if (patientInsertError) return res.status(500).json({ error: patientInsertError.message })
@@ -1985,7 +1999,7 @@ app.post('/api/patients/login', async (req, res) => {
 
   if (!patient) return res.status(401).json({ error: 'Invalid credentials. Facility-created patients should use their PID and 6-digit PIN.' })
 
-  await supabase.from('patients').update({ is_online: true }).eq('id', patient.id)
+  await updateAdaptive('patients', { is_online: true, last_seen_at: new Date().toISOString() }, (query) => query.eq('id', patient.id), { select: null, maybeSingle: false })
   await recordAuditLog(req, {
     userId: patient.id,
     userType: 'patient',
@@ -2073,7 +2087,7 @@ app.post('/api/patients/facility/login', async (req, res) => {
   }
   if (!patient) return res.status(401).json({ error: 'Invalid credentials' })
 
-  await supabase.from('patients').update({ is_online: true }).eq('id', patient.id)
+  await updateAdaptive('patients', { is_online: true, last_seen_at: new Date().toISOString() }, (query) => query.eq('id', patient.id), { select: null, maybeSingle: false })
   res.json({ patient: sanitizePatientForResponse(patient), message: 'Login successful' })
 })
 
@@ -2875,8 +2889,16 @@ app.patch('/api/doctors/:doctorId/status', async (req, res) => {
 })
 
 app.patch('/api/patients/:patientId/status', async (req, res) => {
-  await supabase.from('patients').update({ is_online: Boolean(req.body.isOnline) }).eq('id', req.params.patientId)
-  res.json({ message: 'Status updated' })
+  const isOnline = Boolean(req.body.isOnline)
+  const seenAt = new Date().toISOString()
+  const update = await updateAdaptive(
+    'patients',
+    { is_online: isOnline, last_seen_at: seenAt, updated_at: seenAt },
+    (query) => query.eq('id', req.params.patientId),
+    { select: '*', maybeSingle: true }
+  )
+  if (update.error) return res.status(500).json({ error: update.error.message })
+  res.json({ message: 'Status updated', patient: sanitizePatientForResponse(update.data || { id: req.params.patientId, is_online: isOnline, last_seen_at: seenAt }) })
 })
 
 // ---------- DOCTOR LIST ----------
@@ -3975,8 +3997,12 @@ app.get('/api/referrals/specialty', async (req, res) => {
   const targetDoctorId = String(req.query.targetDoctorId || '').trim()
   const referrals = (data || []).filter((referral) => {
     if (!specialtyMatches(referral.to_specialty, specialty)) return false
+    const status = String(referral.status || 'pending').toLowerCase()
+    if (['rejected', 'cancelled', 'canceled'].includes(status)) return false
     if (!targetDoctorId) return true
-    return !referral.target_doctor_id || String(referral.target_doctor_id) === targetDoctorId
+    if (referral.target_doctor_id) return String(referral.target_doctor_id) === targetDoctorId
+    if (status === 'accepted') return String(referral.accepted_by_doctor_id || '') === targetDoctorId
+    return true
   })
   res.json({ referrals })
 })
@@ -3995,15 +4021,18 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
   if (!referral) return res.status(404).json({ error: 'Referral not found' })
   if (String(referral.status || '').toLowerCase() === 'accepted') {
     const patient = await findPatientByIdentifier(referral.patient_id)
+    const patientOnline = isPatientRecentlyOnline(patient || {})
     const { data: existingConsultation } = referral.consultation_id
       ? await supabase.from('consultations_ng').select('*').eq('id', referral.consultation_id).maybeSingle()
       : { data: null }
     return res.json({
       referral,
-      patient: sanitizePatientForResponse(patient),
+      patient: sanitizePatientForResponse(patient ? { ...patient, is_online: patientOnline } : patient),
       consultation: existingConsultation,
       tokensCharged: Number(existingConsultation?.patient_tokens_charged || 0),
-      message: 'Referral was already accepted. Existing consultation room reopened.',
+      message: patientOnline
+        ? 'Referral was already accepted. Existing consultation room reopened.'
+        : 'Referral was already accepted. The patient is offline and will be notified to join later.',
     })
   }
 
@@ -4019,6 +4048,7 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
 
   const patient = await findPatientByIdentifier(referral.patient_id)
   if (!patient) return res.status(404).json({ error: 'Patient not found' })
+  const patientOnline = isPatientRecentlyOnline(patient)
 
   const split = calculateFacilitySpecialtySplit({
     channel: 'specialty_referral',
@@ -4114,13 +4144,15 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
 
   res.json({
     referral: updatedReferral || referral,
-    patient: sanitizePatientForResponse(patient),
+    patient: sanitizePatientForResponse({ ...patient, is_online: patientOnline }),
     consultation: { ...(insertedConsultation || consultation), patient_tokens_charged: financials.tokensCharged },
     split: financials.split,
     tokensCharged: financials.tokensCharged,
     doctor: sanitizeDoctorForResponse(doctor),
     settlementPending: Boolean(financials.settlementPending),
-    message: 'Referral accepted and consultation room opened',
+    message: patientOnline
+      ? 'Referral accepted and consultation room opened'
+      : 'Referral accepted. The patient was notified and the room will become available when they come online.',
   })
 })
 
@@ -4523,13 +4555,19 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
     const status = String(consultation.status || '').toLowerCase()
     return !['completed', 'cancelled', 'canceled', 'referred'].includes(status)
   })
+  const isRecentJoinRequest = (signal) => {
+    const createdAt = new Date(signal?.created_at || 0).getTime()
+    return signal?.type === 'join_request'
+      && Number.isFinite(createdAt)
+      && Date.now() - createdAt <= PATIENT_ONLINE_WINDOW_MS
+  }
   const consultationByPatient = new Map()
   for (const consultation of activeConsultations) {
     const current = consultationByPatient.get(consultation.patient_id)
     const latestVideoSignal = latestVideoSignalByRoom.get(consultation.id)
     const currentSignal = current ? latestVideoSignalByRoom.get(current.id) : null
-    const consultationWaiting = latestVideoSignal?.type === 'join_request'
-    const currentWaiting = currentSignal?.type === 'join_request'
+    const consultationWaiting = isRecentJoinRequest(latestVideoSignal)
+    const currentWaiting = isRecentJoinRequest(currentSignal)
     if (!current || (consultationWaiting && !currentWaiting) || new Date(consultation.created_at || 0) > new Date(current.created_at || 0)) {
       consultationByPatient.set(consultation.patient_id, consultation)
     }
@@ -4538,6 +4576,9 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
   let rows = [...consultationByPatient.values()].map((consultation) => {
     const patient = patientById.get(consultation.patient_id) || { id: consultation.patient_id, name: 'Patient' }
     const latestVideoSignal = latestVideoSignalByRoom.get(consultation.id)
+    const patientOnline = isPatientRecentlyOnline(patient)
+    const recentJoinRequest = isRecentJoinRequest(latestVideoSignal)
+    const videoWaiting = patientOnline && recentJoinRequest
     const facilityId = consultation.facility_id || patient.facility_id || null
     const facility = facilityById.get(String(facilityId || '')) || null
     const channel = String(consultation.channel || '')
@@ -4555,14 +4596,15 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
       facility_name: facility?.name || '',
       facility_type: facility?.type || patient.facility_type || '',
       source,
-      video_waiting: latestVideoSignal?.type === 'join_request',
-      video_waiting_at: latestVideoSignal?.type === 'join_request' ? latestVideoSignal.created_at : null,
-      online_status: patient.is_online ? 'online' : 'offline',
+      is_online: patientOnline,
+      video_waiting: videoWaiting,
+      video_waiting_at: videoWaiting ? latestVideoSignal.created_at : null,
+      online_status: patientOnline ? 'online' : 'offline',
     }
   })
 
   if (onlineOnly) {
-    rows = rows.filter((patient) => patient.is_online || patient.video_waiting)
+    rows = rows.filter((patient) => patient.is_online)
   }
 
   if (search) {

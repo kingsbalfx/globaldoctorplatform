@@ -12,6 +12,7 @@ const fileManager = readFileSync(new URL('../src/components/FileManager.jsx', im
 const doctorDashboard = readFileSync(new URL('../src/pages/AdminDashboard.jsx', import.meta.url), 'utf8')
 const chatPanel = readFileSync(new URL('../src/components/ChatPanel.jsx', import.meta.url), 'utf8')
 const communityChat = readFileSync(new URL('../src/components/DoctorCommunityChat.jsx', import.meta.url), 'utf8')
+const patientDashboard = readFileSync(new URL('../src/pages/PatientDashboard.jsx', import.meta.url), 'utf8')
 
 test('doctor availability is deterministic and database-backed', () => {
   assert.match(server, /doctor_availability_slots/)
@@ -104,7 +105,8 @@ test('specialty referral acceptance is idempotent and opens room without chargin
   assert.match(server, /Existing consultation room reopened/)
   assert.match(server, /source: 'specialty_referral',[\s\S]*chargePatient: false/)
   assert.match(server, /Referral accepted and consultation room opened/)
-  assert.match(server, /targetDoctorId[\s\S]*return !referral\.target_doctor_id/)
+  assert.match(server, /if \(referral\.target_doctor_id\) return String\(referral\.target_doctor_id\) === targetDoctorId/)
+  assert.match(server, /if \(status === 'accepted'\) return String\(referral\.accepted_by_doctor_id/)
 })
 
 test('patient token balance reconciles wallet and patient mirrors', () => {
@@ -118,6 +120,21 @@ test('doctor dashboard uses waiting-room alert without forced tab navigation', (
   assert.match(doctorDashboard, /Patient waiting now/)
   assert.match(doctorDashboard, /animate-ping/)
   assert.doesNotMatch(doctorDashboard, /hasAutoOpenedPatients/)
+})
+
+test('doctor queue hides offline patients and expires stale waiting signals', () => {
+  assert.match(server, /function isPatientRecentlyOnline/)
+  assert.match(server, /const videoWaiting = patientOnline && recentJoinRequest/)
+  assert.match(server, /rows = rows\.filter\(\(patient\) => patient\.is_online\)/)
+  assert.match(server, /Date\.now\(\) - createdAt <= PATIENT_ONLINE_WINDOW_MS/)
+  assert.match(patientDashboard, /window\.setInterval\(markOnline, 60 \* 1000\)/)
+  assert.match(schema, /ALTER TABLE public\.patients ADD COLUMN IF NOT EXISTS last_seen_at timestamptz/)
+})
+
+test('accepted offline referrals do not force an empty doctor video workspace', () => {
+  assert.match(doctorDashboard, /The patient is offline, so the consultation room will appear/)
+  assert.match(server, /The patient is offline and will be notified to join later/)
+  assert.match(server, /room will become available when they come online/)
 })
 
 test('chat panels show six recent messages inside fixed scroll areas', () => {

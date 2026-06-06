@@ -175,11 +175,17 @@ function AdminDashboard({ doctor, onLogout }) {
 
   const openAcceptedReferralWorkspace = ({ patient, consultation }) => {
     if (!patient?.id || !consultation?.id) return
+    if (!patient.is_online) {
+      addError('Referral accepted. The patient is offline, so the consultation room will appear when the patient comes online and joins.', 'info', 9000)
+      void loadConsultationPatients(consultationPatientLimit, consultationPatientSearch)
+      setActiveTab('referrals')
+      return
+    }
     setSelectedConsultationPatient({
       ...patient,
       latest_consultation: consultation,
       source: 'specialty_referral',
-      video_waiting: true,
+      video_waiting: false,
     })
     setWorkspacePanel('')
     setActiveConsultTool('chat')
