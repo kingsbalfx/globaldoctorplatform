@@ -58,6 +58,7 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
   const [showPurchase, setShowPurchase] = useState(false)
   const [purchaseUSD, setPurchaseUSD] = useState(10)
   const [purchaseLoading, setPurchaseLoading] = useState(false)
+  const [startingConsultation, setStartingConsultation] = useState(false)
 
   useEffect(() => {
     void fetchDoctors()
@@ -175,8 +176,8 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
     onDoctorSelected(selectedDoctor, subscriptionType)
   }
 
-  const handleStartNow = () => {
-    if (!selectedDoctor) return
+  const handleStartNow = async () => {
+    if (!selectedDoctor || startingConsultation) return
     if (!selectedDoctor.isOnline && !selectedDoctor.isVirtual) {
       addError('This doctor is offline. Please schedule a future appointment instead.', 'warning')
       return
@@ -185,7 +186,12 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
       setShowPurchase(true)
       return
     }
-    onInstantConsultation?.(selectedDoctor, subscriptionType)
+    setStartingConsultation(true)
+    try {
+      await onInstantConsultation?.(selectedDoctor, subscriptionType)
+    } finally {
+      setStartingConsultation(false)
+    }
   }
 
   const handlePurchaseTokens = async () => {
@@ -420,10 +426,10 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
               <button
                 type="button"
                 onClick={handleStartNow}
-                disabled={!selectedDoctor}
+                disabled={!selectedDoctor || startingConsultation}
                 className="rounded-xl bg-emerald-700 px-6 py-3 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {!selectedDoctor ? 'Choose a specialist' : canAffordSelected ? 'Start consultation now' : 'Buy tokens'}
+                {startingConsultation ? 'Opening consultation...' : !selectedDoctor ? 'Choose a specialist' : canAffordSelected ? 'Start consultation now' : 'Buy tokens'}
               </button>
               <button
                 type="button"

@@ -13,6 +13,7 @@ const doctorDashboard = readFileSync(new URL('../src/pages/AdminDashboard.jsx', 
 const chatPanel = readFileSync(new URL('../src/components/ChatPanel.jsx', import.meta.url), 'utf8')
 const communityChat = readFileSync(new URL('../src/components/DoctorCommunityChat.jsx', import.meta.url), 'utf8')
 const patientDashboard = readFileSync(new URL('../src/pages/PatientDashboard.jsx', import.meta.url), 'utf8')
+const doctorSelection = readFileSync(new URL('../src/components/DoctorSelection.jsx', import.meta.url), 'utf8')
 
 test('doctor availability is deterministic and database-backed', () => {
   assert.match(server, /doctor_availability_slots/)
@@ -22,6 +23,9 @@ test('doctor availability is deterministic and database-backed', () => {
   assert.doesNotMatch(server, /DOCTOR AVAILABILITY \(mock\)/)
   assert.doesNotMatch(calendar, /generateMockSlots/)
   assert.doesNotMatch(calendar, /Math\.random/)
+  assert.match(calendar, /Submit appointment/)
+  assert.match(calendar, /disabled=\{!selectedDate \|\| !selectedTime \|\| scheduling\}/)
+  assert.match(calendar, /This doctor has no available time on this date/)
 })
 
 test('admin files are persisted instead of mocked', () => {
@@ -110,10 +114,29 @@ test('specialty referral acceptance is idempotent and opens room without chargin
 })
 
 test('patient token balance reconciles wallet and patient mirrors', () => {
-  assert.match(server, /const reconciledBalance = ledgerRows\.length > 0/)
+  assert.match(server, /const reconciledBalance = Math\.max\(/)
   assert.match(server, /token_transactions'\)\.select\('amount'\)/)
   assert.match(server, /ledgerRows\.reduce/)
   assert.match(server, /Patient token mirror repair skipped/)
+})
+
+test('consultation start creates the room quickly and alerts the doctor waiting room', () => {
+  assert.match(server, /Promise\.all\(\[\s*findPatientByIdentifier\(patientId\),\s*getDoctorProfile\(doctorId\)/)
+  assert.match(server, /Consultation room creation timed out/)
+  assert.match(server, /settlementPending: true/)
+  assert.match(server, /type: 'join_request',[\s\S]*source: 'consultation_start'/)
+  assert.match(server, /last_seen_at: now/)
+  assert.match(doctorDashboard, /\{selectedConsultationPatient \? 'Change patient' : 'Show patients'\}/)
+  assert.match(server, /if \(chargePatient \|\| tokensCharged > 0\) consultationUpdates\.patient_tokens_charged = tokensCharged/)
+  assert.match(doctorSelection, /startingConsultation/)
+  assert.match(doctorSelection, /Opening consultation\.\.\./)
+})
+
+test('Kora token purchases are inferred from older payment references', () => {
+  assert.match(server, /function getPaymentPurpose\(payment\)/)
+  assert.match(server, /reference\.startsWith\('kora-token-'\)/)
+  assert.match(server, /getPaymentPurpose\(payment\) === 'token_purchase'/)
+  assert.match(server, /getPaymentPurpose\(annotatedPayment\) === 'token_purchase'/)
 })
 
 test('doctor dashboard uses waiting-room alert without forced tab navigation', () => {

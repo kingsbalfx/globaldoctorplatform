@@ -398,6 +398,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         doctor={selectedDoctor}
         subscriptionType={subscriptionType}
         onAppointmentScheduled={handleAppointmentScheduled}
+        onBack={() => setCurrentStep('doctor')}
       />
     )
   }

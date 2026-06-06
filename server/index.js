@@ -422,28 +422,44 @@ async function annotatePaymentFromKora(payment, payload) {
 
 function parsePaymentMetadata(payment) {
   if (!payment) return {}
+  const reference = String(payment.reference || payment.provider_reference || payment.id || '')
+  const tokenMatch = reference.match(/^kora-token-(\d+)-(\d+)-/)
+  const legacyMatch = reference.match(/^kora-token-(\d+)-/)
+  const inferred = {
+    patientId: payment.patient_id || '',
+    tokensExpected: tokenMatch
+      ? Number(tokenMatch[1])
+      : Math.round(Number(payment.amount || 0) / Math.max(1, KORA_USD_EXCHANGE_RATE) * 10),
+    koraAmount: payment.amount,
+    koraCurrency: payment.currency,
+    createdMs: tokenMatch ? Number(tokenMatch[2]) : legacyMatch ? Number(legacyMatch[1]) : null,
+  }
   if (!payment.metadata) {
-    const reference = String(payment.reference || payment.provider_reference || payment.id || '')
-    const tokenMatch = reference.match(/^kora-token-(\d+)-(\d+)-/)
-    const legacyMatch = reference.match(/^kora-token-(\d+)-/)
-    return {
-      patientId: payment.patient_id || '',
-      tokensExpected: tokenMatch
-        ? Number(tokenMatch[1])
-        : Math.round(Number(payment.amount || 0) / Math.max(1, KORA_USD_EXCHANGE_RATE) * 10),
-      koraAmount: payment.amount,
-      koraCurrency: payment.currency,
-      createdMs: tokenMatch ? Number(tokenMatch[2]) : legacyMatch ? Number(legacyMatch[1]) : null,
-    }
+    return inferred
   }
   if (typeof payment.metadata === 'string') {
     try {
-      return JSON.parse(payment.metadata)
+      return { ...inferred, ...JSON.parse(payment.metadata) }
     } catch {
-      return {}
+      return inferred
     }
   }
-  return payment.metadata
+  return { ...inferred, ...payment.metadata }
+}
+
+function getPaymentPurpose(payment) {
+  const metadata = parsePaymentMetadata(payment)
+  const reference = String(payment?.reference || payment?.provider_reference || payment?.id || '').toLowerCase()
+  if (reference.startsWith('kora-token-')) return 'token_purchase'
+  if (reference.startsWith('kora-sub-')) return 'subscription'
+
+  const explicitPurpose = String(
+    payment?.type || payment?.payment_type || metadata.purpose || metadata.paymentType || ''
+  ).trim().toLowerCase()
+  if (explicitPurpose) return explicitPurpose
+
+  if (metadata.plan || metadata.tokensIncluded) return 'subscription'
+  return ''
 }
 
 async function creditTokenPurchasePayment(payment, source = 'kora') {
@@ -980,9 +996,11 @@ async function getPatientTokenBalance(patientId) {
   const validBalances = [walletBalance, patientBalance].filter(Number.isFinite)
   const ledgerRows = Array.isArray(ledgerResult.data) ? ledgerResult.data : []
   const ledgerBalance = ledgerRows.reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0)
-  const reconciledBalance = ledgerRows.length > 0
-    ? Math.max(0, Math.round(ledgerBalance))
-    : validBalances.length > 0 ? Math.max(0, ...validBalances) : 0
+  const reconciledBalance = Math.max(
+    0,
+    ...validBalances,
+    ledgerRows.length > 0 ? Math.round(ledgerBalance) : 0
+  )
 
   if (patientResult.data && (!Number.isFinite(walletBalance) || walletBalance !== reconciledBalance)) {
     const { error } = await upsertPatientTokenBalance(patientId, reconciledBalance)
@@ -1373,12 +1391,13 @@ async function recordConsultationFinancials({
     created_at: new Date().toISOString(),
   }
   await insertAdaptive('revenue_splits_ng', revenueSplit)
-  await updateAdaptive('consultations_ng', {
+  const consultationUpdates = {
     total_ngn: normalizedSplit.total_ngn,
     blocks: normalizedSplit.blocks,
     duration_min: normalizedSplit.durationMin,
-    patient_tokens_charged: tokensCharged,
-  }, (query) => query.eq('id', consultationId), { select: null, maybeSingle: false })
+  }
+  if (chargePatient || tokensCharged > 0) consultationUpdates.patient_tokens_charged = tokensCharged
+  await updateAdaptive('consultations_ng', consultationUpdates, (query) => query.eq('id', consultationId), { select: null, maybeSingle: false })
 
   return { ok: true, split: revenueSplit, tokensCharged, existing: false }
 }
@@ -4749,11 +4768,13 @@ app.post('/api/consultations/start', async (req, res) => {
   const allowedChannels = ['direct_home', 'facility_private', 'facility_phc']
   if (!patientId || !doctorId || !allowedChannels.includes(channel)) return res.status(400).json({ error: 'patientId, doctorId, and valid channel required' })
 
-  const patientRecord = await findPatientByIdentifier(patientId)
+  const [patientRecord, doctor] = await Promise.all([
+    findPatientByIdentifier(patientId),
+    getDoctorProfile(doctorId),
+  ])
   if (!patientRecord) return res.status(404).json({ error: 'Patient not found' })
-
-  const doctor = await getDoctorProfile(doctorId)
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+  const resolvedDoctorId = String(doctor.id || doctorId)
 
   if (channel !== 'direct_home') {
     if (!facilityId || !facilityPin) return res.status(400).json({ error: 'facilityId and facilityPin required' })
@@ -4776,13 +4797,21 @@ app.post('/api/consultations/start', async (req, res) => {
     ? calculateConsultationSplitNgn({ channel, track: track || 'economy', durationMin: durationMin || 15 })
     : calculateFacilitySpecialtySplit({ channel, doctor, durationMin: durationMin || 15 })
   const id = generateId('cng')
+  const now = new Date().toISOString()
   const consultation = {
-    id, patient_id: patientRecord.id, doctor_id: doctorId, facility_id: facilityId,
+    id, patient_id: patientRecord.id, doctor_id: resolvedDoctorId, facility_id: facilityId,
     channel: split.channel, track: split.track, duration_min: split.durationMin,
     blocks: split.blocks, total_ngn: split.total_ngn, status: 'in_progress',
-    created_at: new Date().toISOString()
+    created_at: now
   }
-  await supabase.from('consultations_ng').insert(consultation)
+  const consultationInsert = await withTimeout(
+    insertAdaptive('consultations_ng', consultation),
+    4000,
+    { error: new Error('Consultation room creation timed out') }
+  )
+  if (consultationInsert.error) {
+    return res.status(503).json({ error: 'Failed to create consultation room. Please retry.', details: consultationInsert.error.message })
+  }
 
   let directHomeTokensCharged = 0
   if (channel === 'direct_home') {
@@ -4801,29 +4830,62 @@ app.post('/api/consultations/start', async (req, res) => {
     }
   }
 
-  const financials = await recordConsultationFinancials({
+  const financialsPromise = recordConsultationFinancials({
     consultationId: id,
     patientId: patientRecord.id,
-    doctorId,
+    doctorId: resolvedDoctorId,
     facilityId,
     split,
     source: channel === 'direct_home' ? 'Direct live consultation' : 'Facility consultation',
     chargePatient: false,
     debitFacilityTopup: channel === 'facility_phc',
   })
+  const financials = channel === 'direct_home'
+    ? await withTimeout(financialsPromise, 2500, {
+      ok: true,
+      split,
+      tokensCharged: 0,
+      settlementPending: true,
+    })
+    : await financialsPromise
   if (!financials.ok) {
     await supabase.from('consultations_ng').update({ status: 'cancelled' }).eq('id', id)
     return res.status(402).json(financials)
   }
   if (directHomeTokensCharged > 0) {
-    await updateAdaptive('consultations_ng', {
+    void updateAdaptive('consultations_ng', {
       patient_tokens_charged: directHomeTokensCharged,
     }, (query) => query.eq('id', id), { select: null, maybeSingle: false })
+      .catch((error) => console.warn('Consultation token charge annotation skipped:', error.message))
   }
 
-  await insertAdaptive('notifications', {
+  void updateAdaptive('patients', {
+    is_online: true,
+    last_seen_at: now,
+    updated_at: now,
+  }, (query) => query.eq('id', patientRecord.id), { select: null, maybeSingle: false })
+    .catch((error) => console.warn('Patient consultation heartbeat skipped:', error.message))
+
+  const waitingSignal = {
+    id: generateId('sig'),
+    seq: Date.now() * 1000 + (++videoSignalSeq % 1000),
+    room_id: id,
+    sender_id: String(patientRecord.id),
+    sender_type: 'patient',
+    type: 'join_request',
+    payload: { source: 'consultation_start' },
+    created_at: now,
+  }
+  rememberFallbackVideoSignal(waitingSignal)
+  void insertAdaptive('video_signals', waitingSignal)
+    .then((result) => {
+      if (result.error) console.warn('Consultation waiting signal skipped:', result.error.message)
+    })
+    .catch((error) => console.warn('Consultation waiting signal skipped:', error.message))
+
+  void insertAdaptive('notifications', {
     id: generateId('notif'),
-    user_id: doctorId,
+    user_id: resolvedDoctorId,
     user_type: 'doctor',
     notification_type: 'consultation_started',
     type: 'consultation',
@@ -4833,13 +4895,18 @@ app.post('/api/consultations/start', async (req, res) => {
     related_resource_id: id,
     is_read: false,
     notification_channels: ['in_app'],
-    created_at: new Date().toISOString(),
+    created_at: now,
   })
+    .then((result) => {
+      if (result.error) console.warn('Consultation doctor notification skipped:', result.error.message)
+    })
+    .catch((error) => console.warn('Consultation doctor notification skipped:', error.message))
 
   res.status(201).json({
     consultation: { ...consultation, patient_tokens_charged: directHomeTokensCharged || financials.tokensCharged, total_ngn: financials.split?.total_ngn ?? split.total_ngn },
     split: financials.split || split,
     tokensCharged: directHomeTokensCharged || financials.tokensCharged,
+    settlementPending: Boolean(financials.settlementPending),
   })
 })
 
@@ -5261,7 +5328,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
       payment = await annotatePaymentFromKora(payment, charge.payload)
     }
 
-    if ((payment.type || payment.payment_type) === 'token_purchase') {
+    if (getPaymentPurpose(payment) === 'token_purchase') {
       const result = await creditTokenPurchasePayment(payment, 'Kora')
       const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
       return res.json({
@@ -5273,7 +5340,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
       })
     }
 
-    if ((payment.type || payment.payment_type) === 'subscription') {
+    if (getPaymentPurpose(payment) === 'subscription') {
       const result = await creditSubscriptionPayment(payment, 'Kora')
       const { data: refreshedPayment } = await supabase.from('payments').select('*').eq('id', payment.id).maybeSingle()
       return res.json({
@@ -5314,12 +5381,12 @@ app.post('/api/webhooks/kora', async (req, res) => {
 
   const annotatedPayment = await annotatePaymentFromKora(payment, { data })
 
-  if ((annotatedPayment.type || annotatedPayment.payment_type) === 'token_purchase') {
+  if (getPaymentPurpose(annotatedPayment) === 'token_purchase') {
     const result = await creditTokenPurchasePayment(annotatedPayment, 'Kora webhook')
     return res.json({ received: true, credited: result.credited, tokens: result.tokens })
   }
 
-  if ((annotatedPayment.type || annotatedPayment.payment_type) === 'subscription') {
+  if (getPaymentPurpose(annotatedPayment) === 'subscription') {
     const result = await creditSubscriptionPayment(annotatedPayment, 'Kora webhook')
     return res.json({ received: true, credited: result.credited, tokens: result.tokens })
   }

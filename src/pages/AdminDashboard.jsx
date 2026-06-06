@@ -810,6 +810,13 @@ function AdminDashboard({ doctor, onLogout }) {
                 >
                   {loadingConsultationPatients ? 'Loading...' : 'Refresh'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setWorkspacePanel('patients')}
+                  className="rounded-2xl bg-brand-700 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-600"
+                >
+                  {selectedConsultationPatient ? 'Change patient' : 'Show patients'}
+                </button>
               </div>
             </div>
 

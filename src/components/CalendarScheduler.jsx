@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react'
+import { ArrowLeft, CalendarCheck } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
 
-function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentScheduled }) {
+function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentScheduled, onBack }) {
   const { addError } = useError()
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(null)
   const [selectedTime, setSelectedTime] = useState(null)
   const [availableSlots, setAvailableSlots] = useState({})
   const [loading, setLoading] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
   const [consultationType, setConsultationType] = useState('general')
 
   useEffect(() => {
@@ -90,8 +92,9 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
   }
 
   const handleScheduleAppointment = async () => {
-    if (!selectedDate || !selectedTime) return
+    if (!selectedDate || !selectedTime || scheduling) return
 
+    setScheduling(true)
     try {
       const appointmentData = {
         patientId: patient.id,
@@ -120,17 +123,36 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
       addError('Appointment scheduled successfully.', 'success')
     } catch (error) {
       addError('Failed to schedule appointment: ' + error.message, 'error')
+    } finally {
+      setScheduling(false)
     }
   }
 
   const timeSlots = Object.keys(availableSlots).sort()
+  const selectionGuidance = !selectedDate
+    ? 'Select an available weekday to continue.'
+    : !selectedTime
+      ? 'Select an available time to continue.'
+      : `${formatDate(selectedDate)} at ${selectedTime}`
 
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-slate-900">Schedule Your Appointment</h1>
-          <p className="text-slate-600 mt-2">Choose a date and time that works for you</p>
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Schedule Your Appointment</h1>
+            <p className="mt-2 text-slate-600">Choose a date and time that works for you</p>
+          </div>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Change doctor
+            </button>
+          )}
         </div>
 
         <div className="grid lg:grid-cols-2 gap-8">
@@ -205,6 +227,7 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
                   <div className="grid grid-cols-3 gap-3">
                     {timeSlots.map(time => (
                       <button
+                        type="button"
                         key={time}
                         onClick={() => handleTimeSelect(time)}
                         disabled={!availableSlots[time]}
@@ -219,6 +242,11 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
                         {time}
                       </button>
                     ))}
+                    {timeSlots.length === 0 && (
+                      <div className="col-span-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+                        This doctor has no available time on this date. Please choose another weekday.
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -285,14 +313,28 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
                   </div>
                 </div>
 
-                <button
-                  onClick={handleScheduleAppointment}
-                  className="w-full mt-6 bg-brand-700 text-white py-3 px-6 rounded-2xl font-semibold hover:bg-brand-600 transition"
-                >
-                  Schedule Appointment
-                </button>
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="sticky bottom-4 mt-8 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-semibold text-slate-900">
+                {doctor?.name ? `Book with ${doctor.name}` : 'Complete your appointment selection'}
+              </p>
+              <p className="mt-1 text-sm text-slate-600">{selectionGuidance}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleScheduleAppointment}
+              disabled={!selectedDate || !selectedTime || scheduling}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-brand-700 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CalendarCheck className="h-5 w-5" aria-hidden="true" />
+              {scheduling ? 'Scheduling...' : 'Submit appointment'}
+            </button>
           </div>
         </div>
       </div>
