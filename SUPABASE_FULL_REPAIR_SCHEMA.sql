@@ -1012,6 +1012,78 @@ ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS is_availab
 ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS source text DEFAULT 'doctor';
 ALTER TABLE public.doctor_availability_slots ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 
+-- Repair older installations where CREATE TABLE IF NOT EXISTS preserved tables
+-- without the unique keys required by PostgREST upsert/onConflict.
+DO $$
+DECLARE patient_id_attnum smallint;
+BEGIN
+  SELECT attnum INTO patient_id_attnum
+  FROM pg_attribute
+  WHERE attrelid = 'public.patient_tokens'::regclass
+    AND attname = 'patient_id'
+    AND NOT attisdropped;
+
+  IF patient_id_attnum IS NOT NULL AND NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.patient_tokens'::regclass
+      AND contype IN ('p', 'u')
+      AND conkey = ARRAY[patient_id_attnum]::smallint[]
+  ) THEN
+    UPDATE public.patient_tokens target
+    SET balance = source.balance
+    FROM (
+      SELECT patient_id, MAX(COALESCE(balance, 0)) AS balance
+      FROM public.patient_tokens
+      GROUP BY patient_id
+    ) source
+    WHERE target.patient_id = source.patient_id;
+
+    DELETE FROM public.patient_tokens older
+    USING public.patient_tokens newer
+    WHERE older.patient_id = newer.patient_id
+      AND older.ctid < newer.ctid;
+
+    ALTER TABLE public.patient_tokens
+      ADD CONSTRAINT patient_tokens_patient_id_key UNIQUE (patient_id);
+  END IF;
+END $$;
+
+DO $$
+DECLARE doctor_id_attnum smallint;
+DECLARE slot_date_attnum smallint;
+DECLARE slot_time_attnum smallint;
+BEGIN
+  SELECT attnum INTO doctor_id_attnum FROM pg_attribute
+  WHERE attrelid = 'public.doctor_availability_slots'::regclass AND attname = 'doctor_id' AND NOT attisdropped;
+  SELECT attnum INTO slot_date_attnum FROM pg_attribute
+  WHERE attrelid = 'public.doctor_availability_slots'::regclass AND attname = 'slot_date' AND NOT attisdropped;
+  SELECT attnum INTO slot_time_attnum FROM pg_attribute
+  WHERE attrelid = 'public.doctor_availability_slots'::regclass AND attname = 'slot_time' AND NOT attisdropped;
+
+  IF doctor_id_attnum IS NOT NULL AND slot_date_attnum IS NOT NULL AND slot_time_attnum IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM pg_constraint
+      WHERE conrelid = 'public.doctor_availability_slots'::regclass
+        AND contype = 'u'
+        AND conkey @> ARRAY[doctor_id_attnum, slot_date_attnum, slot_time_attnum]::smallint[]
+        AND array_length(conkey, 1) = 3
+    )
+  THEN
+    DELETE FROM public.doctor_availability_slots older
+    USING public.doctor_availability_slots newer
+    WHERE older.doctor_id = newer.doctor_id
+      AND older.slot_date = newer.slot_date
+      AND older.slot_time = newer.slot_time
+      AND older.ctid < newer.ctid;
+
+    ALTER TABLE public.doctor_availability_slots
+      ADD CONSTRAINT doctor_availability_slots_doctor_date_time_key
+      UNIQUE (doctor_id, slot_date, slot_time);
+  END IF;
+END $$;
+
 ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS name text;
 ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS file_name text;
 ALTER TABLE public.admin_files ADD COLUMN IF NOT EXISTS file_type text;
@@ -1058,6 +1130,26 @@ FROM public.patients p
 LEFT JOIN public.patient_tokens pt ON pt.patient_id = p.id
 WHERE pt.patient_id IS NULL;
 
+-- Initialize a ledger baseline for legacy wallets that predate token transactions.
+INSERT INTO public.token_transactions (
+  id, patient_id, transaction_type, amount, description, reference, metadata, created_at
+)
+SELECT
+  'txn-opening-' || encode(gen_random_bytes(8), 'hex'),
+  p.id,
+  'opening_balance',
+  GREATEST(COALESCE(pt.balance, 0), COALESCE(p.tokens, 0)),
+  'Legacy wallet opening balance',
+  'opening-balance-' || p.id,
+  '{"source":"schema_repair"}'::jsonb,
+  now()
+FROM public.patients p
+LEFT JOIN public.patient_tokens pt ON pt.patient_id = p.id
+WHERE GREATEST(COALESCE(pt.balance, 0), COALESCE(p.tokens, 0)) > 0
+  AND NOT EXISTS (
+    SELECT 1 FROM public.token_transactions tx WHERE tx.patient_id = p.id
+  );
+
 INSERT INTO public.facility_wallets(facility_id, balance_ngn)
 SELECT f.id, 0
 FROM public.facilities f
@@ -1103,6 +1195,15 @@ CREATE INDEX IF NOT EXISTS idx_doctor_availability_slots_doctor_date ON public.d
 CREATE INDEX IF NOT EXISTS idx_admin_files_uploaded_at ON public.admin_files(uploaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_token_transactions_patient_reference ON public.token_transactions(patient_id, reference);
 CREATE INDEX IF NOT EXISTS idx_token_transactions_patient_type ON public.token_transactions(patient_id, transaction_type);
+DELETE FROM public.token_transactions older
+USING public.token_transactions newer
+WHERE older.patient_id = newer.patient_id
+  AND older.reference = newer.reference
+  AND older.reference IS NOT NULL
+  AND older.ctid < newer.ctid;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_token_transactions_patient_reference
+  ON public.token_transactions(patient_id, reference)
+  WHERE reference IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_payment ON public.token_revenue_splits(payment_id);
 CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_patient ON public.token_revenue_splits(patient_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(created_at DESC);

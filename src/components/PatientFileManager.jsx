@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
 
 function PatientFileManager({ patientId }) {
@@ -17,7 +17,8 @@ function PatientFileManager({ patientId }) {
     setLoading(true)
     try {
       const response = await apiFetch(`/api/patients/files?patientId=${encodeURIComponent(patientId)}`)
-      const data = await response.json()
+      const data = await readApiJson(response)
+      if (!response.ok) throw new Error(data.error || 'Failed to load patient files')
       setFiles(data.files || [])
     } catch (error) {
       console.error('Failed to load patient files', error)
@@ -73,7 +74,7 @@ function PatientFileManager({ patientId }) {
       if (!response.ok) {
         throw new Error('Download failed')
       }
-      const data = await response.json()
+      const data = await readApiJson(response)
       const blob = new Blob([Uint8Array.from(atob(data.contentBase64), (c) => c.charCodeAt(0))], { type: data.mimeType })
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')

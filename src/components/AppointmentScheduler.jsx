@@ -44,6 +44,8 @@ function AppointmentScheduler({ patientId, onScheduled }) {
           patientId,
           doctorId,
           scheduledDate,
+          slotDate: scheduledDate.slice(0, 10),
+          slotTime: scheduledDate.slice(11, 16),
           consultationType,
           notes,
         }),

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 
 function TokenManager({ patient, onTokensUpdated }) {
@@ -25,7 +25,7 @@ function TokenManager({ patient, onTokensUpdated }) {
     try {
       const response = await apiFetch(`/api/settings`)
       if (response.ok) {
-        const data = await response.json()
+        const data = await readApiJson(response)
         setMinSubscriptionUSD(data.settings.minimumSubscriptionUSD || 10)
       }
     } catch (error) {
@@ -37,11 +37,11 @@ function TokenManager({ patient, onTokensUpdated }) {
     try {
       const response = await apiFetch(`/api/patients/${patient.id}/tokens`)
       if (response.ok) {
-        const data = await response.json()
+        const data = await readApiJson(response)
         setTokens(data.tokens || 0)
         const historyRes = await apiFetch(`/api/patients/${patient.id}/tokens/history`).catch(() => null)
         if (historyRes?.ok) {
-          const historyData = await historyRes.json()
+          const historyData = await readApiJson(historyRes)
           setHasPurchasedBefore((historyData.transactions || []).some(t => (t.transaction_type || t.type) === 'purchase'))
         }
         onTokensUpdated?.(data.tokens || 0)
@@ -55,7 +55,7 @@ function TokenManager({ patient, onTokensUpdated }) {
     try {
       const response = await apiFetch(`/api/patients/${patient.id}/subscription`)
       if (response.ok) {
-        const data = await response.json()
+        const data = await readApiJson(response)
         setSubscription(data.subscription)
       }
     } catch (error) {
@@ -78,14 +78,14 @@ function TokenManager({ patient, onTokensUpdated }) {
       })
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}))
+        const error = await readApiJson(response)
         const details = typeof error.details === 'string'
           ? error.details
           : error.details?.message || error.details?.error || error.details?.data?.message || ''
         throw new Error([error.error || 'Payment initialization failed', details].filter(Boolean).join(': '))
       }
 
-      const result = await response.json()
+      const result = await readApiJson(response)
       const checkoutUrl = String(result.checkout_url || '')
       const checkoutHost = checkoutUrl ? new URL(checkoutUrl, window.location.origin).host : ''
       const isApiUrl = checkoutUrl.includes('/api/')
@@ -109,7 +109,7 @@ function TokenManager({ patient, onTokensUpdated }) {
     try {
       setLoading(true)
       const response = await apiFetch(`/api/payments/kora/verify/${encodeURIComponent(pendingPurchase.reference)}`)
-      const data = await response.json().catch(() => ({}))
+      const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Failed to verify payment')
 
       if (data.status !== 'success') {
@@ -147,14 +147,14 @@ function TokenManager({ patient, onTokensUpdated }) {
       })
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}))
+        const error = await readApiJson(response)
         const details = typeof error.details === 'string'
           ? error.details
           : error.details?.message || error.details?.error || error.details?.data?.message || ''
         throw new Error([error.error || 'Subscription payment failed', details].filter(Boolean).join(': '))
       }
 
-      const result = await response.json()
+      const result = await readApiJson(response)
       const checkoutUrl = String(result.checkout_url || '')
       const checkoutHost = checkoutUrl ? new URL(checkoutUrl, window.location.origin).host : ''
       const isApiUrl = checkoutUrl.includes('/api/')

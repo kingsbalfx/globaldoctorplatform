@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
 
 function AdminSettings() {
@@ -18,7 +18,7 @@ function AdminSettings() {
     try {
       const response = await apiFetch(`/api/settings`)
       if (!response.ok) throw new Error('Failed to load settings')
-      const data = await response.json()
+      const data = await readApiJson(response)
       setSettings(data.settings)
       setMinPrice(data.settings.minimumSubscriptionUSD)
     } catch (error) {
@@ -30,7 +30,7 @@ function AdminSettings() {
     try {
       const response = await apiFetch(`/api/online/status`)
       if (!response.ok) throw new Error('Failed to load online status')
-      const data = await response.json()
+      const data = await readApiJson(response)
       setOnlineStatus(data)
     } catch (error) {
       console.error(error)
@@ -47,10 +47,10 @@ function AdminSettings() {
         body: JSON.stringify({ minimumSubscriptionUSD: Number(minPrice) }),
       })
       if (!response.ok) {
-        const error = await response.json()
+        const error = await readApiJson(response)
         throw new Error(error.error || 'Failed to save settings')
       }
-      const data = await response.json().catch(() => ({}))
+      const data = await readApiJson(response)
       setSettings(data.settings)
       addError('Settings updated successfully.', 'success')
     } catch (error) {

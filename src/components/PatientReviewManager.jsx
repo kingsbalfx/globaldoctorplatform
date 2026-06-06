@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getSpecialtyLogo } from '../lib/specialtyRegistry'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
 
 function PatientReviewManager() {
@@ -19,7 +19,7 @@ function PatientReviewManager() {
     try {
       const response = await apiFetch(`/api/admin/reviews`)
       if (!response.ok) throw new Error('Failed to load reviews')
-      const data = await response.json()
+      const data = await readApiJson(response)
       setReviews(data.reviews || [])
     } catch (error) {
       console.error('Error loading reviews:', error)
@@ -36,7 +36,7 @@ function PatientReviewManager() {
       })
 
       if (!response.ok) throw new Error(`Failed to ${action} review`)
-      const result = await response.json()
+      const result = await readApiJson(response)
       setReviews(reviews.map(r => r.id === reviewId ? result.review : r))
       addError(`Review ${action}ed successfully.`, 'success')
     } catch (error) {

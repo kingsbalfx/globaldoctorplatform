@@ -25,4 +25,15 @@ export async function apiFetch(path, options = {}) {
   throw lastError || new Error('Network request failed')
 }
 
+export async function readApiJson(response, fallback = {}) {
+  if (!response) return fallback
+  const copy = response.clone()
+  try {
+    return await response.json()
+  } catch {
+    const text = await copy.text().catch(() => '')
+    return text ? { ...fallback, error: text } : fallback
+  }
+}
+
 export default apiFetch

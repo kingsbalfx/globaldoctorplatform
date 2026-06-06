@@ -22,7 +22,11 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
   const fetchAvailableSlots = async (date) => {
     setLoading(true)
     try {
-      const dateStr = date.toISOString().split('T')[0]
+      const dateStr = [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0'),
+      ].join('-')
       const response = await apiFetch(`/api/doctors/${doctor.id}/availability?date=${dateStr}`)
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Unable to load availability')
@@ -91,15 +95,24 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
     setSelectedTime(time)
   }
 
+  const getLocalDateKey = (date) => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-')
+
   const handleScheduleAppointment = async () => {
     if (!selectedDate || !selectedTime || scheduling) return
 
     setScheduling(true)
     try {
+      const slotDate = getLocalDateKey(selectedDate)
       const appointmentData = {
         patientId: patient.id,
         doctorId: doctor.id,
-        scheduledDate: new Date(`${selectedDate.toISOString().split('T')[0]}T${selectedTime}:00`).toISOString(),
+        scheduledDate: new Date(`${slotDate}T${selectedTime}:00`).toISOString(),
+        slotDate,
+        slotTime: selectedTime,
         consultationType,
         subscriptionType,
         tokensRequired: subscriptionType === 'basic' ? (doctor.price?.basic || 50) : (doctor.price?.premium || 100)

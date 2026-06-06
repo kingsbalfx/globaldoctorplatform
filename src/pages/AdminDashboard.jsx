@@ -17,7 +17,7 @@ import DoctorPatientNotes from '../components/DoctorPatientNotes'
 import DoctorAvailabilityManager from '../components/DoctorAvailabilityManager'
 import { PortalArtBanner } from '../components/TelehealthArt'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 
 function WorkspaceModal({ title, subtitle, onClose, children, size = 'max-w-4xl' }) {
@@ -93,7 +93,7 @@ function AdminDashboard({ doctor, onLogout }) {
       params.set('onlineOnly', 'true')
       if (search.trim()) params.set('search', search.trim())
       const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/consultation-patients?${params.toString()}`)
-      const data = await response.json().catch(() => ({}))
+      const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Failed to load consultation patients')
       const patients = Array.isArray(data.patients) ? data.patients : []
       setConsultationPatients(patients)
@@ -119,7 +119,7 @@ function AdminDashboard({ doctor, onLogout }) {
     if (!doctor?.id) return
     try {
       const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/financials`)
-      const data = await response.json().catch(() => ({}))
+      const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Failed to load financials')
       setFinancials(data)
       if (data.doctor && activeTab !== 'wallet') {
@@ -200,7 +200,7 @@ function AdminDashboard({ doctor, onLogout }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payoutDetails),
       })
-      const data = await response.json()
+      const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Failed to save payout details')
       if (data.doctor) {
         setPayoutDetails((prev) => ({
@@ -243,7 +243,7 @@ function AdminDashboard({ doctor, onLogout }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tokens, payoutDetails })
       })
-      const data = await response.json()
+      const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Withdrawal request failed')
       setWithdrawalResult({
         message: data.message || 'Withdrawal request queued for payout review.',
@@ -271,7 +271,7 @@ function AdminDashboard({ doctor, onLogout }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isOnline: next }),
       })
-      const data = await response.json().catch(() => ({}))
+      const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Failed to update doctor status')
       setDoctorOnline(next)
       addError(next ? 'You are now visible as online.' : 'You are now offline.', 'success')

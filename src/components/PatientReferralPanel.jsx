@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 
 const specialties = ['Cardiology', 'Dermatology', 'Psychiatry', 'Pediatrics', 'Oncology', 'Orthopedics', 'Neurology', 'Urology', 'Gynaecologist', 'Obstetrics & Gynecology', 'Ophthalmology', 'General Practitioner']
 
@@ -38,7 +38,7 @@ function PatientReferralPanel({ patient, currentDoctor, onReferralSubmitted }) {
       })
 
       if (!response.ok) {
-        const error = await response.json()
+        const error = await readApiJson(response)
         throw new Error(error.error || 'Failed to submit referral')
       }
 

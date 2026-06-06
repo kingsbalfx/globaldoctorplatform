@@ -22,7 +22,7 @@ import { PortalArtBanner } from '../components/TelehealthArt'
 import PatientClinicalSummaryDownload from '../components/PatientClinicalSummaryDownload'
 import VitalParametersMonitor from '../components/VitalParametersMonitor'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 import { supabase } from '../lib/supabaseClient'
 
@@ -120,7 +120,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   const refreshPatientTokens = useCallback(async (patientId) => {
     if (!patientId) return null
     const response = await apiFetch(`/api/patients/${encodeURIComponent(patientId)}/tokens`)
-    const data = await response.json().catch(() => ({}))
+    const data = await readApiJson(response)
     if (!response.ok) throw new Error(data.error || 'Unable to refresh token balance')
     const nextBalance = Number(data.tokens ?? data.balance ?? 0) || 0
     setTokens(nextBalance)
@@ -298,7 +298,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
           durationMin: subType === 'premium' ? 30 : 15,
         }),
       })
-      const data = await response.json().catch(() => ({}))
+      const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Failed to start consultation')
 
       const updatedBalanceResponse = await apiFetch(`/api/patients/${encodeURIComponent(patient.id)}/tokens`)
@@ -371,7 +371,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         }),
       })
       if (!response.ok) {
-        const error = await response.json()
+        const error = await readApiJson(response)
         throw new Error(error.error || 'Emergency call failed')
       }
       addError('Emergency request sent to available doctors. Help is on the way.', 'success')

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 
 function NotificationCenter({ userId, userType }) {
   const [notifications, setNotifications] = useState([])
@@ -15,7 +15,8 @@ function NotificationCenter({ userId, userType }) {
     setLoading(true)
     try {
       const response = await apiFetch(`/api/notifications?userId=${encodeURIComponent(userId)}&userType=${encodeURIComponent(userType)}`)
-      const data = await response.json()
+      const data = await readApiJson(response)
+      if (!response.ok) throw new Error(data.error || 'Failed to load notifications')
       setNotifications(data.notifications || [])
     } catch (error) {
       console.error('Failed to load notifications', error)

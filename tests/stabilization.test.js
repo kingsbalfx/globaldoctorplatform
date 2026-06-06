@@ -14,6 +14,10 @@ const chatPanel = readFileSync(new URL('../src/components/ChatPanel.jsx', import
 const communityChat = readFileSync(new URL('../src/components/DoctorCommunityChat.jsx', import.meta.url), 'utf8')
 const patientDashboard = readFileSync(new URL('../src/pages/PatientDashboard.jsx', import.meta.url), 'utf8')
 const doctorSelection = readFileSync(new URL('../src/components/DoctorSelection.jsx', import.meta.url), 'utf8')
+const patientAuth = readFileSync(new URL('../src/components/PatientAuth.jsx', import.meta.url), 'utf8')
+const appointmentScheduler = readFileSync(new URL('../src/components/AppointmentScheduler.jsx', import.meta.url), 'utf8')
+const vercel = readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')
+const apiFetchClient = readFileSync(new URL('../src/lib/apiFetch.js', import.meta.url), 'utf8')
 
 test('doctor availability is deterministic and database-backed', () => {
   assert.match(server, /doctor_availability_slots/)
@@ -57,7 +61,10 @@ test('patient token wallet writes tolerate older schema cache', () => {
   assert.match(server, /async function upsertPatientTokenBalance/)
   assert.match(server, /getMissingColumnName\(result\.error\) === 'updated_at'/)
   assert.match(server, /mode: 'without_updated_at'/)
-  assert.match(server, /const walletUpdate = await upsertPatientTokenBalance\(patientId, newBalance\)/)
+  assert.match(server, /isMissingConflictConstraintError\(result\.error\)/)
+  assert.match(server, /mode: 'update_without_constraint'/)
+  assert.match(server, /const \[walletUpdate, patientUpdate\] = await Promise\.all\(\[/)
+  assert.match(schema, /ADD CONSTRAINT patient_tokens_patient_id_key UNIQUE \(patient_id\)/)
 })
 
 test('Kora verification records actual payment method details', () => {
@@ -82,7 +89,37 @@ test('schema includes recent repair columns and indexes', () => {
   assert.match(schema, /reference text/)
   assert.match(schema, /metadata jsonb/)
   assert.match(schema, /idx_doctor_availability_slots_doctor_date/)
+  assert.match(schema, /doctor_availability_slots_doctor_date_time_key/)
   assert.match(schema, /idx_token_transactions_patient_reference/)
+  assert.match(server, /async function upsertByConflictAdaptive/)
+  assert.match(server, /upsertByConflictAdaptive\('platform_balances'/)
+  assert.match(server, /upsertByConflictAdaptive\('server_settings'/)
+})
+
+test('appointment scheduling avoids repeated slow work and redundant Supabase auth failure', () => {
+  assert.match(server, /const \[slotResult, appointmentResult\] = await Promise\.all\(\[slotPromise, appointmentPromise\]\)/)
+  assert.match(server, /deductPatientTokens\(patientId, requiredTokens, '', \{ currentBalance: balance \}\)/)
+  assert.match(server, /Appointment was already scheduled/)
+  assert.match(server, /req\.body\.slotDate/)
+  assert.match(calendar, /slotDate,\s*slotTime: selectedTime/)
+  assert.match(calendar, /date\.getFullYear\(\)/)
+  assert.match(appointmentScheduler, /slotDate: scheduledDate\.slice\(0, 10\)/)
+  assert.match(server, /function getAppointmentLocalSlotTime/)
+  assert.match(server, /isMissingConflictConstraintError\(error\)[\s\S]*insertAdaptive\('doctor_availability_slots', rows\)/)
+  assert.doesNotMatch(patientAuth, /onAuth\(\{ type: 'login', patient: result\.patient \}\)[\s\S]{0,120}signInWithPassword/)
+})
+
+test('production API avoids cold-start diagnostics and allows enough time for database recovery', () => {
+  assert.match(server, /process\.env\.NODE_ENV !== 'production' \|\| process\.env\.RUN_STARTUP_DIAGNOSTICS === 'true'/)
+  assert.equal(JSON.parse(vercel).functions['api/index.js'].maxDuration, 30)
+})
+
+test('active UI workflows tolerate non-JSON gateway errors', () => {
+  assert.match(apiFetchClient, /export async function readApiJson/)
+  assert.match(apiFetchClient, /const copy = response\.clone\(\)/)
+  assert.match(patientDashboard, /readApiJson\(response\)/)
+  assert.match(doctorDashboard, /readApiJson\(response\)/)
+  assert.match(chatPanel, /readApiJson\(response\)/)
 })
 
 test('doctor online status requires a recent heartbeat', () => {
@@ -114,10 +151,14 @@ test('specialty referral acceptance is idempotent and opens room without chargin
 })
 
 test('patient token balance reconciles wallet and patient mirrors', () => {
-  assert.match(server, /const reconciledBalance = Math\.max\(/)
+  assert.match(server, /const ledgerAvailable = !ledgerResult\.error && ledgerRows\.length > 0/)
+  assert.match(server, /const reconciledBalance = ledgerAvailable/)
   assert.match(server, /token_transactions'\)\.select\('amount'\)/)
   assert.match(server, /ledgerRows\.reduce/)
   assert.match(server, /Patient token mirror repair skipped/)
+  assert.match(server, /async function ensurePatientTokenLedgerBaseline/)
+  assert.match(server, /opening-balance-\$\{patientId\}/)
+  assert.match(schema, /Legacy wallet opening balance/)
 })
 
 test('consultation start creates the room quickly and alerts the doctor waiting room', () => {
@@ -137,6 +178,9 @@ test('Kora token purchases are inferred from older payment references', () => {
   assert.match(server, /reference\.startsWith\('kora-token-'\)/)
   assert.match(server, /getPaymentPurpose\(payment\) === 'token_purchase'/)
   assert.match(server, /getPaymentPurpose\(annotatedPayment\) === 'token_purchase'/)
+  assert.match(server, /skipTransaction: true/)
+  assert.match(server, /String\(claim\.error\.code \|\| ''\) === '23505'/)
+  assert.match(schema, /CREATE UNIQUE INDEX IF NOT EXISTS uq_token_transactions_patient_reference/)
 })
 
 test('doctor dashboard uses waiting-room alert without forced tab navigation', () => {

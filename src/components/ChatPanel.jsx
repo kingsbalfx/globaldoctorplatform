@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronUp, Send } from 'lucide-react'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from './ErrorHandler'
 
 function ChatPanel({ consultationId, userId, userType, recipientId, recipientType, patientId, doctorId }) {
@@ -32,7 +32,8 @@ function ChatPanel({ consultationId, userId, userType, recipientId, recipientTyp
       if (patientId) params.set('patientId', patientId)
       if (doctorId) params.set('doctorId', doctorId)
       const response = await apiFetch(`/api/chat/messages?${params.toString()}`)
-      const data = await response.json()
+      const data = await readApiJson(response)
+      if (!response.ok) throw new Error(data.error || 'Failed to load chat messages')
       setMessages(data.messages || [])
     } catch (error) {
       console.error('Failed to load chat messages', error)

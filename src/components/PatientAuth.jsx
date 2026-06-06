@@ -146,7 +146,6 @@ function PatientAuth({ onAuth }) {
         if (response.ok) {
           const result = await response.json()
           onAuth({ type: 'login', patient: result.patient })
-          void supabase.auth.signInWithPassword(loginPayload).catch(() => null)
           return
         }
 

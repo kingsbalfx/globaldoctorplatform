@@ -59,7 +59,7 @@ const TOKEN_PURCHASE_SPLIT = Object.freeze({
 })
 
 // ---------- STARTUP DIAGNOSTICS ----------
-;(async () => {
+if (process.env.NODE_ENV !== 'production' || process.env.RUN_STARTUP_DIAGNOSTICS === 'true') void (async () => {
   console.log('🔍 Running startup diagnostics...')
   
   // Test Supabase connection
@@ -481,8 +481,34 @@ async function creditTokenPurchasePayment(payment, source = 'kora') {
     return { credited: false, tokens, reason: 'Payment already credited' }
   }
 
+  const currentTokens = await getPatientTokenBalance(patientId)
+  await ensurePatientTokenLedgerBaseline(patientId, currentTokens)
+  const claim = await insertAdaptive('token_transactions', {
+    id: generateId('txn'),
+    patient_id: patientId,
+    transaction_type: 'purchase',
+    amount: tokensExpected,
+    description: `Token purchase via ${source} (${paymentReference})`,
+    reference: paymentReference || null,
+    metadata: {
+      paymentId: payment.id,
+      provider: payment.provider || payment.payment_provider || 'kora',
+      source,
+      tokensExpected,
+    },
+    created_at: new Date().toISOString(),
+  })
+  if (claim.error) {
+    if (String(claim.error.code || '') === '23505') {
+      return { credited: false, tokens: await getPatientTokenBalance(patientId), reason: 'Payment already credited' }
+    }
+    throw claim.error
+  }
+
   const tokens = await creditPatientTokens(patientId, tokensExpected, `Token purchase via ${source} (${paymentReference})`, {
     reference: paymentReference,
+    currentBalance: currentTokens,
+    skipTransaction: true,
     metadata: {
       paymentId: payment.id,
       provider: payment.provider || payment.payment_provider || 'kora',
@@ -649,6 +675,25 @@ function isIntegerSyntaxError(error) {
   return text.includes('22p02') || text.includes('invalid input syntax for type integer')
 }
 
+async function upsertByConflictAdaptive(table, rowOrRows, conflictColumns) {
+  const rows = Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows]
+  const columns = Array.isArray(conflictColumns) ? conflictColumns : [conflictColumns]
+  const result = await supabase.from(table).upsert(rows, { onConflict: columns.join(',') })
+  if (!result.error || !isMissingConflictConstraintError(result.error)) return result
+
+  for (const row of rows) {
+    let updateQuery = supabase.from(table).update(row)
+    for (const column of columns) updateQuery = updateQuery.eq(column, row[column])
+    const update = await updateQuery.select(columns.join(',')).limit(1)
+    if (update.error) return update
+    if (!update.data?.length) {
+      const insert = await insertAdaptive(table, row)
+      if (insert.error) return insert
+    }
+  }
+  return { error: null }
+}
+
 async function insertVitalParameterAdaptive(vital) {
   const attempts = [
     vital,
@@ -677,6 +722,11 @@ async function resolvePaymentDoctorId(value) {
 function isMissingColumnError(error) {
   const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase()
   return text.includes('schema cache') || text.includes('column')
+}
+
+function isMissingConflictConstraintError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`.toLowerCase()
+  return text.includes('no unique or exclusion constraint matching the on conflict specification')
 }
 
 function getMissingColumnName(error) {
@@ -996,19 +1046,24 @@ async function getPatientTokenBalance(patientId) {
   const validBalances = [walletBalance, patientBalance].filter(Number.isFinite)
   const ledgerRows = Array.isArray(ledgerResult.data) ? ledgerResult.data : []
   const ledgerBalance = ledgerRows.reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0)
-  const reconciledBalance = Math.max(
-    0,
-    ...validBalances,
-    ledgerRows.length > 0 ? Math.round(ledgerBalance) : 0
-  )
+  const ledgerAvailable = !ledgerResult.error && ledgerRows.length > 0
+  const reconciledBalance = ledgerAvailable
+    ? Math.max(0, Math.round(ledgerBalance))
+    : validBalances.length > 0 ? Math.max(0, ...validBalances) : 0
 
   if (patientResult.data && (!Number.isFinite(walletBalance) || walletBalance !== reconciledBalance)) {
-    const { error } = await upsertPatientTokenBalance(patientId, reconciledBalance)
-    if (error) console.warn('Patient token wallet repair skipped:', error.message)
+    void upsertPatientTokenBalance(patientId, reconciledBalance)
+      .then(({ error }) => {
+        if (error) console.warn('Patient token wallet repair skipped:', error.message)
+      })
+      .catch((error) => console.warn('Patient token wallet repair skipped:', error.message))
   }
   if (patientResult.data && (!Number.isFinite(patientBalance) || patientBalance !== reconciledBalance)) {
-    const update = await supabase.from('patients').update({ tokens: reconciledBalance }).eq('id', patientId)
-    if (update.error && !isMissingColumnError(update.error)) console.warn('Patient token mirror repair skipped:', update.error.message)
+    void supabase.from('patients').update({ tokens: reconciledBalance }).eq('id', patientId)
+      .then((update) => {
+        if (update.error && !isMissingColumnError(update.error)) console.warn('Patient token mirror repair skipped:', update.error.message)
+      })
+      .catch((error) => console.warn('Patient token mirror repair skipped:', error.message))
   }
   return reconciledBalance
 }
@@ -1027,6 +1082,33 @@ async function upsertPatientTokenBalance(patientId, balance) {
     const { updated_at: _updatedAt, ...fallbackRow } = row
     result = await supabase.from('patient_tokens').upsert(fallbackRow, { onConflict: 'patient_id' })
     if (!result.error) return { error: null, balance: normalizedBalance, mode: 'without_updated_at' }
+  }
+
+  if (isMissingConflictConstraintError(result.error)) {
+    const withoutUpdatedAt = isMissingColumnError(result.error)
+    const candidate = withoutUpdatedAt
+      ? { patient_id: patientId, balance: normalizedBalance }
+      : row
+    let update = await supabase
+      .from('patient_tokens')
+      .update(candidate)
+      .eq('patient_id', patientId)
+      .select('patient_id')
+      .limit(1)
+    if (update.error && isMissingColumnError(update.error) && 'updated_at' in candidate) {
+      update = await supabase
+        .from('patient_tokens')
+        .update({ balance: normalizedBalance })
+        .eq('patient_id', patientId)
+        .select('patient_id')
+        .limit(1)
+    }
+    if (!update.error && update.data?.length) {
+      return { error: null, balance: normalizedBalance, mode: 'update_without_constraint' }
+    }
+    const insert = await insertAdaptive('patient_tokens', candidate)
+    if (!insert.error) return { error: null, balance: normalizedBalance, mode: 'insert_without_constraint' }
+    return { error: update.error || insert.error, balance: normalizedBalance, mode: 'failed_without_constraint' }
   }
 
   return { error: result.error, balance: normalizedBalance, mode: 'failed' }
@@ -1063,14 +1145,41 @@ async function hasTokenCreditForPayment(patientId, paymentReference) {
   return Boolean(data?.length)
 }
 
-async function deductPatientTokens(patientId, amount, description = '') {
+async function ensurePatientTokenLedgerBaseline(patientId, currentBalance) {
+  const balance = Math.max(0, Math.round(Number(currentBalance) || 0))
+  if (!patientId || balance <= 0) return
+  const existing = await supabase
+    .from('token_transactions')
+    .select('id')
+    .eq('patient_id', patientId)
+    .limit(1)
+  if (existing.error || existing.data?.length) return
+
+  const baseline = await insertAdaptive('token_transactions', {
+    id: generateId('txn'),
+    patient_id: patientId,
+    transaction_type: 'opening_balance',
+    amount: balance,
+    description: 'Legacy wallet opening balance',
+    reference: `opening-balance-${patientId}`,
+    metadata: { source: 'automatic_ledger_repair' },
+    created_at: new Date().toISOString(),
+  })
+  if (baseline.error && String(baseline.error.code || '') !== '23505') throw baseline.error
+}
+
+async function deductPatientTokens(patientId, amount, description = '', options = {}) {
   const tokens = Math.max(0, Math.round(Number(amount) || 0))
-  const current = await getPatientTokenBalance(patientId)
+  const suppliedBalance = Number(options.currentBalance)
+  const current = Number.isFinite(suppliedBalance) ? suppliedBalance : await getPatientTokenBalance(patientId)
   if (current < tokens) return false
+  await ensurePatientTokenLedgerBaseline(patientId, current)
   const newBalance = current - tokens
-  const walletUpdate = await upsertPatientTokenBalance(patientId, newBalance)
+  const [walletUpdate, patientUpdate] = await Promise.all([
+    upsertPatientTokenBalance(patientId, newBalance),
+    supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId),
+  ])
   if (walletUpdate.error) throw walletUpdate.error
-  const patientUpdate = await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
   if (patientUpdate.error && !isMissingColumnError(patientUpdate.error)) throw patientUpdate.error
   const transaction = await insertAdaptive('token_transactions', {
     id: generateId('txn'),
@@ -1085,24 +1194,30 @@ async function deductPatientTokens(patientId, amount, description = '') {
 }
 
 async function creditPatientTokens(patientId, amount, description = 'Token credit', options = {}) {
-  const current = await getPatientTokenBalance(patientId)
+  const suppliedBalance = Number(options.currentBalance)
+  const current = Number.isFinite(suppliedBalance) ? suppliedBalance : await getPatientTokenBalance(patientId)
   const tokenAmount = Math.max(0, Math.round(Number(amount) || 0))
+  await ensurePatientTokenLedgerBaseline(patientId, current)
   const newBalance = current + tokenAmount
-  const walletUpdate = await upsertPatientTokenBalance(patientId, newBalance)
+  const [walletUpdate, patientUpdate] = await Promise.all([
+    upsertPatientTokenBalance(patientId, newBalance),
+    supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId),
+  ])
   if (walletUpdate.error) throw walletUpdate.error
-  const patientUpdate = await supabase.from('patients').update({ tokens: newBalance }).eq('id', patientId)
   if (patientUpdate.error && !isMissingColumnError(patientUpdate.error)) throw patientUpdate.error
-  const transaction = await insertAdaptive('token_transactions', {
-    id: generateId('txn'),
-    patient_id: patientId,
-    transaction_type: 'purchase',
-    amount: tokenAmount,
-    description,
-    reference: options.reference || null,
-    metadata: options.metadata || null,
-    created_at: new Date().toISOString()
-  })
-  if (transaction.error) throw transaction.error
+  if (!options.skipTransaction) {
+    const transaction = await insertAdaptive('token_transactions', {
+      id: generateId('txn'),
+      patient_id: patientId,
+      transaction_type: 'purchase',
+      amount: tokenAmount,
+      description,
+      reference: options.reference || null,
+      metadata: options.metadata || null,
+      created_at: new Date().toISOString()
+    })
+    if (transaction.error) throw transaction.error
+  }
   return newBalance
 }
 
@@ -1489,11 +1604,12 @@ async function getPlatformBalances() {
 
 async function updatePlatformBalance(platformDelta, dataDelta) {
   const current = await getPlatformBalances()
-  await supabase.from('platform_balances').upsert({
+  const result = await upsertByConflictAdaptive('platform_balances', {
     id: 1,
     platform_balance_ngn: Math.max(0, current.platformBalanceNgn + (platformDelta || 0)),
     data_fund_balance_ngn: Math.max(0, current.dataFundBalanceNgn + (dataDelta || 0))
-  }, { onConflict: 'id' })
+  }, 'id')
+  if (result.error) throw result.error
 }
 
 async function recordAuditLog(req, entry = {}) {
@@ -2835,7 +2951,8 @@ app.patch('/api/admin/settings', async (req, res) => {
     })
   }
   if (updates.length === 0) return res.status(400).json({ error: 'No settings supplied' })
-  await supabase.from('server_settings').upsert(updates, { onConflict: 'key' })
+  const settingsUpdate = await upsertByConflictAdaptive('server_settings', updates, 'key')
+  if (settingsUpdate.error) return res.status(500).json({ error: settingsUpdate.error.message })
   await recordAuditLog(req, {
     action: 'settings.update',
     resourceType: 'server_settings',
@@ -2962,6 +3079,24 @@ function normalizeSlotTime(value) {
   return String(value || '').slice(0, 5)
 }
 
+function getAppointmentLocalSlotTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: process.env.APP_TIME_ZONE || 'Africa/Lagos',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date)
+    const hour = parts.find((part) => part.type === 'hour')?.value
+    const minute = parts.find((part) => part.type === 'minute')?.value
+    return hour && minute ? `${hour}:${minute}` : ''
+  } catch {
+    return date.toISOString().slice(11, 16)
+  }
+}
+
 async function getDoctorAvailabilityForDate(doctorId, dateStr) {
   const date = new Date(`${dateStr}T00:00:00`)
   if (!doctorId || Number.isNaN(date.getTime())) {
@@ -2969,11 +3104,23 @@ async function getDoctorAvailabilityForDate(doctorId, dateStr) {
   }
   const slots = buildDefaultAvailabilitySlots(date)
 
-  const slotResult = await supabase
+  const slotPromise = supabase
     .from('doctor_availability_slots')
     .select('*')
     .eq('doctor_id', String(doctorId))
     .eq('slot_date', dateStr)
+
+  const start = `${dateStr}T00:00:00.000Z`
+  const end = `${dateStr}T23:59:59.999Z`
+  const appointmentPromise = supabase
+    .from('appointments')
+    .select('scheduled_date,status')
+    .eq('doctor_id', String(doctorId))
+    .gte('scheduled_date', start)
+    .lte('scheduled_date', end)
+    .not('status', 'in', '("cancelled","canceled","completed","rejected")')
+  const [slotResult, appointmentResult] = await Promise.all([slotPromise, appointmentPromise])
+
   if (!slotResult.error) {
     for (const slot of slotResult.data || []) {
       const time = normalizeSlotTime(slot.slot_time)
@@ -2983,18 +3130,9 @@ async function getDoctorAvailabilityForDate(doctorId, dateStr) {
     throw slotResult.error
   }
 
-  const start = `${dateStr}T00:00:00.000Z`
-  const end = `${dateStr}T23:59:59.999Z`
-  const appointmentResult = await supabase
-    .from('appointments')
-    .select('scheduled_date,status')
-    .eq('doctor_id', String(doctorId))
-    .gte('scheduled_date', start)
-    .lte('scheduled_date', end)
-    .not('status', 'in', '("cancelled","canceled","completed","rejected")')
   if (!appointmentResult.error) {
     for (const appointment of appointmentResult.data || []) {
-      const time = new Date(appointment.scheduled_date).toISOString().slice(11, 16)
+      const time = getAppointmentLocalSlotTime(appointment.scheduled_date)
       if (time) slots[time] = false
     }
   } else {
@@ -3031,9 +3169,19 @@ app.patch('/api/doctors/:doctorId/availability', async (req, res) => {
     created_at: new Date().toISOString(),
   })).filter((row) => /^\d{2}:\d{2}:00$/.test(row.slot_time))
   if (rows.length === 0) return res.status(400).json({ error: 'At least one valid slot is required' })
-  const { error } = await supabase
+  let { error } = await supabase
     .from('doctor_availability_slots')
     .upsert(rows, { onConflict: 'doctor_id,slot_date,slot_time' })
+  if (isMissingConflictConstraintError(error)) {
+    const removal = await supabase
+      .from('doctor_availability_slots')
+      .delete()
+      .eq('doctor_id', String(doctorId))
+      .eq('slot_date', dateStr)
+    if (removal.error && !isMissingColumnError(removal.error)) return res.status(500).json({ error: removal.error.message })
+    const replacement = await insertAdaptive('doctor_availability_slots', rows)
+    error = replacement.error
+  }
   if (error) return res.status(500).json({ error: error.message })
   const availability = await getDoctorAvailabilityForDate(doctorId, dateStr)
   res.json({ ...availability, date: dateStr, message: 'Availability updated' })
@@ -3067,20 +3215,40 @@ app.post('/api/appointments', async (req, res) => {
     if (!patientId || !doctorId || !scheduledDate || !consultationType) return res.status(400).json({ error: 'Missing fields' })
     const scheduled = new Date(scheduledDate)
     if (Number.isNaN(scheduled.getTime())) return res.status(400).json({ error: 'Invalid appointment date' })
-    const slotDate = scheduled.toISOString().slice(0, 10)
-    const slotTime = scheduled.toISOString().slice(11, 16)
-    const availability = await getDoctorAvailabilityForDate(doctorId, slotDate)
+    const slotDate = String(req.body.slotDate || req.body.date || scheduled.toISOString().slice(0, 10)).slice(0, 10)
+    const slotTime = normalizeSlotTime(req.body.slotTime || req.body.time || scheduled.toISOString().slice(11, 16))
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(slotDate) || !/^\d{2}:\d{2}$/.test(slotTime)) {
+      return res.status(400).json({ error: 'Invalid appointment slot date or time' })
+    }
+
+    const [availability, existingResult, balance, doctorResult] = await Promise.all([
+      getDoctorAvailabilityForDate(doctorId, slotDate),
+      supabase
+        .from('appointments')
+        .select('*')
+        .eq('patient_id', patientId)
+        .eq('doctor_id', String(doctorId))
+        .eq('scheduled_date', scheduledDate)
+        .not('status', 'in', '("cancelled","canceled","rejected")')
+        .limit(1)
+        .maybeSingle(),
+      getPatientTokenBalance(patientId),
+      supabase.from('doctors').select('name').eq('id', doctorId).maybeSingle(),
+    ])
+    if (existingResult.data) {
+      return res.json({ appointment: existingResult.data, message: 'Appointment was already scheduled', existing: true })
+    }
+    if (existingResult.error && !isMissingColumnError(existingResult.error)) throw existingResult.error
     if (!availability.slots?.[slotTime]) return res.status(409).json({ error: 'Selected appointment slot is no longer available.' })
 
     const requiredTokens = tokensRequired || (consultationType === 'referral' ? 15 : 20)
-    const balance = await getPatientTokenBalance(patientId)
     if (balance < requiredTokens) return res.status(402).json({ error: 'Insufficient tokens' })
 
-    const deducted = await deductPatientTokens(patientId, requiredTokens)
+    const deducted = await deductPatientTokens(patientId, requiredTokens, '', { currentBalance: balance })
     if (!deducted) return res.status(402).json({ error: 'Insufficient tokens' })
     deductedTokens = requiredTokens
 
-    const { data: doctor } = await supabase.from('doctors').select('name').eq('id', doctorId).maybeSingle()
+    const doctor = doctorResult.data
 
     const id = generateId('appt')
     const appointment = {
