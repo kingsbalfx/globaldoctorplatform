@@ -873,23 +873,85 @@ function normalizeDoctorPayload(body = {}) {
   }
 }
 
+function normalizeEnvSecret(value) {
+  const trimmed = String(value || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim()
+  if (trimmed.length >= 2 && (
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+    || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    || (trimmed.startsWith('`') && trimmed.endsWith('`'))
+  )) {
+    return trimmed.slice(1, -1).trim()
+  }
+  return trimmed
+}
+
 function getSmtpSettings() {
-  const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || 'smtp.gmail.com'
+  const host = normalizeEnvSecret(process.env.SMTP_HOST || process.env.EMAIL_HOST || 'smtp.gmail.com').toLowerCase()
   const isGmailSmtp = String(host).toLowerCase().includes('gmail.com')
-  const user = process.env.SMTP_USER || process.env.EMAIL_USER || process.env.MAIL_USER || process.env.GMAIL_USER || ''
-  const rawPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.MAIL_PASS || process.env.GMAIL_APP_PASSWORD || ''
-  const pass = isGmailSmtp ? String(rawPass).replace(/\s+/g, '') : String(rawPass)
+  const user = normalizeEnvSecret(process.env.SMTP_USER || process.env.EMAIL_USER || process.env.MAIL_USER || process.env.GMAIL_USER || '').toLowerCase()
+  const passwordCandidates = [
+    ['SMTP_PASS', process.env.SMTP_PASS],
+    ['SMTP_PASSWORD', process.env.SMTP_PASSWORD],
+    ['SMTP_APP_PASSWORD', process.env.SMTP_APP_PASSWORD],
+    ['GMAIL_APP_PASSWORD', process.env.GMAIL_APP_PASSWORD],
+    ['GMAIL_APP_PASS', process.env.GMAIL_APP_PASS],
+    ['EMAIL_PASS', process.env.EMAIL_PASS],
+    ['MAIL_PASS', process.env.MAIL_PASS],
+  ].map(([source, value]) => {
+    const normalized = normalizeEnvSecret(value)
+    return {
+      source,
+      pass: isGmailSmtp ? normalized.replace(/\s+/g, '') : normalized,
+    }
+  }).filter((candidate) => candidate.pass && !/^replace[_ -]?me$/i.test(candidate.pass))
+  const selectedPassword = isGmailSmtp
+    ? passwordCandidates.find((candidate) => /^[a-z0-9]{16}$/i.test(candidate.pass)) || passwordCandidates[0]
+    : passwordCandidates[0]
+  const pass = selectedPassword?.pass || ''
+  const oauthClientId = normalizeEnvSecret(process.env.GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '')
+  const oauthClientSecret = normalizeEnvSecret(process.env.GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || '')
+  const oauthRefreshToken = normalizeEnvSecret(process.env.GMAIL_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN || '')
+  const oauthConfigured = Boolean(isGmailSmtp && user && oauthClientId && oauthClientSecret && oauthRefreshToken)
   const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 587)
   const secure = process.env.SMTP_SECURE !== undefined
     ? String(process.env.SMTP_SECURE).toLowerCase() === 'true'
     : port === 465
-  const from = process.env.SMTP_FROM || process.env.EMAIL_FROM || user
-  const fromName = process.env.SMTP_FROM_NAME || 'GlobalDoc Connect'
+  const from = normalizeEnvSecret(process.env.SMTP_FROM || process.env.EMAIL_FROM || user).toLowerCase()
+  const fromName = normalizeEnvSecret(process.env.SMTP_FROM_NAME || 'GlobalDoc Connect')
   const warnings = []
-  if (isGmailSmtp && pass && pass.length !== 16) {
-    warnings.push('Gmail app passwords are normally 16 characters after spaces are removed. Generate a fresh Gmail App Password if login fails.')
+  const gmailAppPasswordFormat = !isGmailSmtp || /^[a-z0-9]{16}$/i.test(pass)
+  const authMode = isGmailSmtp && !gmailAppPasswordFormat && oauthConfigured ? 'oauth2' : 'password'
+  if (isGmailSmtp && pass && !gmailAppPasswordFormat) {
+    warnings.push('The configured Gmail password is not a 16-letter App Password. A Google OAuth client ID, normal account password, or API key cannot authenticate SMTP.')
   }
-  return { user, pass, host, port, secure, from, fromName, warnings }
+  if (isGmailSmtp && user && !/@gmail\.com$/i.test(user) && !/@googlemail\.com$/i.test(user)) {
+    warnings.push('SMTP_USER is not a Gmail address. For Google Workspace, confirm SMTP access is enabled for the account.')
+  }
+  if (isGmailSmtp && from && user && from !== user) {
+    warnings.push('SMTP_FROM differs from SMTP_USER. Gmail may replace or reject an unverified sender address.')
+  }
+  if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+    warnings.push('NODE_TLS_REJECT_UNAUTHORIZED=0 disables TLS certificate verification. Remove it from production environment variables.')
+  }
+  return {
+    user,
+    pass,
+    host,
+    port,
+    secure,
+    from,
+    fromName,
+    warnings,
+    credentialSource: selectedPassword?.source || '',
+    passwordLength: pass.length,
+    gmailAppPasswordFormat,
+    isGmailSmtp,
+    oauthClientId,
+    oauthClientSecret,
+    oauthRefreshToken,
+    oauthConfigured,
+    authMode,
+  }
 }
 
 function describeSmtpError(error) {
@@ -897,7 +959,7 @@ function describeSmtpError(error) {
   const code = error?.code ? ` (${error.code})` : ''
   const command = error?.command ? ` during ${error.command}` : ''
   if (/Invalid login|Username and Password not accepted|535/i.test(message)) {
-    return `Gmail rejected the SMTP login${code}. Confirm the account has 2-Step Verification enabled and SMTP_PASS is a Gmail App Password.`
+    return `Gmail rejected the SMTP login${code}. Use a fresh 16-letter Gmail App Password for the exact SMTP_USER account; Google OAuth client IDs and normal Gmail passwords do not work for SMTP.`
   }
   if (/self signed|certificate|tls/i.test(message)) {
     return `SMTP TLS/certificate error${code}: ${message}`
@@ -910,23 +972,54 @@ function describeSmtpError(error) {
 
 async function sendSmtpEmail({ to, subject, text, html }) {
   const settings = getSmtpSettings()
-  if (!settings.user || !settings.pass || !to) {
+  const configured = Boolean(settings.user && to && (
+    settings.authMode === 'oauth2' ? settings.oauthConfigured : settings.pass
+  ))
+  if (!configured) {
     return {
       sent: false,
       reason: 'SMTP credentials or recipient email missing',
-      configured: Boolean(settings.user && settings.pass),
+      configured: false,
       host: settings.host,
       port: settings.port,
       secure: settings.secure,
+      authMode: settings.authMode,
+      credentialSource: settings.credentialSource,
+      passwordLength: settings.passwordLength,
+      gmailAppPasswordFormat: settings.gmailAppPasswordFormat,
+      warnings: settings.warnings,
+    }
+  }
+  if (settings.isGmailSmtp && settings.authMode === 'password' && !settings.gmailAppPasswordFormat) {
+    return {
+      sent: false,
+      reason: `The selected ${settings.credentialSource || 'SMTP password'} is ${settings.passwordLength} characters after normalization. Gmail SMTP requires a separate 16-character App Password; an App ID, OAuth Client ID, API key, or normal account password will be rejected.`,
+      configured: true,
+      host: settings.host,
+      port: settings.port,
+      secure: settings.secure,
+      authMode: settings.authMode,
+      credentialSource: settings.credentialSource,
+      passwordLength: settings.passwordLength,
+      gmailAppPasswordFormat: false,
       warnings: settings.warnings,
     }
   }
 
+  const auth = settings.authMode === 'oauth2'
+    ? {
+        type: 'OAuth2',
+        user: settings.user,
+        clientId: settings.oauthClientId,
+        clientSecret: settings.oauthClientSecret,
+        refreshToken: settings.oauthRefreshToken,
+      }
+    : { user: settings.user, pass: settings.pass }
   const transporter = nodemailer.createTransport({
     host: settings.host,
     port: settings.port,
     secure: settings.secure,
-    auth: { user: settings.user, pass: settings.pass },
+    auth,
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 20000,
@@ -955,6 +1048,10 @@ async function sendSmtpEmail({ to, subject, text, html }) {
       port: settings.port,
       secure: settings.secure,
       configured: true,
+      authMode: settings.authMode,
+      credentialSource: settings.credentialSource,
+      passwordLength: settings.passwordLength,
+      gmailAppPasswordFormat: settings.gmailAppPasswordFormat,
       warnings: settings.warnings,
     }
   }
@@ -1663,7 +1760,13 @@ app.get('/api/config', async (req, res) => {
       kora: Boolean(KORA_SECRET_KEY),
       agora: Boolean(AGORA_APP_ID && AGORA_APP_CERTIFICATE),
       turn: VIDEO_TURN_URLS.length > 0 && Boolean(VIDEO_TURN_USERNAME && VIDEO_TURN_CREDENTIAL),
-      smtp: Boolean((process.env.SMTP_USER || process.env.EMAIL_USER || process.env.GMAIL_USER) && (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASS || process.env.GMAIL_APP_PASSWORD)),
+      smtp: Boolean((process.env.SMTP_USER || process.env.EMAIL_USER || process.env.GMAIL_USER) && (
+        process.env.SMTP_PASS
+        || process.env.SMTP_PASSWORD
+        || process.env.EMAIL_PASS
+        || process.env.GMAIL_APP_PASSWORD
+        || (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN)
+      )),
       adminEnv: Boolean(process.env.ADMIN_EMAIL || process.env.ADMIN_PASSWORD),
     },
   })
@@ -2968,12 +3071,18 @@ app.post('/api/admin/smtp/test', async (req, res) => {
   if (!to) return res.status(400).json({ error: 'Recipient email is required' })
   const settings = getSmtpSettings()
   const smtp = {
-    configured: Boolean(settings.user && settings.pass),
+    configured: Boolean(settings.user && (settings.pass || settings.oauthConfigured)),
     host: settings.host,
     port: settings.port,
     secure: settings.secure,
     from: settings.from,
     user: settings.user ? `${settings.user.slice(0, 3)}***${settings.user.slice(-8)}` : '',
+    credentialSource: settings.credentialSource,
+    passwordLength: settings.passwordLength,
+    gmailAppPasswordFormat: settings.gmailAppPasswordFormat,
+    oauthConfigured: settings.oauthConfigured,
+    authMode: settings.authMode,
+    warnings: settings.warnings,
   }
   try {
     const email = await sendSmtpEmail({
@@ -3586,10 +3695,12 @@ app.post('/api/doctors/community/messages', async (req, res) => {
   const { senderId, senderName, senderType, phone, message } = req.body
   if (!senderId || !senderName || !message) return res.status(400).json({ error: 'senderId, senderName, and message required' })
   const id = generateId('comm')
-  await supabase.from('community_messages').insert({
+  const communityMessage = {
     id, sender_id: senderId, sender_name: senderName, sender_type: senderType || 'doctor',
     phone: phone || null, message, created_at: new Date().toISOString()
-  })
+  }
+  const { error } = await supabase.from('community_messages').insert(communityMessage)
+  if (error) return res.status(500).json({ error: error.message })
   await recordAuditLog(req, {
     userId: senderId,
     userType: senderType || 'doctor',
@@ -3598,7 +3709,7 @@ app.post('/api/doctors/community/messages', async (req, res) => {
     resourceId: id,
     changes: { senderName, senderType: senderType || 'doctor' },
   })
-  res.status(201).json({ message: 'Community message sent' })
+  res.status(201).json({ communityMessage, message: 'Community message sent' })
 })
 
 // ---------- LEGACY REFERRAL SUPPORT ----------

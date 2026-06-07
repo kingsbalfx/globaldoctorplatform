@@ -960,9 +960,22 @@ function PlatformAdminDashboard({ adminSession, onLogout }) {
                         <p className="font-semibold text-slate-900">{smtpTestResult.email?.sent ? 'Sent' : 'Not sent'}</p>
                         <p className="mt-1 break-words">{smtpTestResult.email?.response || smtpTestResult.email?.reason || 'No provider response'}</p>
                         <p className="mt-1 text-slate-500">Host: {smtpTestResult.smtp?.host}:{smtpTestResult.smtp?.port}</p>
+                        <p className="mt-1 text-slate-500">
+                          Credential: {smtpTestResult.smtp?.credentialSource || smtpTestResult.email?.credentialSource || 'Not detected'}
+                          {' · '}Length: {smtpTestResult.smtp?.passwordLength ?? smtpTestResult.email?.passwordLength ?? 0}
+                          {' · '}Gmail App Password: {(smtpTestResult.smtp?.gmailAppPasswordFormat ?? smtpTestResult.email?.gmailAppPasswordFormat) ? 'Valid format' : 'Invalid format'}
+                          {' · '}Authentication: {smtpTestResult.smtp?.authMode || smtpTestResult.email?.authMode || 'password'}
+                        </p>
                         {Array.isArray(smtpTestResult.email?.warnings) && smtpTestResult.email.warnings.length > 0 && (
                           <div className="mt-2 rounded-xl bg-amber-50 p-2 text-amber-800">
                             {smtpTestResult.email.warnings.map((warning) => (
+                              <p key={warning}>{warning}</p>
+                            ))}
+                          </div>
+                        )}
+                        {Array.isArray(smtpTestResult.smtp?.warnings) && smtpTestResult.smtp.warnings.length > 0 && (
+                          <div className="mt-2 rounded-xl bg-amber-50 p-2 text-amber-800">
+                            {smtpTestResult.smtp.warnings.map((warning) => (
                               <p key={warning}>{warning}</p>
                             ))}
                           </div>

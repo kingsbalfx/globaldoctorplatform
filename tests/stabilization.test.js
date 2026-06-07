@@ -122,6 +122,17 @@ test('active UI workflows tolerate non-JSON gateway errors', () => {
   assert.match(chatPanel, /readApiJson\(response\)/)
 })
 
+test('Gmail SMTP selects and normalizes a valid app-password candidate safely', () => {
+  assert.match(server, /function normalizeEnvSecret/)
+  assert.match(server, /GMAIL_APP_PASSWORD/)
+  assert.match(server, /passwordCandidates\.find\(\(candidate\) => \/\^\[a-z0-9\]\{16\}\$\/i\.test\(candidate\.pass\)\)/)
+  assert.match(server, /gmailAppPasswordFormat/)
+  assert.match(server, /Google OAuth client IDs and normal Gmail passwords do not work for SMTP/)
+  assert.match(server, /Gmail SMTP requires a separate 16-character App Password/)
+  assert.match(server, /GMAIL_REFRESH_TOKEN/)
+  assert.match(server, /type: 'OAuth2'/)
+})
+
 test('doctor online status requires a recent heartbeat', () => {
   assert.match(server, /doctor\.last_seen_at \|\| nested\.last_seen_at/)
   assert.match(server, /if \(!rawSeenAt\) return false/)
@@ -204,10 +215,14 @@ test('accepted offline referrals do not force an empty doctor video workspace', 
   assert.match(server, /room will become available when they come online/)
 })
 
-test('chat panels show six recent messages inside fixed scroll areas', () => {
-  assert.match(chatPanel, /useState\(6\)/)
-  assert.match(chatPanel, /h-\[420px\] overflow-y-auto/)
-  assert.match(chatPanel, /Load \{Math\.min\(6, hiddenMessageCount\)\} older messages/)
-  assert.match(communityChat, /useState\(6\)/)
-  assert.match(communityChat, /h-\[420px\]/)
+test('chat panels keep typing stable while messages synchronize inside fixed scroll areas', () => {
+  assert.match(chatPanel, /requestInFlightRef/)
+  assert.match(chatPanel, /stickToBottomRef/)
+  assert.match(chatPanel, /messages\.map/)
+  assert.match(chatPanel, /h-\[420px\] overflow-y-auto overscroll-contain/)
+  assert.doesNotMatch(chatPanel, /setLoading\(true\)/)
+  assert.match(communityChat, /requestInFlightRef/)
+  assert.match(communityChat, /messages\.map/)
+  assert.match(communityChat, /h-\[420px\].*overflow-y-auto overscroll-contain/)
+  assert.match(server, /res\.status\(201\)\.json\(\{ communityMessage, message: 'Community message sent' \}\)/)
 })
