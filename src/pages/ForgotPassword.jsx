@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 
 function ForgotPassword({ userType, onBack }) {
@@ -18,7 +18,9 @@ function ForgotPassword({ userType, onBack }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), userType }),
       })
-      if (!response.ok) throw new Error(await response.text())
+      const data = await readApiJson(response)
+      if (!response.ok) throw new Error(data.error || 'Unable to send the reset email. Please try again.')
+      if (data.delivered === false) addError(data.message || 'If the account exists, a reset email will be sent.', 'info')
       setSent(true)
     } catch (error) {
       addError(error.message, 'error')
@@ -32,7 +34,7 @@ function ForgotPassword({ userType, onBack }) {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-3xl shadow-xl p-8 text-center">
           <h1 className="text-2xl font-bold text-slate-900">Check your email</h1>
-          <p className="mt-4 text-slate-600">If an account exists for {email}, a reset link has been sent.</p>
+          <p className="mt-4 text-slate-600">A reset link was requested for {email}. Check your inbox and spam folder.</p>
           <button
             onClick={onBack}
             className="mt-6 text-brand-700 hover:text-brand-600 font-medium"

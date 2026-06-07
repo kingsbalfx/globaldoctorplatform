@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { apiFetch } from '../lib/apiFetch'
+import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 
 function ResetPassword() {
@@ -24,7 +24,7 @@ function ResetPassword() {
         body: JSON.stringify({ token, newPassword: password, userType }),
       })
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}))
+        const error = await readApiJson(response)
         throw new Error(error.error || 'Reset failed')
       }
       setSuccess(true)

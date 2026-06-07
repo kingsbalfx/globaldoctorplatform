@@ -210,6 +210,11 @@ function getApiOrigin(req) {
   return `${proto}://${host}`
 }
 
+function getPublicAppUrl() {
+  return normalizeAppBaseUrl(process.env.APP_BASE_URL || process.env.VITE_PUBLIC_APP_URL || process.env.VITE_APP_BASE || process.env.VERCEL_URL)
+    || 'https://globaldoctorplatform.vercel.app'
+}
+
 function extractKoraCheckoutUrl(payload) {
   return payload?.data?.checkout_url
     || payload?.data?.checkoutUrl
@@ -518,7 +523,20 @@ async function creditTokenPurchasePayment(payment, source = 'kora') {
   })
   await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
   await recordTokenRevenueSplit(payment, metadata).catch((error) => console.warn('Token revenue split skipped:', error.message))
-  return { credited: true, tokens, reason: 'Tokens credited' }
+  const patient = await findPatientByIdentifier(patientId)
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: patient?.id || patientId,
+    userType: 'patient',
+    email: patient?.email,
+    name: patient?.name,
+    subject: 'GlobalDoc token purchase receipt',
+    message: `Your payment was verified and ${tokensExpected} tokens were added. Your new balance is ${tokens} tokens.`,
+    actionUrl: `${getPublicAppUrl()}/patient`,
+    purpose: 'token_purchase_receipt',
+    resourceType: 'payment',
+    resourceId: payment.id,
+  })
+  return { credited: true, tokens, emailDelivery, reason: 'Tokens credited' }
 }
 
 async function creditSubscriptionPayment(payment, source = 'kora') {
@@ -569,7 +587,20 @@ async function creditSubscriptionPayment(payment, source = 'kora') {
 
   const tokens = await creditPatientTokens(patientId, tokensIncluded, `Subscription payment via ${source}: ${plan} - ${tokensIncluded} tokens`)
   await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id)
-  return { credited: true, tokens, reason: 'Subscription activated and tokens credited' }
+  const patient = await findPatientByIdentifier(patientId)
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: patient?.id || patientId,
+    userType: 'patient',
+    email: patient?.email,
+    name: patient?.name,
+    subject: 'GlobalDoc subscription activated',
+    message: `Your ${plan} subscription was activated and ${tokensIncluded} tokens were added. Your new balance is ${tokens} tokens.`,
+    actionUrl: `${getPublicAppUrl()}/patient`,
+    purpose: 'subscription_receipt',
+    resourceType: 'payment',
+    resourceId: payment.id,
+  })
+  return { credited: true, tokens, emailDelivery, reason: 'Subscription activated and tokens credited' }
 }
 
 async function insertPaymentRecord(row) {
@@ -970,13 +1001,33 @@ function describeSmtpError(error) {
   return `${message}${code}${command}`
 }
 
-async function sendSmtpEmail({ to, subject, text, html }) {
+async function recordEmailDelivery({ to, subject, purpose, resourceType, resourceId, userId, userType, result }) {
+  const row = {
+    id: generateId('email'),
+    recipient_email: String(to || '').trim().toLowerCase(),
+    subject: String(subject || '').trim(),
+    purpose: String(purpose || 'notification').trim(),
+    resource_type: resourceType || null,
+    resource_id: resourceId || null,
+    user_id: userId || null,
+    user_type: userType || null,
+    status: result?.sent ? 'sent' : 'failed',
+    provider_message_id: result?.messageId || null,
+    provider_response: result?.response || null,
+    failure_reason: result?.sent ? null : result?.reason || 'Email was not sent',
+    created_at: new Date().toISOString(),
+  }
+  await insertAdaptive('email_delivery_logs', row).catch(() => null)
+  return result
+}
+
+async function sendSmtpEmail({ to, subject, text, html, purpose, resourceType, resourceId, userId, userType }) {
   const settings = getSmtpSettings()
   const configured = Boolean(settings.user && to && (
     settings.authMode === 'oauth2' ? settings.oauthConfigured : settings.pass
   ))
   if (!configured) {
-    return {
+    return recordEmailDelivery({ to, subject, purpose, resourceType, resourceId, userId, userType, result: {
       sent: false,
       reason: 'SMTP credentials or recipient email missing',
       configured: false,
@@ -988,10 +1039,10 @@ async function sendSmtpEmail({ to, subject, text, html }) {
       passwordLength: settings.passwordLength,
       gmailAppPasswordFormat: settings.gmailAppPasswordFormat,
       warnings: settings.warnings,
-    }
+    } })
   }
   if (settings.isGmailSmtp && settings.authMode === 'password' && !settings.gmailAppPasswordFormat) {
-    return {
+    return recordEmailDelivery({ to, subject, purpose, resourceType, resourceId, userId, userType, result: {
       sent: false,
       reason: `The selected ${settings.credentialSource || 'SMTP password'} is ${settings.passwordLength} characters after normalization. Gmail SMTP requires a separate 16-character App Password; an App ID, OAuth Client ID, API key, or normal account password will be rejected.`,
       configured: true,
@@ -1003,7 +1054,7 @@ async function sendSmtpEmail({ to, subject, text, html }) {
       passwordLength: settings.passwordLength,
       gmailAppPasswordFormat: false,
       warnings: settings.warnings,
-    }
+    } })
   }
 
   const auth = settings.authMode === 'oauth2'
@@ -1037,11 +1088,11 @@ async function sendSmtpEmail({ to, subject, text, html }) {
     })
     const rejected = Array.isArray(info.rejected) ? info.rejected : []
     if (rejected.length > 0) {
-      return { sent: false, reason: `SMTP rejected: ${rejected.join(', ')}`, messageId: info.messageId || null, accepted: info.accepted || [] }
+      return recordEmailDelivery({ to, subject, purpose, resourceType, resourceId, userId, userType, result: { sent: false, reason: `SMTP rejected: ${rejected.join(', ')}`, messageId: info.messageId || null, accepted: info.accepted || [] } })
     }
-    return { sent: true, messageId: info.messageId || null, accepted: info.accepted || [], response: info.response || null, warnings: settings.warnings }
+    return recordEmailDelivery({ to, subject, purpose, resourceType, resourceId, userId, userType, result: { sent: true, messageId: info.messageId || null, accepted: info.accepted || [], response: info.response || null, warnings: settings.warnings } })
   } catch (error) {
-    return {
+    return recordEmailDelivery({ to, subject, purpose, resourceType, resourceId, userId, userType, result: {
       sent: false,
       reason: describeSmtpError(error),
       host: settings.host,
@@ -1053,8 +1104,38 @@ async function sendSmtpEmail({ to, subject, text, html }) {
       passwordLength: settings.passwordLength,
       gmailAppPasswordFormat: settings.gmailAppPasswordFormat,
       warnings: settings.warnings,
+    } })
+  }
+}
+
+async function sendUserNotificationEmail({ userId, userType, email, name, subject, message, actionUrl, purpose, resourceType, resourceId }) {
+  let recipient = String(email || '').trim().toLowerCase()
+  let recipientName = String(name || '').trim()
+  if (!recipient && userId) {
+    const table = userType === 'doctor' ? 'doctors_auth' : 'patients'
+    const lookup = await supabase.from(table).select('email,name').eq('id', userId).maybeSingle()
+    recipient = String(lookup.data?.email || '').trim().toLowerCase()
+    recipientName = recipientName || String(lookup.data?.name || '').trim()
+    if (!recipient && userType === 'doctor') {
+      const profile = await supabase.from('doctors').select('email,name').eq('id', userId).maybeSingle()
+      recipient = String(profile.data?.email || '').trim().toLowerCase()
+      recipientName = recipientName || String(profile.data?.name || '').trim()
     }
   }
+  if (!recipient) return { sent: false, reason: 'Recipient email missing' }
+  const safeMessage = String(message || '').trim()
+  const link = actionUrl ? `\n\nOpen GlobalDoc: ${actionUrl}` : ''
+  return sendSmtpEmail({
+    to: recipient,
+    subject,
+    text: `Hello ${recipientName || 'GlobalDoc user'},\n\n${safeMessage}${link}\n\nGlobalDoc Connect`,
+    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a"><h2 style="color:#0f766e">${subject}</h2><p>Hello ${recipientName || 'GlobalDoc user'},</p><p>${safeMessage}</p>${actionUrl ? `<p><a href="${actionUrl}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#0f766e;color:#fff;text-decoration:none">Open GlobalDoc</a></p>` : ''}<p style="color:#64748b">GlobalDoc Connect</p></div>`,
+    purpose,
+    resourceType,
+    resourceId,
+    userId,
+    userType,
+  })
 }
 
 async function sendDoctorApprovalEmail(doctor) {
@@ -3096,6 +3177,16 @@ app.post('/api/admin/smtp/test', async (req, res) => {
   }
 })
 
+app.get('/api/admin/email-deliveries', async (req, res) => {
+  if (!await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+  let query = supabase.from('email_delivery_logs').select('*').order('created_at', { ascending: false }).limit(200)
+  if (req.query.status) query = query.eq('status', String(req.query.status))
+  if (req.query.purpose) query = query.eq('purpose', String(req.query.purpose))
+  const { data, error } = await query
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ deliveries: data || [] })
+})
+
 // ---------- ONLINE STATUS ----------
 app.get('/api/online/status', async (_req, res) => {
   const activeSince = new Date(Date.now() - DOCTOR_ONLINE_WINDOW_MS).toISOString()
@@ -3330,7 +3421,7 @@ app.post('/api/appointments', async (req, res) => {
       return res.status(400).json({ error: 'Invalid appointment slot date or time' })
     }
 
-    const [availability, existingResult, balance, doctorResult] = await Promise.all([
+    const [availability, existingResult, balance, doctorResult, patientRecord] = await Promise.all([
       getDoctorAvailabilityForDate(doctorId, slotDate),
       supabase
         .from('appointments')
@@ -3342,7 +3433,8 @@ app.post('/api/appointments', async (req, res) => {
         .limit(1)
         .maybeSingle(),
       getPatientTokenBalance(patientId),
-      supabase.from('doctors').select('name').eq('id', doctorId).maybeSingle(),
+      supabase.from('doctors').select('name,email').eq('id', doctorId).maybeSingle(),
+      findPatientByIdentifier(patientId),
     ])
     if (existingResult.data) {
       return res.json({ appointment: existingResult.data, message: 'Appointment was already scheduled', existing: true })
@@ -3403,7 +3495,35 @@ app.post('/api/appointments', async (req, res) => {
       }
     ]).catch((error) => console.warn('Appointment notification creation skipped:', error.message))
 
-    return res.status(201).json({ appointment, message: 'Appointment scheduled' })
+    const appointmentMessage = `Your appointment with ${doctor?.name || 'your doctor'} is scheduled for ${new Date(scheduledDate).toLocaleString()}.`
+    const emailDelivery = await Promise.all([
+      sendUserNotificationEmail({
+        userId: patientRecord?.id || patientId,
+        userType: 'patient',
+        email: patientRecord?.email,
+        name: patientRecord?.name,
+        subject: 'GlobalDoc appointment confirmed',
+        message: appointmentMessage,
+        actionUrl: `${getPublicAppUrl()}/patient`,
+        purpose: 'appointment_confirmed',
+        resourceType: 'appointment',
+        resourceId: id,
+      }),
+      sendUserNotificationEmail({
+        userId: doctorId,
+        userType: 'doctor',
+        email: doctor?.email,
+        name: doctor?.name,
+        subject: 'New GlobalDoc appointment',
+        message: `You have a new appointment scheduled for ${new Date(scheduledDate).toLocaleString()}.`,
+        actionUrl: `${getPublicAppUrl()}/doctor`,
+        purpose: 'appointment_confirmed',
+        resourceType: 'appointment',
+        resourceId: id,
+      }),
+    ])
+
+    return res.status(201).json({ appointment, emailDelivery, message: 'Appointment scheduled' })
   } catch (error) {
     if (deductedTokens > 0 && patientId) {
       await creditPatientTokens(patientId, deductedTokens, 'Automatic refund: appointment scheduling failed').catch(() => null)
@@ -3434,6 +3554,88 @@ app.patch('/api/notifications/:notificationId/read', async (req, res) => {
   await supabase.from('notifications').update({ is_read: true, read_at: new Date().toISOString() }).eq('id', req.params.notificationId)
   res.json({ message: 'Marked as read' })
 })
+
+async function processDueAppointmentEmailReminders(req, res) {
+  const authHeader = String(req.headers.authorization || '')
+  const cronAuthorized = Boolean(process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`)
+  if (!cronAuthorized && !await isPlatformAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+  const now = new Date().toISOString()
+  let reminderResult = await supabase
+    .from('appointment_reminders')
+    .select('*')
+    .eq('is_sent', false)
+    .lte('scheduled_send_time', now)
+    .order('scheduled_send_time', { ascending: true })
+    .limit(25)
+  if (reminderResult.error && isMissingColumnError(reminderResult.error)) {
+    reminderResult = await supabase
+      .from('appointment_reminders')
+      .select('*')
+      .eq('sent', false)
+      .lte('scheduled_for', now)
+      .order('scheduled_for', { ascending: true })
+      .limit(25)
+  }
+  if (reminderResult.error) return res.status(500).json({ error: reminderResult.error.message })
+
+  const results = []
+  for (const reminder of reminderResult.data || []) {
+    const { data: appointment } = await supabase.from('appointments').select('*').eq('id', reminder.appointment_id).maybeSingle()
+    if (!appointment || ['cancelled', 'canceled', 'rejected', 'completed'].includes(String(appointment.status || '').toLowerCase())) {
+      await updateAdaptive('appointment_reminders', { is_sent: true, sent: true }, (query) => query.eq('id', reminder.id), { select: null, maybeSingle: false })
+      continue
+    }
+    const [patient, doctor] = await Promise.all([
+      findPatientByIdentifier(appointment.patient_id),
+      appointment.doctor_id ? getDoctorProfile(appointment.doctor_id) : Promise.resolve(null),
+    ])
+    const scheduledText = new Date(appointment.scheduled_date).toLocaleString()
+    const delivery = await Promise.all([
+      sendUserNotificationEmail({
+        userId: patient?.id || appointment.patient_id,
+        userType: 'patient',
+        email: patient?.email,
+        name: patient?.name,
+        subject: 'GlobalDoc appointment reminder',
+        message: `Reminder: your appointment with ${doctor?.name || appointment.doctor_name || 'your doctor'} is scheduled for ${scheduledText}.`,
+        actionUrl: `${getPublicAppUrl()}/patient`,
+        purpose: `appointment_reminder_${reminder.reminder_type || 'scheduled'}`,
+        resourceType: 'appointment',
+        resourceId: appointment.id,
+      }),
+      doctor
+        ? sendUserNotificationEmail({
+            userId: doctor.id,
+            userType: 'doctor',
+            email: doctor.email,
+            name: doctor.name,
+            subject: 'GlobalDoc appointment reminder',
+            message: `Reminder: you have an appointment with ${patient?.name || appointment.patient_id} scheduled for ${scheduledText}.`,
+            actionUrl: `${getPublicAppUrl()}/doctor`,
+            purpose: `appointment_reminder_${reminder.reminder_type || 'scheduled'}`,
+            resourceType: 'appointment',
+            resourceId: appointment.id,
+          })
+        : Promise.resolve({ sent: false, reason: 'Doctor record missing' }),
+    ])
+    const delivered = delivery.some((item) => item.sent)
+    if (delivered) {
+      await updateAdaptive('appointment_reminders', { is_sent: true, sent: true }, (query) => query.eq('id', reminder.id), { select: null, maybeSingle: false })
+    }
+    results.push({ reminderId: reminder.id, appointmentId: appointment.id, delivered, delivery })
+  }
+
+  res.json({
+    processed: results.length,
+    delivered: results.filter((item) => item.delivered).length,
+    results,
+    message: 'Due appointment email reminders processed.',
+  })
+}
+
+app.get('/api/notifications/process-email-reminders', processDueAppointmentEmailReminders)
+app.post('/api/notifications/process-email-reminders', processDueAppointmentEmailReminders)
 
 // ---------- CHAT ----------
 app.post('/api/chat/messages', async (req, res) => {
@@ -3647,7 +3849,20 @@ app.post('/api/prescriptions', async (req, res) => {
     created_at: new Date().toISOString(),
   })
 
-  res.status(201).json({ prescription: row, message: 'Prescription sent' })
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: resolvedPatientId,
+    userType: 'patient',
+    email: patientRecord?.email,
+    name: resolvedPatientName,
+    subject: 'New GlobalDoc prescription',
+    message: `Dr. ${resolvedDoctorName || 'your doctor'} sent a prescription. It is saved in your prescription portal for review and download.`,
+    actionUrl: `${getPublicAppUrl()}/patient`,
+    purpose: 'prescription',
+    resourceType: 'prescription',
+    resourceId: row.id,
+  })
+
+  res.status(201).json({ prescription: row, emailDelivery, message: 'Prescription sent' })
 })
 
 // ---------- PATIENT FILES ----------
@@ -4047,8 +4262,24 @@ app.patch('/api/admin/doctors/:doctorId/account-status', async (req, res) => {
     resourceId: req.params.doctorId,
     changes: { status, reason },
   })
+  const doctorRecord = { ...profile, ...authRow, id: String(req.params.doctorId), account_status: status, suspension_reason: updates.suspension_reason }
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: doctorRecord.id,
+    userType: 'doctor',
+    email: doctorRecord.email,
+    name: doctorRecord.name,
+    subject: status === 'active' ? 'Your GlobalDoc doctor account is active' : 'GlobalDoc doctor account status update',
+    message: status === 'active'
+      ? 'Your doctor account has been resumed. You can sign in and continue using the doctor portal.'
+      : `Your doctor account is currently ${status}. Reason: ${updates.suspension_reason}`,
+    actionUrl: `${getPublicAppUrl()}/doctor`,
+    purpose: 'doctor_account_status',
+    resourceType: 'doctor',
+    resourceId: doctorRecord.id,
+  })
   res.json({
-    doctor: sanitizeDoctorForResponse({ ...profile, ...authRow, id: String(req.params.doctorId), account_status: status, suspension_reason: updates.suspension_reason }),
+    doctor: sanitizeDoctorForResponse(doctorRecord),
+    emailDelivery,
     message: status === 'active' ? 'Doctor resumed.' : 'Doctor paused.',
   })
 })
@@ -4227,7 +4458,7 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
     related_resource_type: 'specialty_referral',
     related_resource_id: referral.id,
     is_read: false,
-    notification_channels: ['in_app'],
+    notification_channels: ['in_app', 'email'],
     created_at: new Date().toISOString(),
   }))).catch((error) => console.warn('Referral doctor notifications skipped:', error.message))
 
@@ -4242,7 +4473,7 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
     related_resource_type: 'specialty_referral',
     related_resource_id: referral.id,
     is_read: false,
-    notification_channels: ['in_app'],
+    notification_channels: ['in_app', 'email'],
     created_at: new Date().toISOString(),
   }).catch((error) => console.warn('Referral patient notification skipped:', error.message))
 
@@ -4277,12 +4508,41 @@ app.post('/api/referrals/specialty/create', async (req, res) => {
       related_resource_type: 'appointment',
       related_resource_id: appointmentId,
       is_read: false,
-      notification_channels: ['in_app'],
+      notification_channels: ['in_app', 'email'],
       created_at: new Date().toISOString(),
     })
   }
 
-  res.status(201).json({ referral, appointment, message: 'Specialty referral created with patient record attached.' })
+  const referralEmailDelivery = await Promise.all([
+    sendUserNotificationEmail({
+      userId: snapshot.patient.id,
+      userType: 'patient',
+      email: snapshot.patient.email,
+      name: snapshot.patient.name,
+      subject: 'GlobalDoc specialty referral created',
+      message: `${doctor.name || 'Your doctor'} referred you to ${targetDoctor?.name ? `Dr. ${targetDoctor.name}` : referral.to_specialty}.${appointmentDate ? ` A suggested appointment is scheduled for ${appointmentDate.toLocaleString()}.` : ''}`,
+      actionUrl: `${getPublicAppUrl()}/patient`,
+      purpose: 'specialty_referral_created',
+      resourceType: 'specialty_referral',
+      resourceId: referral.id,
+    }),
+    targetDoctor
+      ? sendUserNotificationEmail({
+          userId: targetDoctor.id,
+          userType: 'doctor',
+          email: targetDoctor.email,
+          name: targetDoctor.name,
+          subject: 'New GlobalDoc specialty referral',
+          message: `${doctor.name || 'A doctor'} referred ${snapshot.patient.name || snapshot.patient.id} to you for ${referral.to_specialty}.`,
+          actionUrl: `${getPublicAppUrl()}/doctor`,
+          purpose: 'specialty_referral',
+          resourceType: 'specialty_referral',
+          resourceId: referral.id,
+        })
+      : Promise.resolve({ sent: false, reason: 'No individual specialist selected' }),
+  ])
+
+  res.status(201).json({ referral, appointment, emailDelivery: referralEmailDelivery, message: 'Specialty referral created with patient record attached.' })
 })
 
 app.get('/api/referrals/specialty', async (req, res) => {
@@ -4406,7 +4666,7 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
       related_resource_type: 'consultation',
       related_resource_id: insertedConsultation?.id || consultation.id,
       is_read: false,
-      notification_channels: ['in_app'],
+      notification_channels: ['in_app', 'email'],
       created_at: acceptedAt,
     },
     {
@@ -4420,7 +4680,7 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
       related_resource_type: 'specialty_referral',
       related_resource_id: referralId,
       is_read: false,
-      notification_channels: ['in_app'],
+      notification_channels: ['in_app', 'email'],
       created_at: acceptedAt,
     },
   ]).catch((error) => console.warn('Referral acceptance notifications skipped:', error.message))
@@ -4439,6 +4699,35 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
     3500,
     { ok: true, split, tokensCharged: 0, settlementPending: true }
   )
+  const referringDoctor = referral.from_doctor_id ? await getDoctorProfile(referral.from_doctor_id) : null
+  const emailDelivery = await Promise.all([
+    sendUserNotificationEmail({
+      userId: patient.id,
+      userType: 'patient',
+      email: patient.email,
+      name: patient.name,
+      subject: 'Your GlobalDoc referral was accepted',
+      message: `Dr. ${doctor.name || doctorId} accepted your ${doctor.specialty || referral.to_specialty} referral.${patientOnline ? ' You can open the consultation room now.' : ' You will see the room when you next come online.'}`,
+      actionUrl: `${getPublicAppUrl()}/patient`,
+      purpose: 'specialty_referral_accepted',
+      resourceType: 'specialty_referral',
+      resourceId: referralId,
+    }),
+    referringDoctor
+      ? sendUserNotificationEmail({
+          userId: referringDoctor.id,
+          userType: 'doctor',
+          email: referringDoctor.email,
+          name: referringDoctor.name,
+          subject: 'Your GlobalDoc referral was accepted',
+          message: `Dr. ${doctor.name || doctorId} accepted ${patient.name || patient.id}. The patient record and consultation were transferred.`,
+          actionUrl: `${getPublicAppUrl()}/doctor`,
+          purpose: 'specialty_referral_accepted',
+          resourceType: 'specialty_referral',
+          resourceId: referralId,
+        })
+      : Promise.resolve({ sent: false, reason: 'Referring doctor email missing' }),
+  ])
 
   res.json({
     referral: updatedReferral || referral,
@@ -4447,6 +4736,7 @@ app.post('/api/referrals/specialty/:referralId/accept', async (req, res) => {
     split: financials.split,
     tokensCharged: financials.tokensCharged,
     doctor: sanitizeDoctorForResponse(doctor),
+    emailDelivery,
     settlementPending: Boolean(financials.settlementPending),
     message: patientOnline
       ? 'Referral accepted and consultation room opened'
@@ -5006,7 +5296,23 @@ app.patch('/api/admin/facilities/:facilityId', async (req, res) => {
     resourceId: facilityId,
     changes: updates,
   })
-  res.json({ facility: data, message: 'Facility updated' })
+  const emailDelivery = updates.is_active !== undefined
+    ? await sendUserNotificationEmail({
+        userId: data.id,
+        userType: 'facility',
+        email: data.email,
+        name: data.name,
+        subject: updates.is_active ? 'Your GlobalDoc facility account is active' : 'GlobalDoc facility account status update',
+        message: updates.is_active
+          ? 'Your facility account is active and can use the facility portal.'
+          : `Your facility account is currently paused. Reason: ${data.suspension_reason || 'Account review in progress.'}`,
+        actionUrl: `${getPublicAppUrl()}/facility`,
+        purpose: 'facility_account_status',
+        resourceType: 'facility',
+        resourceId: data.id,
+      })
+    : { sent: false, reason: 'No facility status change' }
+  res.json({ facility: data, emailDelivery, message: 'Facility updated' })
 })
 
 app.post('/api/facilities/auth', async (req, res) => {
@@ -5173,7 +5479,7 @@ app.post('/api/consultations/start', async (req, res) => {
     related_resource_type: 'consultation',
     related_resource_id: id,
     is_read: false,
-    notification_channels: ['in_app'],
+    notification_channels: ['in_app', 'email'],
     created_at: now,
   })
     .then((result) => {
@@ -5181,11 +5487,25 @@ app.post('/api/consultations/start', async (req, res) => {
     })
     .catch((error) => console.warn('Consultation doctor notification skipped:', error.message))
 
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: resolvedDoctorId,
+    userType: 'doctor',
+    email: doctor.email,
+    name: doctor.name,
+    subject: channel === 'direct_home' ? 'Patient waiting for GlobalDoc consultation' : 'Facility consultation started',
+    message: `${patientRecord?.name || 'A patient'} is waiting in consultation ${id}.`,
+    actionUrl: `${getPublicAppUrl()}/doctor`,
+    purpose: 'consultation_started',
+    resourceType: 'consultation',
+    resourceId: id,
+  })
+
   res.status(201).json({
     consultation: { ...consultation, patient_tokens_charged: directHomeTokensCharged || financials.tokensCharged, total_ngn: financials.split?.total_ngn ?? split.total_ngn },
     split: financials.split || split,
     tokensCharged: directHomeTokensCharged || financials.tokensCharged,
     settlementPending: Boolean(financials.settlementPending),
+    emailDelivery,
   })
 })
 
@@ -5307,7 +5627,35 @@ app.post('/api/referrals/facility/create', async (req, res) => {
   const insert = await insertAdaptive('facility_referrals', referral)
   if (insert.error) return res.status(500).json({ error: insert.error.message })
 
-  res.status(201).json({ referral, referralCode: code, message: 'Facility referral created' })
+  const patient = await findPatientByIdentifier(patientId)
+  await insertAdaptive('notifications', {
+    id: generateId('notif'),
+    user_id: patient?.id || patientId,
+    user_type: 'patient',
+    notification_type: 'facility_referral',
+    type: 'referral',
+    title: 'Facility referral created',
+    message: `You were referred to ${facility.name || facilityId}. Referral code: ${code}.`,
+    related_resource_type: 'facility_referral',
+    related_resource_id: referral.id,
+    is_read: false,
+    notification_channels: ['in_app', 'email'],
+    created_at: new Date().toISOString(),
+  })
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: patient?.id || patientId,
+    userType: 'patient',
+    email: patient?.email,
+    name: patient?.name,
+    subject: 'GlobalDoc facility referral',
+    message: `You were referred to ${facility.name || facilityId}. Your referral code is ${code}.`,
+    actionUrl: `${getPublicAppUrl()}/patient`,
+    purpose: 'facility_referral',
+    resourceType: 'facility_referral',
+    resourceId: referral.id,
+  })
+
+  res.status(201).json({ referral, referralCode: code, emailDelivery, message: 'Facility referral created' })
 })
 
 app.get('/api/referrals/facility', async (req, res) => {
@@ -5406,8 +5754,35 @@ app.post('/api/labs/order', async (req, res) => {
     facility_id: facilityId, tests, total_price_ngn: Math.round(total_price_ngn),
     status: 'ordered', created_at: new Date().toISOString()
   }
-  await supabase.from('lab_orders').insert(order)
-  res.status(201).json({ order, message: 'Lab order created' })
+  const { error: labOrderError } = await supabase.from('lab_orders').insert(order)
+  if (labOrderError) return res.status(500).json({ error: labOrderError.message })
+  await insertAdaptive('notifications', {
+    id: generateId('notif'),
+    user_id: resolvedPatientId,
+    user_type: 'patient',
+    notification_type: 'lab_order',
+    type: 'lab_order',
+    title: 'New lab request available',
+    message: `Dr. ${resolvedDoctorName || 'your doctor'} sent a lab request you can review and download.`,
+    related_resource_type: 'lab_order',
+    related_resource_id: order.id,
+    is_read: false,
+    notification_channels: ['in_app', 'email'],
+    created_at: new Date().toISOString(),
+  })
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: resolvedPatientId,
+    userType: 'patient',
+    email: patientRecord?.email,
+    name: resolvedPatientName,
+    subject: 'New GlobalDoc lab request',
+    message: `Dr. ${resolvedDoctorName || 'your doctor'} sent a lab request. It is saved in your lab request portal for review and download.`,
+    actionUrl: `${getPublicAppUrl()}/patient`,
+    purpose: 'lab_order',
+    resourceType: 'lab_order',
+    resourceId: order.id,
+  })
+  res.status(201).json({ order, emailDelivery, message: 'Lab order created' })
 })
 
 app.get('/api/labs/orders', async (req, res) => {
@@ -5614,6 +5989,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
         status: 'success',
         credited: result.credited,
         tokens: result.tokens,
+        emailDelivery: result.emailDelivery,
         payment: refreshedPayment || payment,
         message: result.reason,
       })
@@ -5626,6 +6002,7 @@ app.get('/api/payments/kora/verify/:reference', async (req, res) => {
         status: 'success',
         credited: result.credited,
         tokens: result.tokens,
+        emailDelivery: result.emailDelivery,
         payment: refreshedPayment || payment,
         message: result.reason,
       })
@@ -5726,7 +6103,20 @@ app.post('/api/vital-requests', async (req, res) => {
     notification_channels: ['in_app', 'voice_prompt'],
     created_at: new Date().toISOString(),
   }).catch(() => null)
-  res.status(201).json({ request, message: 'Vital request sent' })
+  const patient = await findPatientByIdentifier(patientId)
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: patient?.id || patientId,
+    userType: 'patient',
+    email: patient?.email,
+    name: patient?.name,
+    subject: 'GlobalDoc vital sign request',
+    message: instructions || `Your doctor requested ${parameterName}. Open your active consultation to accept or skip the request.`,
+    actionUrl: `${getPublicAppUrl()}/patient`,
+    purpose: 'vital_request',
+    resourceType: 'vital_parameter_request',
+    resourceId: request.id,
+  })
+  res.status(201).json({ request, emailDelivery, message: 'Vital request sent' })
 })
 
 app.get('/api/vital-requests', async (req, res) => {
@@ -5858,26 +6248,42 @@ app.post('/api/vital-parameters', async (req, res) => {
       related_resource_type: 'vital_parameter',
       related_resource_id: insert.row?.id || vital.id,
       is_read: false,
-      notification_channels: ['in_app'],
+      notification_channels: ['in_app', 'email'],
       created_at: new Date().toISOString(),
     }).catch(() => null)
   }
-  res.status(201).json({ vital, message: 'Vital parameter recorded' })
+  const doctor = doctor_id ? await getDoctorProfile(doctor_id) : null
+  const emailDelivery = doctor
+    ? await sendUserNotificationEmail({
+        userId: doctor.id,
+        userType: 'doctor',
+        email: doctor.email,
+        name: doctor.name,
+        subject: 'GlobalDoc vital sign recorded',
+        message: `${parameter_name} was captured and saved for your patient.`,
+        actionUrl: `${getPublicAppUrl()}/doctor`,
+        purpose: 'vital_recorded',
+        resourceType: 'vital_parameter',
+        resourceId: insert.row?.id || vital.id,
+      })
+    : { sent: false, reason: 'Doctor email missing' }
+  res.status(201).json({ vital, emailDelivery, message: 'Vital parameter recorded' })
 })
 
 // ---------- FORGOT / RESET PASSWORD ----------
 app.post('/api/auth/forgot-password', async (req, res) => {
-  const { email, userType } = req.body
-  if (!email || !userType) return res.status(400).json({ error: 'email and userType required' })
+  const normalizedEmail = String(req.body?.email || '').trim().toLowerCase()
+  const userType = String(req.body?.userType || '').trim().toLowerCase()
+  if (!normalizedEmail || !['patient', 'doctor'].includes(userType)) return res.status(400).json({ error: 'A valid email and user type are required.' })
 
-  const normalizedEmail = email.toLowerCase()
   const table = userType === 'patient' ? 'patients' : 'doctors_auth'
 
   // Check if user exists
-  const { data: user } = await supabase.from(table).select('*').eq('email', normalizedEmail).maybeSingle()
+  const { data: user, error: lookupError } = await supabase.from(table).select('id,email,name').eq('email', normalizedEmail).limit(1).maybeSingle()
+  if (lookupError) return res.status(503).json({ error: 'Unable to verify the account right now. Please try again shortly.' })
   if (!user) {
     // Do not reveal whether the email exists – simply return ok
-    return res.json({ message: 'If that email is registered, a reset link has been sent.' })
+    return res.json({ delivered: false, message: 'If that email is registered, a reset link will be sent.' })
   }
 
   // Generate a secure token
@@ -5885,29 +6291,48 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1 hour
 
   // Store the token
-  await supabase.from('password_reset_tokens').insert({
+  await supabase.from('password_reset_tokens').update({ used: true }).eq('user_email', normalizedEmail).eq('user_type', userType).eq('used', false)
+  const resetTokenRow = {
     id: generateId('pwrst'),
     user_email: normalizedEmail,
     user_type: userType,
     token,
     expires_at: expiresAt,
+    used: false,
     created_at: new Date().toISOString()
-  })
+  }
+  let resetTokenInsert = await insertAdaptive('password_reset_tokens', resetTokenRow)
+  if (resetTokenInsert.error && /invalid input syntax for type integer/i.test(resetTokenInsert.error.message || '')) {
+    const legacyResetTokenRow = { ...resetTokenRow, id: crypto.randomInt(100000000, 2147483647) }
+    resetTokenInsert = await insertAdaptive('password_reset_tokens', legacyResetTokenRow)
+  }
+  if (resetTokenInsert.error) {
+    console.error('Password reset token storage failed:', resetTokenInsert.error.message)
+    return res.status(503).json({ error: 'Unable to create a password reset link right now. Please try again shortly.' })
+  }
 
   // Send email
-  const origin = 'https://globaldoctorplatform.vercel.app'
+  const origin = getApiOrigin(req) || 'https://globaldoctorplatform.vercel.app'
   const resetUrl = `${origin}/reset-password?token=${encodeURIComponent(token)}&userType=${encodeURIComponent(userType)}`
 
   const emailResult = await sendSmtpEmail({
     to: normalizedEmail,
-    subject: 'Reset your password',
-    text: `Click the link to reset your password: ${resetUrl}\nThis link expires in 1 hour.`,
+    subject: 'Reset your GlobalDoc password',
+    text: `Hello ${user.name || 'GlobalDoc user'},\n\nUse this secure link to reset your password:\n${resetUrl}\n\nThis link expires in 1 hour. If you did not request this, you can ignore this email.\n\nGlobalDoc Connect`,
+    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a"><h2 style="color:#0f766e">Reset your GlobalDoc password</h2><p>Hello ${user.name || 'GlobalDoc user'},</p><p>Use the secure button below to reset your password. This link expires in 1 hour.</p><p><a href="${resetUrl}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#0f766e;color:#fff;text-decoration:none">Reset password</a></p><p>If you did not request this, you can safely ignore this email.</p><p style="color:#64748b">GlobalDoc Connect</p></div>`,
+    purpose: 'password_reset',
+    resourceType: 'password_reset_token',
+    resourceId: token.slice(0, 12),
+    userId: user.id,
+    userType,
   }).catch((error) => ({ sent: false, reason: error.message }))
   if (!emailResult.sent) {
     console.error('Password reset email failed:', emailResult.reason || 'SMTP not configured')
+    await supabase.from('password_reset_tokens').update({ used: true }).eq('token', token)
+    return res.status(503).json({ error: emailResult.reason || 'Unable to send the reset email right now. Please try again shortly.' })
   }
 
-  res.json({ message: 'If that email is registered, a reset link has been sent.' })
+  res.json({ delivered: true, message: 'Password reset email sent. Check your inbox and spam folder.' })
 })
 
 app.post('/api/auth/reset-password', async (req, res) => {
@@ -5915,14 +6340,16 @@ app.post('/api/auth/reset-password', async (req, res) => {
   if (!token || !newPassword || !userType) return res.status(400).json({ error: 'token, newPassword, and userType required' })
 
   // Find a valid token
-  const { data: resetEntry } = await supabase.from('password_reset_tokens')
+  const { data: resetEntry, error: resetLookupError } = await supabase.from('password_reset_tokens')
     .select('*')
     .eq('token', token)
     .eq('used', false)
     .gt('expires_at', new Date().toISOString())
     .maybeSingle()
 
+  if (resetLookupError) return res.status(503).json({ error: 'Unable to validate the reset link right now. Please try again shortly.' })
   if (!resetEntry) return res.status(400).json({ error: 'Invalid or expired reset token.' })
+  if (String(resetEntry.user_type) !== String(userType)) return res.status(400).json({ error: 'Invalid reset link user type.' })
 
   // Update the password
   const table = userType === 'patient' ? 'patients' : 'doctors_auth'
@@ -5935,7 +6362,21 @@ app.post('/api/auth/reset-password', async (req, res) => {
   // Mark token as used
   await supabase.from('password_reset_tokens').update({ used: true }).eq('id', resetEntry.id)
 
-  res.json({ message: 'Password has been reset. You can now log in.' })
+  const { data: user } = await supabase.from(table).select('id,email,name').eq('email', resetEntry.user_email).limit(1).maybeSingle()
+  const emailDelivery = await sendUserNotificationEmail({
+    userId: user?.id,
+    userType,
+    email: resetEntry.user_email,
+    name: user?.name,
+    subject: 'Your GlobalDoc password was changed',
+    message: 'Your password was changed successfully. If you did not make this change, contact GlobalDoc support immediately.',
+    actionUrl: `${getPublicAppUrl()}/${userType === 'doctor' ? 'doctor' : 'patient'}`,
+    purpose: 'password_changed',
+    resourceType: userType,
+    resourceId: user?.id,
+  })
+
+  res.json({ emailDelivery, message: 'Password has been reset. You can now log in.' })
 })
 
 // ---------- EXPORT ----------

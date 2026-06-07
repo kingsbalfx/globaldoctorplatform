@@ -18,6 +18,7 @@ const patientAuth = readFileSync(new URL('../src/components/PatientAuth.jsx', im
 const appointmentScheduler = readFileSync(new URL('../src/components/AppointmentScheduler.jsx', import.meta.url), 'utf8')
 const vercel = readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')
 const apiFetchClient = readFileSync(new URL('../src/lib/apiFetch.js', import.meta.url), 'utf8')
+const forgotPassword = readFileSync(new URL('../src/pages/ForgotPassword.jsx', import.meta.url), 'utf8')
 
 test('doctor availability is deterministic and database-backed', () => {
   assert.match(server, /doctor_availability_slots/)
@@ -131,6 +132,20 @@ test('Gmail SMTP selects and normalizes a valid app-password candidate safely', 
   assert.match(server, /Gmail SMTP requires a separate 16-character App Password/)
   assert.match(server, /GMAIL_REFRESH_TOKEN/)
   assert.match(server, /type: 'OAuth2'/)
+})
+
+test('password reset and clinical notification emails confirm real SMTP delivery', () => {
+  assert.match(server, /recordEmailDelivery/)
+  assert.match(server, /sendUserNotificationEmail/)
+  assert.match(server, /purpose: 'password_reset'/)
+  assert.match(server, /Password reset token storage failed/)
+  assert.match(server, /return res\.status\(503\)\.json\(\{ error: emailResult\.reason/)
+  assert.match(server, /processDueAppointmentEmailReminders/)
+  assert.match(server, /purpose: 'prescription'/)
+  assert.match(server, /purpose: 'lab_order'/)
+  assert.match(server, /purpose: 'token_purchase_receipt'/)
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS public\.email_delivery_logs/)
+  assert.match(forgotPassword, /if \(!response\.ok\) throw new Error\(data\.error/)
 })
 
 test('doctor online status requires a recent heartbeat', () => {

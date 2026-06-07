@@ -652,6 +652,47 @@ CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
   created_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.email_delivery_logs (
+  id text PRIMARY KEY,
+  recipient_email text,
+  subject text,
+  purpose text DEFAULT 'notification',
+  resource_type text,
+  resource_id text,
+  user_id text,
+  user_type text,
+  status text DEFAULT 'pending',
+  provider_message_id text,
+  provider_response text,
+  failure_reason text,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS recipient_email text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS subject text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS purpose text DEFAULT 'notification';
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS resource_type text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS resource_id text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS user_id text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS user_type text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending';
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS provider_message_id text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS provider_response text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS failure_reason text;
+ALTER TABLE public.email_delivery_logs ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'password_reset_tokens'
+      AND column_name = 'id' AND data_type IN ('integer', 'bigint')
+  ) THEN
+    ALTER TABLE public.password_reset_tokens ALTER COLUMN id DROP DEFAULT;
+    ALTER TABLE public.password_reset_tokens ALTER COLUMN id TYPE text USING id::text;
+  END IF;
+END $$;
+
 -- Repair older vital tables that were created with integer ids.
 DO $$
 DECLARE r record;
@@ -1209,6 +1250,8 @@ CREATE INDEX IF NOT EXISTS idx_token_revenue_splits_patient ON public.token_reve
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_community_messages_created_at ON public.community_messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_announcements_audience ON public.announcements(audience, is_active);
+CREATE INDEX IF NOT EXISTS idx_email_delivery_logs_recipient ON public.email_delivery_logs(recipient_email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_email_delivery_logs_status ON public.email_delivery_logs(status, created_at DESC);
 
 -- Keep updated_at fresh on key tables.
 DROP TRIGGER IF EXISTS trg_admins_updated_at ON public.admins;
