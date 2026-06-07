@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Clock, Inbox, Loader2, RefreshCw, Search, UserCheck } from 'lucide-react'
+import { CheckCircle2, Clock, ExternalLink, FileText, Inbox, Loader2, RefreshCw, Search, UserCheck } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
 
 const statusOptions = ['all', 'new', 'open', 'assigned', 'closed']
@@ -9,6 +9,20 @@ function badgeClass(status) {
   if (value === 'closed') return 'bg-emerald-50 text-emerald-700 ring-emerald-100'
   if (value === 'open' || value === 'assigned') return 'bg-blue-50 text-blue-700 ring-blue-100'
   return 'bg-amber-50 text-amber-700 ring-amber-100'
+}
+
+function formatSize(bytes) {
+  const value = Number(bytes || 0)
+  if (!value) return '0KB'
+  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)}KB`
+  return `${(value / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function fileStatusClass(status) {
+  const value = String(status || '').toLowerCase()
+  if (value.includes('stored')) return 'text-emerald-700 bg-emerald-50 ring-emerald-100'
+  if (value.includes('failed')) return 'text-red-700 bg-red-50 ring-red-100'
+  return 'text-amber-700 bg-amber-50 ring-amber-100'
 }
 
 function SupportDashboard() {
@@ -21,6 +35,8 @@ function SupportDashboard() {
   const [error, setError] = useState('')
   const [notes, setNotes] = useState('')
   const [assignedTo, setAssignedTo] = useState('')
+
+  const selectedFiles = selected?.support_files || []
 
   const filteredTickets = useMemo(() => {
     const term = query.trim().toLowerCase()
@@ -45,8 +61,12 @@ function SupportDashboard() {
       const response = await apiFetch(`/api/support/tickets${suffix}`)
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'Could not load requests.')
-      setTickets(payload.tickets || [])
-      if (!selected && (payload.tickets || [])[0]) setSelected((payload.tickets || [])[0])
+      const nextTickets = payload.tickets || []
+      setTickets(nextTickets)
+      setSelected((current) => {
+        if (current?.id) return nextTickets.find((ticket) => ticket.id === current.id) || nextTickets[0] || null
+        return nextTickets[0] || null
+      })
     } catch (loadError) {
       setError(loadError.message || 'Could not load requests.')
     } finally {
@@ -95,7 +115,7 @@ function SupportDashboard() {
           <div>
             <p className="inline-flex items-center rounded-full bg-brand-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-brand-700">Agent workspace</p>
             <h1 className="mt-4 text-3xl font-bold text-slate-900">Support requests</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">Review user submissions, assigned files metadata, status, and internal notes.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">Review submitted requests, uploaded documents, status, and internal notes.</p>
           </div>
           <button onClick={() => loadTickets(status)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand-700 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">
             <RefreshCw className="h-4 w-4" /> Refresh
@@ -128,18 +148,22 @@ function SupportDashboard() {
           <div className="max-h-[620px] space-y-3 overflow-y-auto pr-1">
             {loading && <div className="rounded-3xl bg-slate-50 p-6 text-center text-slate-600"><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" />Loading requests...</div>}
             {!loading && filteredTickets.length === 0 && <div className="rounded-3xl bg-slate-50 p-6 text-center text-slate-600">No requests found.</div>}
-            {filteredTickets.map((ticket) => (
-              <button key={ticket.id} type="button" onClick={() => selectTicket(ticket)} className={`block w-full rounded-3xl border p-4 text-left transition hover:-translate-y-0.5 ${selected?.id === ticket.id ? 'border-brand-300 bg-brand-50' : 'border-slate-200 bg-slate-50 hover:bg-white'}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{ticket.id}</p>
-                    <h3 className="mt-2 font-bold text-slate-900">{ticket.subject || 'Request'}</h3>
-                    <p className="mt-1 text-sm text-slate-600">{ticket.full_name || 'Unknown'} · {ticket.email}</p>
+            {filteredTickets.map((ticket) => {
+              const count = (ticket.support_files || []).length
+              return (
+                <button key={ticket.id} type="button" onClick={() => selectTicket(ticket)} className={`block w-full rounded-3xl border p-4 text-left transition hover:-translate-y-0.5 ${selected?.id === ticket.id ? 'border-brand-300 bg-brand-50' : 'border-slate-200 bg-slate-50 hover:bg-white'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{ticket.id}</p>
+                      <h3 className="mt-2 font-bold text-slate-900">{ticket.subject || 'Request'}</h3>
+                      <p className="mt-1 text-sm text-slate-600">{ticket.full_name || 'Unknown'} · {ticket.email}</p>
+                      <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-bold text-brand-700 ring-1 ring-brand-100"><FileText className="h-3.5 w-3.5" /> {count} file{count === 1 ? '' : 's'}</p>
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ring-1 ${badgeClass(ticket.status)}`}>{ticket.status || 'new'}</span>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-bold ring-1 ${badgeClass(ticket.status)}`}>{ticket.status || 'new'}</span>
-                </div>
-              </button>
-            ))}
+                </button>
+              )
+            })}
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
@@ -162,10 +186,30 @@ function SupportDashboard() {
                 </div>
                 <label className="mt-4 block space-y-1 text-sm font-semibold text-slate-700">Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={5} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-brand-400" /></label>
                 <div className="mt-4 rounded-2xl bg-white p-4">
-                  <p className="text-sm font-bold text-slate-900">Files metadata</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-900">Uploaded documents</p>
+                    <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 ring-1 ring-brand-100">{selectedFiles.length}</span>
+                  </div>
                   <div className="mt-3 space-y-2">
-                    {(selected.support_files || []).length === 0 && <p className="text-sm text-slate-500">No files recorded.</p>}
-                    {(selected.support_files || []).map((file) => <div key={file.id} className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-700">{file.file_name} · {file.file_type || 'file'} · {file.file_size || 0} bytes</div>)}
+                    {selectedFiles.length === 0 && <p className="text-sm text-slate-500">No uploaded documents found for this request.</p>}
+                    {selectedFiles.map((file) => (
+                      <div key={file.id} className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-700 ring-1 ring-slate-100">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="truncate font-bold text-slate-900">{file.file_name || 'Uploaded file'}</p>
+                            <p className="mt-1 text-xs text-slate-500">{file.file_type || 'file'} · {formatSize(file.file_size)} · {file.created_at ? new Date(file.created_at).toLocaleString() : 'No date'}</p>
+                            <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 ${fileStatusClass(file.storage_status)}`}>{file.storage_status || 'recorded'}</span>
+                          </div>
+                          {file.file_url ? (
+                            <a href={file.file_url} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600">
+                              Open document <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          ) : (
+                            <span className="shrink-0 rounded-xl bg-amber-50 px-4 py-2 text-xs font-bold text-amber-700 ring-1 ring-amber-100">No link available</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
                 <button onClick={() => updateTicket(selected.status || 'open')} disabled={saving} className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-brand-700 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-brand-700/20 hover:bg-brand-600 disabled:bg-slate-300">
