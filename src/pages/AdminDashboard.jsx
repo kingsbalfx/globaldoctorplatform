@@ -192,6 +192,34 @@ function AdminDashboard({ doctor, onLogout }) {
     setActiveTab('patients')
   }
 
+  const handleDoctorEndConsultation = async () => {
+    if (!selectedConsultation?.id || !doctor?.id) return
+    try {
+      const response = await apiFetch('/api/consultations/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consultationId: selectedConsultation.id,
+          doctorId: doctor.id,
+          durationMin: selectedConsultation.duration_min,
+        }),
+      })
+      const data = await readApiJson(response)
+      if (!response.ok) throw new Error(data.error || 'Unable to complete consultation')
+      setSelectedConsultationPatient((current) => current ? {
+        ...current,
+        latest_consultation: { ...current.latest_consultation, ...(data.consultation || {}), status: 'completed' },
+      } : current)
+      await Promise.all([
+        loadConsultationPatients(consultationPatientLimit, consultationPatientSearch),
+        loadFinancials(),
+      ])
+      addError('Consultation completed. The patient has been asked to rate their care experience.', 'success')
+    } catch (error) {
+      addError(error.message, 'error')
+    }
+  }
+
   const handleSavePayoutDetails = async () => {
     setSavingPayoutDetails(true)
     try {
@@ -538,7 +566,7 @@ function AdminDashboard({ doctor, onLogout }) {
               </div>
               <div className="rounded-3xl bg-slate-50 p-4">
                 <p className="text-sm text-slate-600">Payment received</p>
-                <p className="text-slate-900">$50 consultation fee received</p>
+                <p className="text-slate-900">Consultation payment received</p>
                 <p className="text-xs text-slate-500 mt-1">2 days ago</p>
               </div>
             </div>
@@ -980,7 +1008,12 @@ function AdminDashboard({ doctor, onLogout }) {
                   userType="doctor"
                   patientId={selectedConsultationPatient.id}
                   doctorId={doctor.id}
+                  onEndCall={handleDoctorEndConsultation}
                 />
+                <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950 shadow-sm">
+                  <p className="font-bold">Build trust with every consultation</p>
+                  <p className="mt-1 leading-6">Before ending the call, please ask the patient to rate their care experience. Their verified rating updates your public score automatically.</p>
+                </div>
                 <div className="mt-5">
                   <VitalParametersMonitor
                     consultationId={selectedConsultation.id}

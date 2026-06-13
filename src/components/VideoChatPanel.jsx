@@ -20,7 +20,7 @@ const CLEAN_AUDIO_CONSTRAINTS = {
 
 const REMOTE_SPEAKER_VOLUME = 0.72
 
-function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId, autoStart = false }) {
+function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId, autoStart = false, onEndCall }) {
   const { addError } = useError()
   const localVideoRef = useRef(null)
   const remoteVideoRef = useRef(null)
@@ -704,6 +704,11 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     setStatus('Closed')
   }
 
+  const handleManualEndCall = () => {
+    endCall()
+    onEndCall?.()
+  }
+
   useEffect(() => {
     lastSignalSeqRef.current = 0
     processedSignalsRef.current = new Set()
@@ -881,7 +886,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
                 <button type="button" onClick={refreshFrontCamera} className="rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-200">
                   Refresh camera
                 </button>
-                <button type="button" onClick={endCall} className="rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white hover:bg-red-700">
+                <button type="button" onClick={handleManualEndCall} className="rounded-full bg-red-600 px-5 py-3 text-sm font-semibold text-white hover:bg-red-700">
                   End Call
                 </button>
               </>

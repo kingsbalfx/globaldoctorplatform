@@ -6,6 +6,7 @@ import crypto from 'crypto'
 import nodemailer from 'nodemailer'
 import { createClient } from '@supabase/supabase-js'
 import { calculateConsultationSplitNgn, calculateLabCommissionNgn } from '../src/lib/ngPricing.js'
+import { getFairConsultationTokens, isGeneralPractitioner } from '../src/lib/consultationPricing.js'
 import pkg from 'agora-access-token'
 const { RtcTokenBuilder, RtcRole } = pkg
 
@@ -808,8 +809,15 @@ function sanitizeDoctorForResponse(doctor) {
   const profilePhotoUrl = doctor.profilePhotoUrl || doctor.profile_photo_url || doctors?.profile_photo_url || doctor.passportDataUrl || doctor.passport_data_url || doctors?.passport_data_url || ''
   const accountStatus = doctor.accountStatus || doctor.account_status || doctors?.account_status || 'active'
   const suspensionReason = doctor.suspensionReason || doctor.suspension_reason || doctors?.suspension_reason || ''
+  const specialty = doctor.specialty || doctors?.specialty || 'General Practitioner'
+  const basicConsultationTokens = getFairConsultationTokens({ ...doctors, ...doctor, specialty }, 'basic')
+  const premiumConsultationTokens = getFairConsultationTokens({ ...doctors, ...doctor, specialty }, 'premium')
   return {
     ...rest,
+    specialty,
+    fee: basicConsultationTokens,
+    consultation_fee: basicConsultationTokens,
+    price: { basic: basicConsultationTokens, premium: premiumConsultationTokens },
     earningsTokens,
     earnings_tokens: earningsTokens,
     gender,
@@ -887,7 +895,7 @@ function normalizeDoctorPayload(body = {}) {
     languages: Array.isArray(body.languages)
       ? body.languages.filter(Boolean)
       : String(body.languages || 'English').split(',').map((item) => item.trim()).filter(Boolean),
-    consultationFee: safeNumber(body.consultation_fee ?? body.fee) || 50,
+    consultationFee: safeNumber(body.consultation_fee ?? body.fee) || (isGeneralPractitioner(body.specialty) ? 20 : 40),
     licenseNumber: String(body.licenseNumber || body.license_number || '').trim(),
     licenseIssuer: String(body.licenseIssuer || body.license_issuer || '').trim(),
     licenseExpiry: body.licenseExpiry || body.license_expiry || null,
@@ -1947,7 +1955,7 @@ app.post('/api/doctors/register', async (req, res) => {
     id: profileId, name: payload.name, specialty: payload.specialty, location: payload.location,
     languages: ['English'], rating: 0, rating_count: 0,
     availability: 'Available upon request', verified: false, is_online: false,
-    fee: payload.consultationFee, price: { basic: 50, premium: 100 },
+    fee: payload.consultationFee, price: isGeneralPractitioner(payload.specialty) ? { basic: 20, premium: 20 } : { basic: 40, premium: 60 },
     license_verified: false,
     license_number: payload.licenseNumber,
     license_issuer: payload.licenseIssuer || null,
@@ -2095,8 +2103,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         rating: 0,
         rating_count: 0,
         is_online: false,
-        fee: 35,
-        price: { basic: 50, premium: 100 },
+        fee: isGeneralPractitioner(specialty) ? 20 : 40,
+        price: isGeneralPractitioner(specialty) ? { basic: 20, premium: 20 } : { basic: 40, premium: 60 },
         license_verified: false,
         license_number: insertedDoctor.license_number,
         license_issuer: doctorProfile.license_issuer,
@@ -2173,8 +2181,8 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           rating: 0,
           rating_count: 0,
           is_online: false,
-          fee: 35,
-          price: { basic: 50, premium: 100 },
+          fee: isGeneralPractitioner(specialty) ? 20 : 40,
+          price: isGeneralPractitioner(specialty) ? { basic: 20, premium: 20 } : { basic: 40, premium: 60 },
           license_verified: false,
           license_number: doctorProfile.license_number,
           license_issuer: doctorProfile.license_issuer,
@@ -3389,19 +3397,87 @@ app.patch('/api/doctors/:doctorId/availability', async (req, res) => {
 
 // ---------- REVIEWS ----------
 app.post('/api/reviews', async (req, res) => {
-  const { doctorId, patientId, rating, comment, verifiedPatient } = req.body
-  if (!doctorId || !patientId || !rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'Invalid review' })
+  const { consultationId, doctorId, patientId, comment, verifiedPatient } = req.body
+  const rating = Number(req.body.rating)
+  if (!consultationId || !doctorId || !patientId || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'A completed consultation and a rating from 1 to 5 are required' })
+  }
   if (!verifiedPatient) return res.status(403).json({ error: 'Only verified patients may submit reviews' })
 
+  const { data: consultation, error: consultationError } = await supabase
+    .from('consultations_ng')
+    .select('id,patient_id,doctor_id,status')
+    .eq('id', consultationId)
+    .maybeSingle()
+  if (consultationError) return res.status(500).json({ error: consultationError.message })
+  if (!consultation) return res.status(404).json({ error: 'Consultation not found' })
+  if (String(consultation.patient_id) !== String(patientId) || String(consultation.doctor_id) !== String(doctorId)) {
+    return res.status(403).json({ error: 'This consultation does not belong to the selected patient and doctor' })
+  }
+  if (String(consultation.status).toLowerCase() !== 'completed') {
+    return res.status(409).json({ error: 'The consultation must be completed before it can be rated' })
+  }
+
+  const { data: existingReview } = await supabase
+    .from('reviews')
+    .select('*')
+    .eq('consultation_id', consultationId)
+    .eq('patient_id', patientId)
+    .maybeSingle()
+  if (existingReview) return res.json({ review: existingReview, message: 'Consultation was already rated', existing: true })
+
   const id = generateId('rev')
-  const review = { id, doctor_id: doctorId, patient_id: patientId, rating, comment, verified: true, created_at: new Date().toISOString() }
-  await supabase.from('reviews').insert(review)
+  const review = {
+    id,
+    consultation_id: consultationId,
+    doctor_id: doctorId,
+    patient_id: patientId,
+    rating,
+    comment: String(comment || '').trim() || null,
+    verified: true,
+    created_at: new Date().toISOString(),
+  }
+  const insert = await insertAdaptive('reviews', review)
+  if (insert.error) return res.status(500).json({ error: insert.error.message })
 
   const { data: reviews } = await supabase.from('reviews').select('rating').eq('doctor_id', doctorId)
-  const avg = reviews?.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0
-  await supabase.from('doctors').update({ rating: Number(avg.toFixed(2)), rating_count: reviews?.length || 0 }).eq('id', doctorId)
+  const validReviews = (reviews || []).filter((item) => Number(item.rating) >= 1 && Number(item.rating) <= 5)
+  const avg = validReviews.length ? validReviews.reduce((sum, item) => sum + Number(item.rating), 0) / validReviews.length : 0
+  await supabase.from('doctors').update({ rating: Number(avg.toFixed(2)), rating_count: validReviews.length }).eq('id', doctorId)
 
-  res.status(201).json({ review, message: 'Review submitted' })
+  res.status(201).json({ review, doctorRating: Number(avg.toFixed(2)), ratingCount: validReviews.length, message: 'Thank you. Your doctor rating was recorded.' })
+})
+
+app.get('/api/reviews/pending', async (req, res) => {
+  const patientId = String(req.query.patientId || '').trim()
+  if (!patientId) return res.status(400).json({ error: 'patientId required' })
+
+  const { data: consultations, error: consultationError } = await supabase
+    .from('consultations_ng')
+    .select('id,patient_id,doctor_id,status,completed_at,created_at')
+    .eq('patient_id', patientId)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(30)
+  if (consultationError) return res.status(500).json({ error: consultationError.message })
+  if (!consultations?.length) return res.json({ consultations: [] })
+
+  const consultationIds = consultations.map((item) => item.id)
+  const doctorIds = [...new Set(consultations.map((item) => item.doctor_id).filter(Boolean))]
+  const [reviewResult, doctorResult] = await Promise.all([
+    supabase.from('reviews').select('consultation_id').eq('patient_id', patientId).in('consultation_id', consultationIds),
+    doctorIds.length
+      ? supabase.from('doctors').select('id,name,specialty,gender,profile_photo_url,rating,rating_count').in('id', doctorIds)
+      : Promise.resolve({ data: [] }),
+  ])
+  if (reviewResult.error) return res.status(500).json({ error: reviewResult.error.message })
+  const rated = new Set((reviewResult.data || []).map((item) => String(item.consultation_id)))
+  const doctorsById = new Map((doctorResult.data || []).map((doctor) => [String(doctor.id), sanitizeDoctorForResponse(doctor)]))
+  const pending = consultations
+    .filter((item) => !rated.has(String(item.id)))
+    .map((item) => ({ ...item, doctor: doctorsById.get(String(item.doctor_id)) || null }))
+
+  res.json({ consultations: pending })
 })
 
 // ---------- APPOINTMENTS ----------
@@ -3409,7 +3485,7 @@ app.post('/api/appointments', async (req, res) => {
   let deductedTokens = 0
   let patientId = ''
   try {
-    const { doctorId, consultationType, notes, subscriptionType, tokensRequired } = req.body
+    const { doctorId, consultationType, notes, subscriptionType } = req.body
     patientId = req.body.patientId
     const scheduledDate = req.body.scheduledDate || (req.body.date && req.body.time ? new Date(`${req.body.date}T${req.body.time}:00`).toISOString() : '')
     if (!patientId || !doctorId || !scheduledDate || !consultationType) return res.status(400).json({ error: 'Missing fields' })
@@ -3433,7 +3509,7 @@ app.post('/api/appointments', async (req, res) => {
         .limit(1)
         .maybeSingle(),
       getPatientTokenBalance(patientId),
-      supabase.from('doctors').select('name,email').eq('id', doctorId).maybeSingle(),
+      supabase.from('doctors').select('name,email,specialty,price,fee,consultation_fee').eq('id', doctorId).maybeSingle(),
       findPatientByIdentifier(patientId),
     ])
     if (existingResult.data) {
@@ -3442,14 +3518,14 @@ app.post('/api/appointments', async (req, res) => {
     if (existingResult.error && !isMissingColumnError(existingResult.error)) throw existingResult.error
     if (!availability.slots?.[slotTime]) return res.status(409).json({ error: 'Selected appointment slot is no longer available.' })
 
-    const requiredTokens = tokensRequired || (consultationType === 'referral' ? 15 : 20)
+    const doctor = doctorResult.data
+    if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
+    const requiredTokens = getFairConsultationTokens(doctor, subscriptionType)
     if (balance < requiredTokens) return res.status(402).json({ error: 'Insufficient tokens' })
 
     const deducted = await deductPatientTokens(patientId, requiredTokens, '', { currentBalance: balance })
     if (!deducted) return res.status(402).json({ error: 'Insufficient tokens' })
     deductedTokens = requiredTokens
-
-    const doctor = doctorResult.data
 
     const id = generateId('appt')
     const appointment = {
@@ -5400,9 +5476,7 @@ app.post('/api/consultations/start', async (req, res) => {
 
   let directHomeTokensCharged = 0
   if (channel === 'direct_home') {
-    const doctorPrice = doctor?.price && typeof doctor.price === 'object' ? doctor.price : {}
-    const priceKey = split.track === 'premium' ? 'premium' : 'basic'
-    directHomeTokensCharged = Math.max(1, Math.round(Number(doctorPrice[priceKey] ?? doctorPrice[split.track] ?? doctor.consultation_fee ?? doctor.fee ?? 20) || 20))
+    directHomeTokensCharged = getFairConsultationTokens(doctor, split.track === 'premium' ? 'premium' : 'basic')
     const charged = await deductPatientTokens(patientRecord.id, directHomeTokensCharged, `Direct ${split.track} consultation with Dr. ${doctor.name || doctorId}`)
     if (!charged) {
       await supabase.from('consultations_ng').update({ status: 'cancelled' }).eq('id', id)
@@ -5515,13 +5589,26 @@ app.post('/api/consultations/end', async (req, res) => {
 
   const { data: consultation } = await supabase.from('consultations_ng').select('*').eq('id', consultationId).maybeSingle()
   if (!consultation) return res.status(404).json({ error: 'Consultation not found' })
-  if (consultation.status === 'completed') return res.json({ consultation, message: 'Already completed' })
+
+  const actorDoctorId = String(req.body?.doctorId || '').trim()
+  const actorPatientId = String(req.body?.patientId || '').trim()
+  const actorIsDoctor = actorDoctorId && actorDoctorId === String(consultation.doctor_id || '')
+  const actorIsPatient = actorPatientId && actorPatientId === String(consultation.patient_id || '')
+  let actorIsFacility = false
 
   if (consultation.facility_id) {
     const facilityPin = req.body?.facilityPin || req.body?.pin
-    if (!facilityPin) return res.status(400).json({ error: 'facilityPin required' })
-    const facility = await getFacilityById(consultation.facility_id)
-    if (!facility || facility.pin !== facilityPin) return res.status(401).json({ error: 'Invalid facility credentials' })
+    if (facilityPin) {
+      const facility = await getFacilityById(consultation.facility_id)
+      actorIsFacility = Boolean(facility && facility.pin === facilityPin)
+      if (!actorIsFacility) return res.status(401).json({ error: 'Invalid facility credentials' })
+    }
+  }
+  if (!actorIsDoctor && !actorIsPatient && !actorIsFacility) {
+    return res.status(403).json({ error: 'Patient, doctor, or facility credentials are required to complete this consultation' })
+  }
+  if (consultation.status === 'completed') {
+    return res.json({ consultation, ratingRequired: true, message: 'Consultation was already completed' })
   }
 
   const finalDurationMin = durationMin || consultation.duration_min
@@ -5592,12 +5679,45 @@ app.post('/api/consultations/end', async (req, res) => {
     total_ngn: split.total_ngn, completed_at: new Date().toISOString()
   }).eq('id', consultationId)
 
+  const completedAt = new Date().toISOString()
+  await Promise.all([
+    insertAdaptive('notifications', {
+      id: generateId('notif'),
+      user_id: consultation.patient_id,
+      user_type: 'patient',
+      title: 'Please rate your doctor',
+      message: 'Your consultation is complete. Rate your doctor to help other patients and improve care.',
+      type: 'rating_required',
+      notification_type: 'rating_required',
+      related_resource_type: 'consultation',
+      related_resource_id: consultationId,
+      is_read: false,
+      notification_channels: ['in_app'],
+      created_at: completedAt,
+    }),
+    insertAdaptive('notifications', {
+      id: generateId('notif'),
+      user_id: consultation.doctor_id,
+      user_type: 'doctor',
+      title: 'Ask your patient for a rating',
+      message: 'This consultation is complete. Please remind the patient to rate their care experience.',
+      type: 'rating_reminder',
+      notification_type: 'rating_reminder',
+      related_resource_type: 'consultation',
+      related_resource_id: consultationId,
+      is_read: false,
+      notification_channels: ['in_app'],
+      created_at: completedAt,
+    }),
+  ])
+
   const currentBalances = await getPlatformBalances()
   res.json({
     consultation: { ...consultation, status: 'completed', ...split },
     split: revenueSplit,
     ledgers: { platformBalanceNgn: currentBalances.platformBalanceNgn, dataFundBalanceNgn: currentBalances.dataFundBalanceNgn },
-    message: 'Consultation completed and split recorded'
+    ratingRequired: true,
+    message: 'Consultation completed and split recorded. Please ask the patient to rate their care experience.'
   })
 })
 

@@ -1068,6 +1068,7 @@ function FacilityPortal({ logoutSignal = 0, onSessionChange }) {
                   userType="facility"
                   patientId={selectedPatientId.trim()}
                   doctorId={selectedDoctorId}
+                  onEndCall={endConsultation}
                 />
                 <div className="mt-4">
                   <LiveDocumentAlerts

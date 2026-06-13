@@ -15,7 +15,7 @@ const emptyForm = {
   specialty: 'General Practitioner',
   location: '',
   languages: 'English',
-  fee: '50',
+  fee: '20',
   licenseNumber: '',
   licenseIssuer: '',
   licenseExpiry: '',
@@ -36,7 +36,7 @@ function doctorToForm(doctor) {
     specialty: doctor.specialty || 'General Practitioner',
     location: doctor.location || '',
     languages: Array.isArray(doctor.languages) ? doctor.languages.join(', ') : 'English',
-    fee: String(doctor.fee || doctor.consultation_fee || 50),
+    fee: String(doctor.fee || doctor.consultation_fee || (doctor.specialty === 'General Practitioner' ? 20 : 40)),
     licenseNumber: doctor.license_number || doctor.licenseNumber || '',
     licenseIssuer: doctor.license_issuer || '',
     licenseExpiry: doctor.license_expiry ? String(doctor.license_expiry).slice(0, 10) : '',
@@ -123,7 +123,9 @@ function DoctorManagement({ adminHeaders }) {
         body: JSON.stringify({
           ...formData,
           languages: formData.languages.split(',').map((item) => item.trim()).filter(Boolean),
-          consultation_fee: Number(formData.fee) || 50,
+          consultation_fee: formData.specialty === 'General Practitioner'
+            ? Math.min(20, Number(formData.fee) || 20)
+            : Math.max(40, Number(formData.fee) || 40),
         }),
       })
 
@@ -346,7 +348,7 @@ function DoctorGrid({ title, doctors, statusDraft, deleteDoctorId, onStatusDraft
                 <p className="mt-2 text-xs text-slate-500">{doctor.email}</p>
                 <p className="text-xs text-slate-500">{doctor.location}</p>
                 <p className="mt-2 text-xs text-slate-600">License: {doctor.license_number || 'Not supplied'}</p>
-                <p className="text-xs text-slate-600">Fee: {doctor.fee || doctor.consultation_fee || 50}</p>
+                <p className="text-xs text-slate-600">Fee: {doctor.fee || doctor.consultation_fee || (doctor.specialty === 'General Practitioner' ? 20 : 40)} tokens</p>
                 {isPaused && (
                   <p className="mt-2 rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
                     {doctor.suspension_reason || doctor.suspensionReason || 'Paused pending admin review.'}

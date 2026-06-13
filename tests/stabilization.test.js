@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
+import { getFairConsultationTokens } from '../src/lib/consultationPricing.js'
 
 const server = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8')
 const schema = readFileSync(new URL('../SUPABASE_FULL_REPAIR_SCHEMA.sql', import.meta.url), 'utf8')
@@ -19,6 +20,9 @@ const appointmentScheduler = readFileSync(new URL('../src/components/Appointment
 const vercel = readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')
 const apiFetchClient = readFileSync(new URL('../src/lib/apiFetch.js', import.meta.url), 'utf8')
 const forgotPassword = readFileSync(new URL('../src/pages/ForgotPassword.jsx', import.meta.url), 'utf8')
+const consultationPricing = readFileSync(new URL('../src/lib/consultationPricing.js', import.meta.url), 'utf8')
+const consultationRatingPrompt = readFileSync(new URL('../src/components/ConsultationRatingPrompt.jsx', import.meta.url), 'utf8')
+const videoChatPanel = readFileSync(new URL('../src/components/VideoChatPanel.jsx', import.meta.url), 'utf8')
 
 test('doctor availability is deterministic and database-backed', () => {
   assert.match(server, /doctor_availability_slots/)
@@ -240,4 +244,33 @@ test('chat panels keep typing stable while messages synchronize inside fixed scr
   assert.match(communityChat, /messages\.map/)
   assert.match(communityChat, /h-\[420px\].*overflow-y-auto overscroll-contain/)
   assert.match(server, /res\.status\(201\)\.json\(\{ communityMessage, message: 'Community message sent' \}\)/)
+})
+
+test('consultation pricing caps general practice and protects specialist minimums', () => {
+  assert.equal(getFairConsultationTokens({ specialty: 'General Practitioner', price: { basic: 50 } }, 'basic'), 20)
+  assert.equal(getFairConsultationTokens({ specialty: 'Cardiology', price: { basic: 20 } }, 'basic'), 40)
+  assert.equal(getFairConsultationTokens({ specialty: 'Cardiology', price: { premium: 80 } }, 'premium'), 80)
+  assert.match(consultationPricing, /GP_MAX_CONSULTATION_TOKENS = 20/)
+  assert.match(consultationPricing, /SPECIALIST_MIN_CONSULTATION_TOKENS = 40/)
+  assert.match(consultationPricing, /Math\.min\(GP_MAX_CONSULTATION_TOKENS/)
+  assert.match(consultationPricing, /Math\.max\(SPECIALIST_MIN_CONSULTATION_TOKENS/)
+  assert.match(server, /const requiredTokens = getFairConsultationTokens\(doctor, subscriptionType\)/)
+  assert.doesNotMatch(server, /Math\.min\(20, getFairConsultationTokens\(doctor, subscriptionType\)\)/)
+  assert.match(schema, /price = '\{"basic":20,"premium":20\}'::jsonb/)
+})
+
+test('completed consultations require one persistent patient rating', () => {
+  assert.match(server, /app\.get\('\/api\/reviews\/pending'/)
+  assert.match(server, /consultation_id: consultationId/)
+  assert.match(server, /ratingRequired: true/)
+  assert.match(server, /Ask your patient for a rating/)
+  assert.match(schema, /uq_reviews_consultation_patient/)
+  assert.match(consultationRatingPrompt, /A rating is required after each completed consultation/)
+  assert.match(consultationRatingPrompt, /Submit rating and continue/)
+  assert.match(patientDashboard, /ConsultationRatingPrompt/)
+  assert.match(patientDashboard, /consultationId: activeConsultationId, patientId: patient\.id/)
+  assert.match(doctorDashboard, /onEndCall=\{handleDoctorEndConsultation\}/)
+  assert.match(videoChatPanel, /onEndCall\?\.\(\)/)
+  assert.match(server, /Patient, doctor, or facility credentials are required to complete this consultation/)
+  assert.match(server, /Consultation was already completed/)
 })

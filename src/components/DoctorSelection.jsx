@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search, Stethoscope, WalletCards } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
+import { getFairConsultationTokens } from '../lib/consultationPricing'
 import { useError } from './ErrorHandler'
 import ProfileAvatar, { getGenderLabel } from './ProfileAvatar'
 
 const consultationTypes = [
-  { id: 'basic', label: 'Basic', tokens: 50, description: 'Focused visit for common concerns.' },
-  { id: 'premium', label: 'Premium', tokens: 100, description: 'Extended visit with specialist review.' },
+  { id: 'basic', label: 'Basic', description: 'Focused visit for common concerns.' },
+  { id: 'premium', label: 'Premium', description: 'Extended visit with specialist review.' },
 ]
 
 const DEFAULT_SPECIALTIES = [
@@ -144,7 +145,7 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
 
   const getDoctorPrice = (doctor, type = subscriptionType) => {
     if (!doctor) return selectedType.tokens
-    return Number(doctor.price?.[type] || selectedType.tokens)
+    return getFairConsultationTokens(doctor, type)
   }
 
   const selectedPrice = getDoctorPrice(selectedDoctor)
@@ -160,7 +161,7 @@ function DoctorSelection({ patient, onDoctorSelected, onInstantConsultation }) {
         location: 'GlobalDoc virtual desk',
         languages: ['English'],
         rating: 4.8,
-        price: { basic: 50, premium: 100 },
+        price: { basic: 20, premium: 20 },
         isOnline: true,
         isVirtual: true,
       }

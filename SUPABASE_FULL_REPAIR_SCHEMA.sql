@@ -133,9 +133,9 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   profile_photo_url text,
   license_issuer text,
   license_expiry date,
-  fee numeric(12,2) DEFAULT 35,
-  consultation_fee numeric(12,2) DEFAULT 35,
-  price jsonb DEFAULT '{"basic":50,"premium":100}'::jsonb,
+  fee numeric(12,2) DEFAULT 20,
+  consultation_fee numeric(12,2) DEFAULT 20,
+  price jsonb DEFAULT '{"basic":20,"premium":20}'::jsonb,
   is_online boolean DEFAULT false,
   earnings_tokens numeric(14,2) DEFAULT 0,
   bank_code text,
@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS public.payouts (
 
 CREATE TABLE IF NOT EXISTS public.reviews (
   id text PRIMARY KEY,
+  consultation_id text,
   doctor_id text REFERENCES public.doctors(id) ON DELETE CASCADE,
   patient_id text REFERENCES public.patients(id) ON DELETE CASCADE,
   rating integer,
@@ -791,7 +792,7 @@ WHERE portal_pin IS NOT NULL
   AND (password IS NULL OR password = '')
   AND COALESCE(registered_via, '') = 'facility';
 
-ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS fee numeric(12,2) DEFAULT 35;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS fee numeric(12,2) DEFAULT 20;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS email text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS signature_data_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS passport_data_url text;
@@ -800,8 +801,8 @@ ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS profile_photo_url text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active';
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS suspension_reason text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS availability text DEFAULT 'Available upon request';
-ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS consultation_fee numeric(12,2) DEFAULT 35;
-ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS price jsonb DEFAULT '{"basic":50,"premium":100}'::jsonb;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS consultation_fee numeric(12,2) DEFAULT 20;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS price jsonb DEFAULT '{"basic":20,"premium":20}'::jsonb;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS is_online boolean DEFAULT false;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS earnings_tokens numeric(14,2) DEFAULT 0;
@@ -813,10 +814,39 @@ ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS mobile_money_operator text;
 ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS mobile_money_number text;
 ALTER TABLE public.doctors ALTER COLUMN email DROP NOT NULL;
 ALTER TABLE public.doctors ALTER COLUMN license_number DROP NOT NULL;
-ALTER TABLE public.doctors ALTER COLUMN consultation_fee SET DEFAULT 35;
+ALTER TABLE public.doctors ALTER COLUMN consultation_fee SET DEFAULT 20;
 ALTER TABLE public.doctors ALTER COLUMN consultation_fee DROP NOT NULL;
 ALTER TABLE public.doctors ALTER COLUMN availability SET DEFAULT 'Available upon request';
 ALTER TABLE public.doctors ALTER COLUMN availability DROP NOT NULL;
+
+UPDATE public.doctors
+SET fee = 20,
+    consultation_fee = 20,
+    price = '{"basic":20,"premium":20}'::jsonb
+WHERE id <> 'system-doctor'
+  AND (
+    lower(COALESCE(specialty, '')) IN ('gp', 'general practitioner', 'general practice', 'family medicine')
+    OR lower(COALESCE(specialty, '')) LIKE '%general pract%'
+  );
+
+UPDATE public.doctors
+SET fee = GREATEST(COALESCE(fee, consultation_fee, 40), 40),
+    consultation_fee = GREATEST(COALESCE(consultation_fee, fee, 40), 40),
+    price = jsonb_build_object(
+      'basic', GREATEST(COALESCE(
+        CASE WHEN COALESCE(price->>'basic', '') ~ '^[0-9]+([.][0-9]+)?$' THEN (price->>'basic')::numeric END,
+        consultation_fee, fee, 40
+      ), 40),
+      'premium', GREATEST(COALESCE(
+        CASE WHEN COALESCE(price->>'premium', '') ~ '^[0-9]+([.][0-9]+)?$' THEN (price->>'premium')::numeric END,
+        consultation_fee, fee, 60
+      ), 40)
+    )
+WHERE id <> 'system-doctor'
+  AND NOT (
+    lower(COALESCE(specialty, '')) IN ('gp', 'general practitioner', 'general practice', 'family medicine')
+    OR lower(COALESCE(specialty, '')) LIKE '%general pract%'
+  );
 
 INSERT INTO public.doctors (
   id, email, name, specialty, location, languages, verified, license_verified, is_online, fee, consultation_fee, price
@@ -849,6 +879,8 @@ ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS profile_photo_url text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active';
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS suspension_reason text;
 ALTER TABLE public.doctors_auth ADD COLUMN IF NOT EXISTS verified boolean DEFAULT false;
+
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS consultation_id text;
 
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS type text;
 ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS name text;
@@ -1215,6 +1247,15 @@ CREATE INDEX IF NOT EXISTS idx_specialty_referrals_to_specialty ON public.specia
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_from_doctor ON public.specialty_referrals(from_doctor_id);
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_target_doctor ON public.specialty_referrals(target_doctor_id, status);
 CREATE INDEX IF NOT EXISTS idx_payments_reference ON public.payments(reference);
+DELETE FROM public.reviews older
+USING public.reviews newer
+WHERE older.consultation_id IS NOT NULL
+  AND older.consultation_id = newer.consultation_id
+  AND older.patient_id = newer.patient_id
+  AND older.ctid < newer.ctid;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_consultation_patient
+  ON public.reviews(consultation_id, patient_id)
+  WHERE consultation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_payments_patient ON public.payments(patient_id);
 CREATE INDEX IF NOT EXISTS idx_payouts_reference ON public.payouts(reference);
 CREATE INDEX IF NOT EXISTS idx_payouts_doctor_status ON public.payouts(doctor_id, status);

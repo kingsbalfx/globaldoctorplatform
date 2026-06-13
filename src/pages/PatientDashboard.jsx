@@ -21,7 +21,9 @@ import ProfileAvatar, { getGenderLabel } from '../components/ProfileAvatar'
 import { PortalArtBanner } from '../components/TelehealthArt'
 import PatientClinicalSummaryDownload from '../components/PatientClinicalSummaryDownload'
 import VitalParametersMonitor from '../components/VitalParametersMonitor'
+import ConsultationRatingPrompt from '../components/ConsultationRatingPrompt'
 import { getSpecialtyInfo } from '../lib/specialtyRegistry'
+import { getFairConsultationTokens } from '../lib/consultationPricing'
 import { apiFetch, readApiJson } from '../lib/apiFetch'
 import { useError } from '../components/ErrorHandler'
 import { supabase } from '../lib/supabaseClient'
@@ -41,6 +43,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   const [loading, setLoading] = useState(false)
   const [selectedConsultationId, setSelectedConsultationId] = useState('')
   const [showAccessibilityPanel, setShowAccessibilityPanel] = useState(false)
+  const [ratingRefreshSignal, setRatingRefreshSignal] = useState(0)
   const { t } = useTranslation()
 
   const activeConsultation = useMemo(() => {
@@ -278,7 +281,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
   }
 
   const handleInstantConsultation = async (doctor, subType) => {
-    const price = Number(doctor?.price?.[subType] || (subType === 'premium' ? 100 : 50))
+    const price = getFairConsultationTokens(doctor, subType)
     try {
       const balanceResponse = await apiFetch(`/api/patients/${encodeURIComponent(patient.id)}/tokens`)
       const balanceData = await balanceResponse.json().catch(() => ({}))
@@ -390,6 +393,26 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     return <DoctorSelection patient={patient} onDoctorSelected={handleDoctorSelected} onInstantConsultation={handleInstantConsultation} />
   }
 
+  const handlePatientEndCall = async () => {
+    if (!activeConsultationId) return
+    try {
+      const response = await apiFetch('/api/consultations/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consultationId: activeConsultationId, patientId: patient.id }),
+      })
+      const data = await readApiJson(response)
+      if (!response.ok) throw new Error(data.error || 'Unable to complete consultation')
+      setAppointments((current) => current.map((item) => (
+        String(item.id) === String(activeConsultationId) ? { ...item, status: 'completed' } : item
+      )))
+      setRatingRefreshSignal((value) => value + 1)
+      addError('Consultation completed. Please rate your doctor.', 'success')
+    } catch (error) {
+      addError(error.message, 'error')
+    }
+  }
+
   // Calendar scheduling step
   if (currentStep === 'calendar') {
     return (
@@ -411,6 +434,11 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     <section className="relative mx-auto mt-16 max-w-7xl overflow-hidden rounded-[2rem] px-6 pb-20 pt-1 sm:px-8" style={patientDashboardStyle}>
       <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-white/70 blur-xl opacity-70" />
       <AnnouncementBanner audience="patient" />
+      <ConsultationRatingPrompt
+        patientId={patient.id}
+        refreshSignal={ratingRefreshSignal}
+        onRated={loadOverview}
+      />
       <PortalArtBanner
         theme="patient"
         title="A calmer patient journey"
@@ -650,6 +678,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
             userType="patient"
             patientId={patient.id}
             doctorId={activeConsultation?.doctorId || activeConsultation?.doctor_id || selectedDoctor?.id || ''}
+            onEndCall={handlePatientEndCall}
           />
           {liveConsultationActive ? (
             <>

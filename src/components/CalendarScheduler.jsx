@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, CalendarCheck } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
+import { getFairConsultationTokens } from '../lib/consultationPricing'
 import { useError } from './ErrorHandler'
 
 function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentScheduled, onBack }) {
@@ -115,7 +116,7 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
         slotTime: selectedTime,
         consultationType,
         subscriptionType,
-        tokensRequired: subscriptionType === 'basic' ? (doctor.price?.basic || 50) : (doctor.price?.premium || 100)
+        tokensRequired: getFairConsultationTokens(doctor, subscriptionType)
       }
 
       const response = await apiFetch(`/api/appointments`, {
@@ -321,7 +322,7 @@ function CalendarScheduler({ patient, doctor, subscriptionType, onAppointmentSch
                   <div className="flex justify-between border-t pt-3">
                     <span className="text-slate-600">Cost:</span>
                     <span className="font-bold text-brand-700">
-                      {subscriptionType === 'basic' ? (doctor.price?.basic || 50) : (doctor.price?.premium || 100)} tokens
+                      {getFairConsultationTokens(doctor, subscriptionType)} tokens
                     </span>
                   </div>
                 </div>
