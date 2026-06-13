@@ -58,6 +58,12 @@ const TOKEN_PURCHASE_SPLIT = Object.freeze({
   adminManagement: 0.4,
   platform: 0.1,
 })
+const CONSULTATION_PROOF_TTL_MS = Math.max(60 * 60 * 1000, Number(process.env.CONSULTATION_PROOF_TTL_MS || 7 * 24 * 60 * 60 * 1000))
+const ACTOR_SESSION_PROOF_TTL_MS = Math.max(60 * 60 * 1000, Number(process.env.ACTOR_SESSION_PROOF_TTL_MS || 30 * 24 * 60 * 60 * 1000))
+const CONSULTATION_SIGNING_SECRET = String(process.env.JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+if (!CONSULTATION_SIGNING_SECRET) {
+  console.warn('JWT_SECRET is not configured. Secure patient/doctor session proofs cannot be issued.')
+}
 
 // ---------- STARTUP DIAGNOSTICS ----------
 if (process.env.NODE_ENV !== 'production' || process.env.RUN_STARTUP_DIAGNOSTICS === 'true') void (async () => {
@@ -93,6 +99,72 @@ const generateId = (prefix) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).
 let videoSignalSeq = 0
 const videoSignalFallbackRooms = new Map()
 const VIDEO_SIGNAL_FALLBACK_TTL_MS = 10 * 60 * 1000
+
+function createConsultationProof(consultationId, actorType, actorId) {
+  if (!CONSULTATION_SIGNING_SECRET || !consultationId || !actorType || !actorId) return ''
+  const payload = Buffer.from(JSON.stringify({
+    consultationId: String(consultationId),
+    actorType: String(actorType),
+    actorId: String(actorId),
+    expiresAt: Date.now() + CONSULTATION_PROOF_TTL_MS,
+  })).toString('base64url')
+  const signature = crypto.createHmac('sha256', CONSULTATION_SIGNING_SECRET).update(payload).digest('base64url')
+  return `${payload}.${signature}`
+}
+
+function verifyConsultationProof(proof, consultationId, actorType, actorId) {
+  if (!CONSULTATION_SIGNING_SECRET || !proof) return false
+  const [payload, signature] = String(proof).split('.')
+  if (!payload || !signature) return false
+  const expected = crypto.createHmac('sha256', CONSULTATION_SIGNING_SECRET).update(payload).digest('base64url')
+  const providedBuffer = Buffer.from(signature)
+  const expectedBuffer = Buffer.from(expected)
+  if (providedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(providedBuffer, expectedBuffer)) return false
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    return parsed.expiresAt > Date.now()
+      && String(parsed.consultationId) === String(consultationId)
+      && String(parsed.actorType) === String(actorType)
+      && String(parsed.actorId) === String(actorId)
+  } catch {
+    return false
+  }
+}
+
+function createActorSessionProof(actorType, actorId) {
+  if (!CONSULTATION_SIGNING_SECRET || !actorType || !actorId) return ''
+  const payload = Buffer.from(JSON.stringify({
+    purpose: 'actor_session',
+    actorType: String(actorType),
+    actorId: String(actorId),
+    expiresAt: Date.now() + ACTOR_SESSION_PROOF_TTL_MS,
+  })).toString('base64url')
+  const signature = crypto.createHmac('sha256', CONSULTATION_SIGNING_SECRET).update(payload).digest('base64url')
+  return `${payload}.${signature}`
+}
+
+function verifyActorSessionProof(proof, actorType, actorId) {
+  if (!CONSULTATION_SIGNING_SECRET || !proof) return false
+  const [payload, signature] = String(proof).split('.')
+  if (!payload || !signature) return false
+  const expected = crypto.createHmac('sha256', CONSULTATION_SIGNING_SECRET).update(payload).digest('base64url')
+  const providedBuffer = Buffer.from(signature)
+  const expectedBuffer = Buffer.from(expected)
+  if (providedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(providedBuffer, expectedBuffer)) return false
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    return parsed.purpose === 'actor_session'
+      && parsed.expiresAt > Date.now()
+      && String(parsed.actorType) === String(actorType)
+      && String(parsed.actorId) === String(actorId)
+  } catch {
+    return false
+  }
+}
+
+function getRequestSessionProof(req) {
+  return String(req.headers['x-session-proof'] || req.body?.sessionProof || req.query?.sessionProof || '').trim()
+}
 
 function generateReadablePatientId(kind = 'HRN') {
   const code = String(kind || 'HRN').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4) || 'HRN'
@@ -800,6 +872,11 @@ function sanitizePatientForResponse(patient) {
   }
 }
 
+function sanitizePatientSession(patient) {
+  const sanitized = sanitizePatientForResponse(patient)
+  return sanitized ? { ...sanitized, session_proof: createActorSessionProof('patient', sanitized.id) } : null
+}
+
 function sanitizeDoctorForResponse(doctor) {
   if (!doctor) return null
   const { password, doctors, ...rest } = doctor
@@ -840,6 +917,11 @@ function sanitizeDoctorForResponse(doctor) {
     license_verified: Boolean(doctor.license_verified || doctors?.license_verified),
     approval_status: (doctor.verified || doctors?.verified) ? 'approved' : 'pending_review',
   }
+}
+
+function sanitizeDoctorSession(doctor) {
+  const sanitized = sanitizeDoctorForResponse(doctor)
+  return sanitized ? { ...sanitized, session_proof: createActorSessionProof('doctor', sanitized.id) } : null
 }
 
 async function findPatientByIdentifier(identifier) {
@@ -886,16 +968,21 @@ async function findPatientByIdentifier(identifier) {
 }
 
 function normalizeDoctorPayload(body = {}) {
+  const specialty = String(body.specialty || 'General Practitioner').trim()
+  const requestedFee = safeNumber(body.consultation_fee ?? body.fee)
+  const consultationFee = isGeneralPractitioner(specialty)
+    ? Math.max(1, Math.min(20, requestedFee || 20))
+    : Math.max(40, requestedFee || 40)
   return {
     email: String(body.email || '').trim().toLowerCase(),
     password: String(body.password || '').trim(),
     name: String(body.name || '').trim(),
-    specialty: String(body.specialty || 'General Practitioner').trim(),
+    specialty,
     location: String(body.location || '').trim(),
     languages: Array.isArray(body.languages)
       ? body.languages.filter(Boolean)
       : String(body.languages || 'English').split(',').map((item) => item.trim()).filter(Boolean),
-    consultationFee: safeNumber(body.consultation_fee ?? body.fee) || (isGeneralPractitioner(body.specialty) ? 20 : 40),
+    consultationFee,
     licenseNumber: String(body.licenseNumber || body.license_number || '').trim(),
     licenseIssuer: String(body.licenseIssuer || body.license_issuer || '').trim(),
     licenseExpiry: body.licenseExpiry || body.license_expiry || null,
@@ -910,6 +997,13 @@ function normalizeDoctorPayload(body = {}) {
     mobileMoneyOperator: String(body.mobileMoneyOperator || body.mobile_money_operator || '').trim(),
     mobileMoneyNumber: String(body.mobileMoneyNumber || body.mobile_money_number || '').trim(),
   }
+}
+
+function buildDoctorConsultationPrice(specialty, consultationFee) {
+  const basic = getFairConsultationTokens({ specialty, fee: consultationFee }, 'basic')
+  return isGeneralPractitioner(specialty)
+    ? { basic, premium: basic }
+    : { basic, premium: Math.max(60, basic) }
 }
 
 function normalizeEnvSecret(value) {
@@ -1913,8 +2007,8 @@ app.post('/api/doctors/login', async (req, res) => {
       })
     }
     const onlineAt = new Date().toISOString()
-    await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true, updated_at: onlineAt }).eq('id', String(doctor.id))
-    res.json({ doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: String(doctor.id), verified: true, license_verified: true, is_online: true, updated_at: onlineAt }), message: 'Login successful' })
+    await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true, last_seen_at: onlineAt, updated_at: onlineAt }).eq('id', String(doctor.id))
+    res.json({ doctor: sanitizeDoctorSession({ ...profile, ...doctor, id: String(doctor.id), verified: true, license_verified: true, is_online: true, last_seen_at: onlineAt, updated_at: onlineAt }), message: 'Login successful' })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1955,7 +2049,9 @@ app.post('/api/doctors/register', async (req, res) => {
     id: profileId, name: payload.name, specialty: payload.specialty, location: payload.location,
     languages: ['English'], rating: 0, rating_count: 0,
     availability: 'Available upon request', verified: false, is_online: false,
-    fee: payload.consultationFee, price: isGeneralPractitioner(payload.specialty) ? { basic: 20, premium: 20 } : { basic: 40, premium: 60 },
+    fee: payload.consultationFee,
+    consultation_fee: payload.consultationFee,
+    price: buildDoctorConsultationPrice(payload.specialty, payload.consultationFee),
     license_verified: false,
     license_number: payload.licenseNumber,
     license_issuer: payload.licenseIssuer || null,
@@ -2041,7 +2137,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           resourceId: id,
           changes: { email: patientEmail },
         })
-        return res.json({ patient: sanitizePatientForResponse(newPatient), message: 'Patient session ready' })
+        return res.json({ patient: sanitizePatientSession(newPatient), message: 'Patient session ready' })
       }
       const { data: updatedPatient, error: updateErr } = await updateAdaptive('patients', patientProfile, (query) => query.eq('id', patient.id))
       if (updateErr) return res.status(500).json({ error: 'Failed to update patient: ' + updateErr.message })
@@ -2054,7 +2150,7 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
         resourceId: patient.id,
         changes: { email: patientEmail },
       })
-      return res.json({ patient: sanitizePatientForResponse(updatedPatient || patient), message: 'Patient session ready' })
+      return res.json({ patient: sanitizePatientSession(updatedPatient || patient), message: 'Patient session ready' })
     }
 
     // Doctor
@@ -2145,9 +2241,9 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           })
         }
         const onlineAt = new Date().toISOString()
-        if (profile) await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true, updated_at: onlineAt }).eq('id', profileId)
+        if (profile) await supabase.from('doctors').update({ is_online: true, verified: true, license_verified: true, last_seen_at: onlineAt, updated_at: onlineAt }).eq('id', profileId)
         return res.json({
-          doctor: sanitizeDoctorForResponse({ ...profile, ...doctor, id: profileId, verified: true, license_verified: true, is_online: true, updated_at: onlineAt }),
+          doctor: sanitizeDoctorSession({ ...profile, ...doctor, id: profileId, verified: true, license_verified: true, is_online: true, last_seen_at: onlineAt, updated_at: onlineAt }),
           message: 'Doctor session ready',
         })
       }
@@ -2204,7 +2300,27 @@ app.post('/api/auth/oauth/bridge', async (req, res) => {
           message: 'Doctor profile updated and is waiting for platform admin approval.'
         })
       }
-      return res.json({ doctor: sanitizeDoctorForResponse(doc), message: 'Doctor session ready' })
+      const onlineAt = new Date().toISOString()
+      await updateAdaptive('doctors', {
+        is_online: true,
+        verified: true,
+        license_verified: true,
+        last_seen_at: onlineAt,
+        updated_at: onlineAt,
+      }, (query) => query.eq('id', profileId), { select: null, maybeSingle: false })
+      return res.json({
+        doctor: sanitizeDoctorSession({
+          ...profile,
+          ...doc,
+          id: profileId,
+          verified: true,
+          license_verified: true,
+          is_online: true,
+          last_seen_at: onlineAt,
+          updated_at: onlineAt,
+        }),
+        message: 'Doctor session ready',
+      })
     }
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -2274,7 +2390,7 @@ app.post('/api/patients/register', async (req, res) => {
       changes: { email, source: 'email' },
     })
     return res.status(200).json({
-      patient: sanitizePatientForResponse(savedPatient || updatedPatient),
+      patient: sanitizePatientSession(savedPatient || updatedPatient),
       message: 'Patient profile updated and signed in',
     })
   }
@@ -2298,7 +2414,7 @@ app.post('/api/patients/register', async (req, res) => {
     changes: { email, source: 'email' },
   })
 
-  res.status(201).json({ patient: sanitizePatientForResponse(newPatient), message: 'Registration successful' })
+  res.status(201).json({ patient: sanitizePatientSession(newPatient), message: 'Registration successful' })
 })
 
 app.post('/api/patients/login', async (req, res) => {
@@ -2334,7 +2450,7 @@ app.post('/api/patients/login', async (req, res) => {
     resourceType: 'patient',
     resourceId: patient.id,
   })
-  res.json({ patient: sanitizePatientForResponse(patient), message: 'Login successful' })
+  res.json({ patient: sanitizePatientSession(patient), message: 'Login successful' })
 })
 
 // ---------- FACILITY PATIENT AUTH ----------
@@ -2415,7 +2531,7 @@ app.post('/api/patients/facility/login', async (req, res) => {
   if (!patient) return res.status(401).json({ error: 'Invalid credentials' })
 
   await updateAdaptive('patients', { is_online: true, last_seen_at: new Date().toISOString() }, (query) => query.eq('id', patient.id), { select: null, maybeSingle: false })
-  res.json({ patient: sanitizePatientForResponse(patient), message: 'Login successful' })
+  res.json({ patient: sanitizePatientSession(patient), message: 'Login successful' })
 })
 
 // ---------- TOKENS ----------
@@ -3206,6 +3322,9 @@ app.get('/api/online/status', async (_req, res) => {
 })
 
 app.patch('/api/doctors/:doctorId/status', async (req, res) => {
+  if (!verifyActorSessionProof(getRequestSessionProof(req), 'doctor', req.params.doctorId)) {
+    return res.status(403).json({ error: 'A valid doctor session is required to update online status' })
+  }
   const doctor = await getDoctorProfile(req.params.doctorId)
   if ((doctor?.account_status === 'paused' || doctor?.account_status === 'stopped') && Boolean(req.body.isOnline)) {
     return res.status(403).json({ error: doctor.suspension_reason || 'Doctor account is paused by platform admin.' })
@@ -3233,6 +3352,9 @@ app.patch('/api/doctors/:doctorId/status', async (req, res) => {
 })
 
 app.patch('/api/patients/:patientId/status', async (req, res) => {
+  if (!verifyActorSessionProof(getRequestSessionProof(req), 'patient', req.params.patientId)) {
+    return res.status(403).json({ error: 'A valid patient session is required to update online status' })
+  }
   const isOnline = Boolean(req.body.isOnline)
   const seenAt = new Date().toISOString()
   const update = await updateAdaptive(
@@ -3397,12 +3519,15 @@ app.patch('/api/doctors/:doctorId/availability', async (req, res) => {
 
 // ---------- REVIEWS ----------
 app.post('/api/reviews', async (req, res) => {
-  const { consultationId, doctorId, patientId, comment, verifiedPatient } = req.body
+  const { consultationId, doctorId, patientId, comment, verifiedPatient, actionProof } = req.body
   const rating = Number(req.body.rating)
   if (!consultationId || !doctorId || !patientId || !Number.isInteger(rating) || rating < 1 || rating > 5) {
     return res.status(400).json({ error: 'A completed consultation and a rating from 1 to 5 are required' })
   }
   if (!verifiedPatient) return res.status(403).json({ error: 'Only verified patients may submit reviews' })
+  if (!verifyConsultationProof(actionProof, consultationId, 'patient', patientId)) {
+    return res.status(403).json({ error: 'A valid patient consultation proof is required to submit this rating' })
+  }
 
   const { data: consultation, error: consultationError } = await supabase
     .from('consultations_ng')
@@ -3451,6 +3576,9 @@ app.post('/api/reviews', async (req, res) => {
 app.get('/api/reviews/pending', async (req, res) => {
   const patientId = String(req.query.patientId || '').trim()
   if (!patientId) return res.status(400).json({ error: 'patientId required' })
+  if (!verifyActorSessionProof(getRequestSessionProof(req), 'patient', patientId)) {
+    return res.status(403).json({ error: 'A valid patient session is required to load pending ratings' })
+  }
 
   const { data: consultations, error: consultationError } = await supabase
     .from('consultations_ng')
@@ -3475,7 +3603,11 @@ app.get('/api/reviews/pending', async (req, res) => {
   const doctorsById = new Map((doctorResult.data || []).map((doctor) => [String(doctor.id), sanitizeDoctorForResponse(doctor)]))
   const pending = consultations
     .filter((item) => !rated.has(String(item.id)))
-    .map((item) => ({ ...item, doctor: doctorsById.get(String(item.doctor_id)) || null }))
+    .map((item) => ({
+      ...item,
+      action_proof: createConsultationProof(item.id, 'patient', patientId),
+      doctor: doctorsById.get(String(item.doctor_id)) || null,
+    }))
 
   res.json({ consultations: pending })
 })
@@ -4175,7 +4307,9 @@ app.post('/api/admin/doctors', async (req, res) => {
   const doctor = {
     id: profileId, name: payload.name, specialty: payload.specialty, location: payload.location, languages: payload.languages,
     rating: 0, rating_count: 0, availability: 'Available upon request', verified: true, is_online: false,
-    fee: payload.consultationFee, license_number: payload.licenseNumber, license_issuer: payload.licenseIssuer || null,
+    fee: payload.consultationFee, consultation_fee: payload.consultationFee,
+    price: buildDoctorConsultationPrice(payload.specialty, payload.consultationFee),
+    license_number: payload.licenseNumber, license_issuer: payload.licenseIssuer || null,
     license_expiry: payload.licenseExpiry || null, bank_code: payload.bankCode || null, bank_account: payload.bankAccount || null,
     currency: payload.currency || null, payout_method: payload.payoutMethod,
     mobile_money_operator: payload.mobileMoneyOperator || null, mobile_money_number: payload.mobileMoneyNumber || null,
@@ -4236,6 +4370,8 @@ app.patch('/api/admin/doctors/:doctorId', async (req, res) => {
     location: payload.location,
     languages: payload.languages,
     fee: payload.consultationFee,
+    consultation_fee: payload.consultationFee,
+    price: buildDoctorConsultationPrice(payload.specialty, payload.consultationFee),
     license_number: payload.licenseNumber,
     license_issuer: payload.licenseIssuer || null,
     license_expiry: payload.licenseExpiry || null,
@@ -5171,6 +5307,9 @@ app.get('/api/doctors/:doctorId/facility-patients', async (req, res) => {
 
 app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
   const { doctorId } = req.params
+  if (!verifyActorSessionProof(getRequestSessionProof(req), 'doctor', doctorId)) {
+    return res.status(403).json({ error: 'A valid doctor session is required to load consultation patients' })
+  }
   const search = String(req.query.search || '').trim().toLowerCase()
   const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)))
   const offset = Math.max(0, Number(req.query.offset || 0))
@@ -5253,7 +5392,10 @@ app.get('/api/doctors/:doctorId/consultation-patients', async (req, res) => {
         : 'facility'
     return {
       ...sanitizePatientForResponse(patient),
-      latest_consultation: consultation,
+      latest_consultation: {
+        ...consultation,
+        action_proof: createConsultationProof(consultation.id, 'doctor', doctorId),
+      },
       assigned_at: consultation.created_at,
       facility_id: facilityId,
       facility,
@@ -5428,6 +5570,9 @@ app.post('/api/consultations/start', async (req, res) => {
   const { patientId, doctorId, channel, track, facilityId, facilityPin, durationMin } = req.body
   const allowedChannels = ['direct_home', 'facility_private', 'facility_phc']
   if (!patientId || !doctorId || !allowedChannels.includes(channel)) return res.status(400).json({ error: 'patientId, doctorId, and valid channel required' })
+  if (channel === 'direct_home' && !verifyActorSessionProof(getRequestSessionProof(req), 'patient', patientId)) {
+    return res.status(403).json({ error: 'A valid patient session is required to start a direct consultation' })
+  }
 
   const [patientRecord, doctor] = await Promise.all([
     findPatientByIdentifier(patientId),
@@ -5575,7 +5720,12 @@ app.post('/api/consultations/start', async (req, res) => {
   })
 
   res.status(201).json({
-    consultation: { ...consultation, patient_tokens_charged: directHomeTokensCharged || financials.tokensCharged, total_ngn: financials.split?.total_ngn ?? split.total_ngn },
+    consultation: {
+      ...consultation,
+      action_proof: createConsultationProof(id, 'patient', patientRecord.id),
+      patient_tokens_charged: directHomeTokensCharged || financials.tokensCharged,
+      total_ngn: financials.split?.total_ngn ?? split.total_ngn,
+    },
     split: financials.split || split,
     tokensCharged: directHomeTokensCharged || financials.tokensCharged,
     settlementPending: Boolean(financials.settlementPending),
@@ -5592,8 +5742,13 @@ app.post('/api/consultations/end', async (req, res) => {
 
   const actorDoctorId = String(req.body?.doctorId || '').trim()
   const actorPatientId = String(req.body?.patientId || '').trim()
-  const actorIsDoctor = actorDoctorId && actorDoctorId === String(consultation.doctor_id || '')
-  const actorIsPatient = actorPatientId && actorPatientId === String(consultation.patient_id || '')
+  const actionProof = String(req.body?.actionProof || '').trim()
+  const actorIsDoctor = actorDoctorId
+    && actorDoctorId === String(consultation.doctor_id || '')
+    && verifyConsultationProof(actionProof, consultationId, 'doctor', actorDoctorId)
+  const actorIsPatient = actorPatientId
+    && actorPatientId === String(consultation.patient_id || '')
+    && verifyConsultationProof(actionProof, consultationId, 'patient', actorPatientId)
   let actorIsFacility = false
 
   if (consultation.facility_id) {

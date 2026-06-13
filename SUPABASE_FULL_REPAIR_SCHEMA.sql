@@ -820,9 +820,18 @@ ALTER TABLE public.doctors ALTER COLUMN availability SET DEFAULT 'Available upon
 ALTER TABLE public.doctors ALTER COLUMN availability DROP NOT NULL;
 
 UPDATE public.doctors
-SET fee = 20,
-    consultation_fee = 20,
-    price = '{"basic":20,"premium":20}'::jsonb
+SET fee = LEAST(GREATEST(COALESCE(fee, consultation_fee, 20), 1), 20),
+    consultation_fee = LEAST(GREATEST(COALESCE(consultation_fee, fee, 20), 1), 20),
+    price = jsonb_build_object(
+      'basic', LEAST(GREATEST(COALESCE(
+        CASE WHEN COALESCE(price->>'basic', '') ~ '^[0-9]+([.][0-9]+)?$' THEN (price->>'basic')::numeric END,
+        consultation_fee, fee, 20
+      ), 1), 20),
+      'premium', LEAST(GREATEST(COALESCE(
+        CASE WHEN COALESCE(price->>'premium', '') ~ '^[0-9]+([.][0-9]+)?$' THEN (price->>'premium')::numeric END,
+        consultation_fee, fee, 20
+      ), 1), 20)
+    )
 WHERE id <> 'system-doctor'
   AND (
     lower(COALESCE(specialty, '')) IN ('gp', 'general practitioner', 'general practice', 'family medicine')
@@ -1247,8 +1256,10 @@ CREATE INDEX IF NOT EXISTS idx_specialty_referrals_to_specialty ON public.specia
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_from_doctor ON public.specialty_referrals(from_doctor_id);
 CREATE INDEX IF NOT EXISTS idx_specialty_referrals_target_doctor ON public.specialty_referrals(target_doctor_id, status);
 CREATE INDEX IF NOT EXISTS idx_payments_reference ON public.payments(reference);
-DELETE FROM public.reviews older
-USING public.reviews newer
+-- Preserve historical duplicate reviews while keeping one consultation-linked rating.
+UPDATE public.reviews older
+SET consultation_id = NULL
+FROM public.reviews newer
 WHERE older.consultation_id IS NOT NULL
   AND older.consultation_id = newer.consultation_id
   AND older.patient_id = newer.patient_id

@@ -4,7 +4,7 @@ import { apiFetch, readApiJson } from '../lib/apiFetch'
 import ProfileAvatar from './ProfileAvatar'
 import { useError } from './ErrorHandler'
 
-function ConsultationRatingPrompt({ patientId, refreshSignal = 0, onRated }) {
+function ConsultationRatingPrompt({ patientId, sessionProof, refreshSignal = 0, onRated }) {
   const { addError } = useError()
   const [pending, setPending] = useState([])
   const [rating, setRating] = useState(0)
@@ -13,11 +13,13 @@ function ConsultationRatingPrompt({ patientId, refreshSignal = 0, onRated }) {
 
   const loadPending = useCallback(async () => {
     if (!patientId) return
-    const response = await apiFetch(`/api/reviews/pending?patientId=${encodeURIComponent(patientId)}`)
+    const response = await apiFetch(`/api/reviews/pending?patientId=${encodeURIComponent(patientId)}`, {
+      headers: { 'x-session-proof': sessionProof || '' },
+    })
     const data = await readApiJson(response)
     if (!response.ok) throw new Error(data.error || 'Unable to load consultation ratings')
     setPending(data.consultations || [])
-  }, [patientId])
+  }, [patientId, sessionProof])
 
   useEffect(() => {
     void loadPending().catch(() => null)
@@ -45,6 +47,7 @@ function ConsultationRatingPrompt({ patientId, refreshSignal = 0, onRated }) {
           rating,
           comment,
           verifiedPatient: true,
+          actionProof: consultation.action_proof,
         }),
       })
       const data = await readApiJson(response)

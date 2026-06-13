@@ -188,15 +188,17 @@ function App() {
       const stored = window.localStorage.getItem('gd_doctor_session')
       if (!stored) return
       const parsed = JSON.parse(stored)
-      if (parsed?.id) {
+      if (parsed?.id && parsed?.session_proof) {
         setAuthDoctor({ type: 'login', ...parsed })
         setPortalSession('doctor')
         window.localStorage.removeItem('gd_patient_session')
         window.localStorage.removeItem('gd_facility_session_active')
         window.localStorage.removeItem('gd_pending_patient_profile')
+      } else {
+        window.localStorage.removeItem('gd_doctor_session')
       }
     } catch {
-      // ignore
+      window.localStorage.removeItem('gd_doctor_session')
     }
   }, [])
 
@@ -239,18 +241,22 @@ function App() {
     const markOnline = () => {
       void apiFetch(statusPath, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session-proof': authDoctor.session_proof || '' },
         body: JSON.stringify({ isOnline: true }),
       })
         .then((response) => response.json().catch(() => ({})))
         .then((data) => {
           if (data?.doctor?.id) {
-            setAuthDoctor((current) => current?.id ? { ...current, ...data.doctor } : current)
-            try {
-              window.localStorage.setItem('gd_doctor_session', JSON.stringify({ type: 'login', ...data.doctor }))
-            } catch {
-              // ignore
-            }
+            setAuthDoctor((current) => {
+              if (!current?.id) return current
+              const nextDoctor = { ...current, ...data.doctor }
+              try {
+                window.localStorage.setItem('gd_doctor_session', JSON.stringify({ type: 'login', ...nextDoctor }))
+              } catch {
+                // ignore
+              }
+              return nextDoctor
+            })
           }
         })
         .catch(() => null)
@@ -260,7 +266,7 @@ function App() {
       const [base = ''] = getApiBaseCandidates()
       void fetch(`${base}${statusPath}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session-proof': authDoctor.session_proof || '' },
         body,
         keepalive: true,
       }).catch(() => null)
@@ -274,7 +280,7 @@ function App() {
       window.removeEventListener('pagehide', markOfflineOnExit)
       window.removeEventListener('beforeunload', markOfflineOnExit)
     }
-  }, [authDoctor?.id, currentView])
+  }, [authDoctor?.id, authDoctor?.session_proof, currentView])
 
   const handleAuth = (authData) => {
     if (authData.type === 'admin-login') {
@@ -322,7 +328,7 @@ function App() {
     if (authDoctor?.id) {
       void apiFetch(`/api/doctors/${encodeURIComponent(authDoctor.id)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session-proof': authDoctor.session_proof || '' },
         body: JSON.stringify({ isOnline: false }),
       }).catch(() => null)
     }

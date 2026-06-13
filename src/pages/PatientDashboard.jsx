@@ -93,7 +93,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       }).catch(() => null)
       void apiFetch(`/api/patients/${encodeURIComponent(patientId)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session-proof': patient.session_proof || '' },
         body: JSON.stringify({ isOnline: false }),
       }).catch(() => null)
     }
@@ -166,14 +166,14 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     const markOnline = () => {
       void apiFetch(statusPath, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session-proof': patient.session_proof || '' },
         body: JSON.stringify({ isOnline: true }),
       }).catch(() => null)
     }
     markOnline()
     const interval = window.setInterval(markOnline, 60 * 1000)
     return () => window.clearInterval(interval)
-  }, [patient?.id, currentStep])
+  }, [patient?.id, patient?.session_proof, currentStep])
 
   useEffect(() => {
     if (logoutSignal > 0) cleanLogout('manual')
@@ -205,7 +205,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       if (!stored) return
       const parsed = JSON.parse(stored)
       // Only restore if the patient has an email – otherwise force login
-      if (parsed?.id) {
+      if (parsed?.id && parsed?.session_proof) {
         const returnToDashboard = window.localStorage.getItem('gd_patient_return_dashboard') === '1'
         window.localStorage.removeItem('gd_patient_return_dashboard')
         setPatient(parsed)
@@ -292,7 +292,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
 
       const response = await apiFetch('/api/consultations/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session-proof': patient.session_proof || '' },
         body: JSON.stringify({
           patientId: patient.id,
           doctorId: doctor.id,
@@ -325,6 +325,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         scheduledDate: new Date().toISOString(),
         scheduled_date: new Date().toISOString(),
         status: 'in_progress',
+        action_proof: consultation.action_proof,
         tokens_charged: data.tokensCharged ?? consultation.patient_tokens_charged ?? price,
       }
       setSelectedDoctor(doctor)
@@ -399,7 +400,11 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       const response = await apiFetch('/api/consultations/end', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consultationId: activeConsultationId, patientId: patient.id }),
+        body: JSON.stringify({
+          consultationId: activeConsultationId,
+          patientId: patient.id,
+          actionProof: activeConsultation?.action_proof,
+        }),
       })
       const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Unable to complete consultation')
@@ -436,6 +441,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
       <AnnouncementBanner audience="patient" />
       <ConsultationRatingPrompt
         patientId={patient.id}
+        sessionProof={patient.session_proof}
         refreshSignal={ratingRefreshSignal}
         onRated={loadOverview}
       />

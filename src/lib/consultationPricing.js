@@ -5,7 +5,8 @@ export const SPECIALIST_PREMIUM_DEFAULT_TOKENS = 60
 
 export function isGeneralPractitioner(specialty) {
   const normalized = String(specialty || '').toLowerCase().replace(/[^a-z]/g, '')
-  return normalized === 'gp'
+  return normalized === ''
+    || normalized === 'gp'
     || normalized.includes('generalpractitioner')
     || normalized.includes('generalpractice')
     || normalized.includes('familymedicine')

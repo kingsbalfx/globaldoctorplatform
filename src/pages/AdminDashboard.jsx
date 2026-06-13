@@ -92,7 +92,9 @@ function AdminDashboard({ doctor, onLogout }) {
       const params = new URLSearchParams({ limit: String(limit), offset: '0' })
       params.set('onlineOnly', 'true')
       if (search.trim()) params.set('search', search.trim())
-      const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/consultation-patients?${params.toString()}`)
+      const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/consultation-patients?${params.toString()}`, {
+        headers: { 'x-session-proof': doctor.session_proof || '' },
+      })
       const data = await readApiJson(response)
       if (!response.ok) throw new Error(data.error || 'Failed to load consultation patients')
       const patients = Array.isArray(data.patients) ? data.patients : []
@@ -201,6 +203,7 @@ function AdminDashboard({ doctor, onLogout }) {
         body: JSON.stringify({
           consultationId: selectedConsultation.id,
           doctorId: doctor.id,
+          actionProof: selectedConsultation.action_proof,
           durationMin: selectedConsultation.duration_min,
         }),
       })
@@ -296,7 +299,7 @@ function AdminDashboard({ doctor, onLogout }) {
     try {
       const response = await apiFetch(`/api/doctors/${encodeURIComponent(doctor.id)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session-proof': doctor.session_proof || '' },
         body: JSON.stringify({ isOnline: next }),
       })
       const data = await readApiJson(response)

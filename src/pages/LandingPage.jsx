@@ -7,6 +7,7 @@ import LanguageSelector from '../components/LanguageSelector'
 import ProfileAvatar, { getGenderLabel } from '../components/ProfileAvatar'
 import { LandingAdArt, TelehealthHeroArt } from '../components/TelehealthArt'
 import { useError } from '../components/ErrorHandler'
+import { consultationTokensToUsd, getFairConsultationTokens } from '../lib/consultationPricing'
 
 const specialties = [
   'Cardiology',
@@ -592,7 +593,9 @@ function LandingPage() {
                 <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-300">
                   <span className="rounded-full bg-slate-800 px-3 py-1">{doctor.availability}</span>
                   <span className="rounded-full bg-slate-800 px-3 py-1">Rating {doctor.rating}</span>
-                  <span className="rounded-full bg-slate-800 px-3 py-1">${doctor.fee}/consult</span>
+                  <span className="rounded-full bg-slate-800 px-3 py-1">
+                    {getFairConsultationTokens(doctor, 'basic')} tokens / ${consultationTokensToUsd(getFairConsultationTokens(doctor, 'basic'))}
+                  </span>
                 </div>
                 <div className="mt-6 flex gap-3">
                   <button
@@ -682,7 +685,9 @@ function LandingPage() {
               <p className="text-sm text-slate-600">Specialty: {selectedDoctor.specialty}</p>
               <p className="text-sm text-slate-600">Sex: {getGenderLabel(selectedDoctor)}</p>
               <p className="text-sm text-slate-600">Location: {selectedDoctor.location}</p>
-              <p className="mt-2 text-lg font-semibold text-slate-900">${selectedDoctor.fee}</p>
+              <p className="mt-2 text-lg font-semibold text-slate-900">
+                {getFairConsultationTokens(selectedDoctor, 'basic')} tokens / ${consultationTokensToUsd(getFairConsultationTokens(selectedDoctor, 'basic'))}
+              </p>
               <p className="mt-2 text-xs text-slate-500">Continue to the patient portal to sign in, confirm tokens, and complete the booking safely.</p>
             </div>
             <form onSubmit={handlePayment} className="mt-6 space-y-4">
