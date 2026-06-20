@@ -44,6 +44,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   const makingOfferRef = useRef(false)
   const ignoreOfferRef = useRef(false)
   const callStartedRef = useRef(false)
+  const callStartedAtRef = useRef(null)
   const remoteAudioMutedRef = useRef(true)
   const [callStarted, setCallStarted] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -658,6 +659,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
       await loadIceServers()
       await createPeer()
       callStartedRef.current = true
+      callStartedAtRef.current = callStartedAtRef.current || Date.now()
       setCallStarted(true)
       await sendSignal('ready', {
         readyAt: new Date().toISOString(),
@@ -697,6 +699,7 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
     setCallStarted(false)
     callStartedRef.current = false
+    callStartedAtRef.current = null
     setAudioMuted(false)
     setRemoteAudioMuted(true)
     remoteAudioMutedRef.current = true
@@ -705,8 +708,12 @@ function VideoChatPanel({ consultationId, userId, userType, patientId, doctorId,
   }
 
   const handleManualEndCall = () => {
+    const elapsedSeconds = callStartedAtRef.current
+      ? Math.max(0, Math.ceil((Date.now() - callStartedAtRef.current) / 1000))
+      : 0
+    const elapsedMinutes = elapsedSeconds > 0 ? Math.ceil(elapsedSeconds / 60) : 0
     endCall()
-    onEndCall?.()
+    onEndCall?.({ elapsedMinutes, elapsedSeconds })
   }
 
   useEffect(() => {

@@ -394,9 +394,10 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
     return <DoctorSelection patient={patient} onDoctorSelected={handleDoctorSelected} onInstantConsultation={handleInstantConsultation} />
   }
 
-  const handlePatientEndCall = async () => {
+  const handlePatientEndCall = async (callMeta = {}) => {
     if (!activeConsultationId) return
     try {
+      const elapsedMinutes = Number(callMeta?.elapsedMinutes)
       const response = await apiFetch('/api/consultations/end', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -404,6 +405,7 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
           consultationId: activeConsultationId,
           patientId: patient.id,
           actionProof: activeConsultation?.action_proof,
+          durationMin: Number.isFinite(elapsedMinutes) ? elapsedMinutes : activeConsultation?.duration_min,
         }),
       })
       const data = await readApiJson(response)
@@ -412,7 +414,9 @@ function PatientDashboard({ logoutSignal = 0, onLoggedOut, onSessionChange }) {
         String(item.id) === String(activeConsultationId) ? { ...item, status: 'completed' } : item
       )))
       setRatingRefreshSignal((value) => value + 1)
-      addError('Consultation completed. Please rate your doctor.', 'success')
+      await refreshPatientTokens(patient.id).catch(() => null)
+      const refunded = Number(data.consultation?.patient_tokens_refunded || 0)
+      addError(refunded > 0 ? 'Consultation completed. ' + refunded + ' unused token(s) were refunded. Please rate your doctor.' : 'Consultation completed. Please rate your doctor.', 'success')
     } catch (error) {
       addError(error.message, 'error')
     }

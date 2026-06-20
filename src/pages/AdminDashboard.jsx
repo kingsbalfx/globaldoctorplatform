@@ -194,9 +194,10 @@ function AdminDashboard({ doctor, onLogout }) {
     setActiveTab('patients')
   }
 
-  const handleDoctorEndConsultation = async () => {
+  const handleDoctorEndConsultation = async (callMeta = {}) => {
     if (!selectedConsultation?.id || !doctor?.id) return
     try {
+      const elapsedMinutes = Number(callMeta?.elapsedMinutes)
       const response = await apiFetch('/api/consultations/end', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,7 +205,7 @@ function AdminDashboard({ doctor, onLogout }) {
           consultationId: selectedConsultation.id,
           doctorId: doctor.id,
           actionProof: selectedConsultation.action_proof,
-          durationMin: selectedConsultation.duration_min,
+          durationMin: Number.isFinite(elapsedMinutes) ? elapsedMinutes : selectedConsultation.duration_min,
         }),
       })
       const data = await readApiJson(response)

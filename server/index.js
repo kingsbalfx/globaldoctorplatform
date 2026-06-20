@@ -1489,7 +1489,7 @@ async function creditPatientTokens(patientId, amount, description = 'Token credi
     const transaction = await insertAdaptive('token_transactions', {
       id: generateId('txn'),
       patient_id: patientId,
-      transaction_type: 'purchase',
+      transaction_type: options.transactionType || 'purchase',
       amount: tokenAmount,
       description,
       reference: options.reference || null,
@@ -1501,6 +1501,49 @@ async function creditPatientTokens(patientId, amount, description = 'Token credi
   return newBalance
 }
 
+function calculateDirectConsultationProration({ consultation = {}, reservedTokens = 0, requestedDurationMin }) {
+  const plannedMinutes = Math.max(1, Math.round(Number(consultation.duration_min || 15) || 15))
+  const tokensReserved = Math.max(0, Math.round(Number(reservedTokens) || 0))
+  let actualMinutes = Number(requestedDurationMin)
+  if (!Number.isFinite(actualMinutes)) {
+    const createdAt = new Date(consultation.created_at || Date.now()).getTime()
+    actualMinutes = Number.isFinite(createdAt) ? (Date.now() - createdAt) / 60000 : plannedMinutes
+  }
+  const billableMinutes = Math.min(plannedMinutes, Math.max(0, Math.ceil(actualMinutes)))
+  const finalTokens = tokensReserved > 0
+    ? Math.min(tokensReserved, Math.ceil((tokensReserved * billableMinutes) / plannedMinutes))
+    : 0
+  return {
+    plannedMinutes,
+    billableMinutes,
+    reservedTokens: tokensReserved,
+    finalTokens,
+    refundTokens: Math.max(0, tokensReserved - finalTokens),
+    ratio: tokensReserved > 0 ? finalTokens / tokensReserved : billableMinutes / plannedMinutes,
+  }
+}
+
+function prorateDirectHomeSplit(split = {}, ratio = 1, durationMin = 15) {
+  const boundedRatio = Math.min(1, Math.max(0, Number(ratio) || 0))
+  const total = Math.round((Number(split.total_ngn) || 0) * boundedRatio)
+  const doctor = Math.round((Number(split.doctor_ngn) || 0) * boundedRatio)
+  const facility = Math.round((Number(split.facility_ngn) || 0) * boundedRatio)
+  const dataFee = Math.round((Number(split.data_fee_ngn) || 0) * boundedRatio)
+  const platform = Math.max(0, total - doctor - facility - dataFee)
+  return {
+    ...split,
+    durationMin: Math.max(0, Math.round(Number(durationMin) || 0)),
+    duration_min: Math.max(0, Math.round(Number(durationMin) || 0)),
+    blocks: Math.max(1, Number(split.blocks) || 1),
+    total_ngn: total,
+    patient_copay_ngn: total,
+    doctor_ngn: doctor,
+    facility_ngn: facility,
+    platform_ngn: platform,
+    data_fee_ngn: dataFee,
+    facility_topup_ngn: 0,
+  }
+}
 async function getDoctorProfile(id) {
   const profileResult = await supabase.from('doctors').select('*').eq('id', id).maybeSingle()
   if (profileResult.data) return profileResult.data
@@ -5788,8 +5831,56 @@ app.post('/api/consultations/end', async (req, res) => {
     .limit(1)
     .maybeSingle()
 
-  if (!existingSplit && split.channel === 'facility_phc' && consultation.facility_id) {
-    const debitResult = await debitFacilityWallet(consultation.facility_id, split.facility_topup_ngn, {
+  let effectiveSplit = split
+  let tokenProration = null
+  if (String(consultation.channel || '') === 'direct_home') {
+    const reservedTokens = Number(consultation.patient_tokens_charged || getFairConsultationTokens(doctor, consultation.track === 'premium' ? 'premium' : 'basic'))
+    tokenProration = calculateDirectConsultationProration({
+      consultation,
+      reservedTokens,
+      requestedDurationMin: durationMin,
+    })
+    effectiveSplit = prorateDirectHomeSplit(existingSplit || split, tokenProration.ratio, tokenProration.billableMinutes)
+    if (tokenProration.refundTokens > 0 && consultation.patient_id) {
+      await creditPatientTokens(
+        consultation.patient_id,
+        tokenProration.refundTokens,
+        `Automatic refund: ${tokenProration.plannedMinutes - tokenProration.billableMinutes} unused consultation minute(s)`,
+        {
+          transactionType: 'refund',
+          reference: `consult-refund-${consultationId}`,
+          metadata: {
+            consultationId,
+            reservedTokens: tokenProration.reservedTokens,
+            finalTokens: tokenProration.finalTokens,
+            refundTokens: tokenProration.refundTokens,
+            billableMinutes: tokenProration.billableMinutes,
+            plannedMinutes: tokenProration.plannedMinutes,
+          },
+        }
+      )
+    }
+    if (existingSplit) {
+      const doctorDeltaNgn = Math.max(0, Number(existingSplit.doctor_ngn || 0) - Number(effectiveSplit.doctor_ngn || 0))
+      const platformDeltaNgn = Math.max(0, Number(existingSplit.platform_ngn || 0) - Number(effectiveSplit.platform_ngn || 0))
+      const dataDeltaNgn = Math.max(0, Number(existingSplit.data_fee_ngn || 0) - Number(effectiveSplit.data_fee_ngn || 0))
+      if (doctorDeltaNgn > 0) await updateDoctorEarnings(consultation.doctor_id, -(await convertNgnToDoctorTokens(doctorDeltaNgn)))
+      if (platformDeltaNgn > 0 || dataDeltaNgn > 0) await updatePlatformBalance(-platformDeltaNgn, -dataDeltaNgn)
+      await updateAdaptive('revenue_splits_ng', {
+        total_ngn: effectiveSplit.total_ngn,
+        doctor_ngn: effectiveSplit.doctor_ngn,
+        platform_ngn: effectiveSplit.platform_ngn,
+        facility_ngn: effectiveSplit.facility_ngn || 0,
+        data_fee_ngn: effectiveSplit.data_fee_ngn || 0,
+        patient_copay_ngn: effectiveSplit.patient_copay_ngn || 0,
+        facility_topup_ngn: effectiveSplit.facility_topup_ngn || 0,
+      }, (query) => query.eq('id', existingSplit.id), { select: null, maybeSingle: false })
+      Object.assign(existingSplit, effectiveSplit)
+    }
+  }
+
+  if (!existingSplit && effectiveSplit.channel === 'facility_phc' && consultation.facility_id) {
+    const debitResult = await debitFacilityWallet(consultation.facility_id, effectiveSplit.facility_topup_ngn, {
       reason: 'PHC consult topup funding',
       ref_type: 'consultation',
       ref_id: consultationId
@@ -5803,36 +5894,41 @@ app.post('/api/consultations/end', async (req, res) => {
     }
   }
 
-  if (!existingSplit && consultation.facility_id && split.facility_ngn > 0) {
-    await creditFacilityWallet(consultation.facility_id, split.facility_ngn, {
+  if (!existingSplit && consultation.facility_id && effectiveSplit.facility_ngn > 0) {
+    await creditFacilityWallet(consultation.facility_id, effectiveSplit.facility_ngn, {
       reason: 'Facility share from consultation',
       ref_type: 'consultation', ref_id: consultationId
     })
   }
 
-  if (!existingSplit && split.doctor_ngn > 0) {
-    await updateDoctorEarnings(consultation.doctor_id, await convertNgnToDoctorTokens(split.doctor_ngn))
+  if (!existingSplit && effectiveSplit.doctor_ngn > 0) {
+    await updateDoctorEarnings(consultation.doctor_id, await convertNgnToDoctorTokens(effectiveSplit.doctor_ngn))
   }
 
-  const platformDelta = split.platform_ngn || 0
-  const dataDelta = split.data_fee_ngn || 0
+  const platformDelta = effectiveSplit.platform_ngn || 0
+  const dataDelta = effectiveSplit.data_fee_ngn || 0
   if (!existingSplit) await updatePlatformBalance(platformDelta, dataDelta)
 
   const revenueSplit = existingSplit || {
     id: generateId('rsng'),
     consultation_id: consultationId,
-    channel: split.channel, track: split.track,
-    total_ngn: split.total_ngn, doctor_ngn: split.doctor_ngn, platform_ngn: split.platform_ngn,
-    facility_ngn: split.facility_ngn || 0, data_fee_ngn: split.data_fee_ngn || 0,
-    patient_copay_ngn: split.patient_copay_ngn || 0, facility_topup_ngn: split.facility_topup_ngn || 0,
+    channel: effectiveSplit.channel, track: effectiveSplit.track,
+    total_ngn: effectiveSplit.total_ngn, doctor_ngn: effectiveSplit.doctor_ngn, platform_ngn: effectiveSplit.platform_ngn,
+    facility_ngn: effectiveSplit.facility_ngn || 0, data_fee_ngn: effectiveSplit.data_fee_ngn || 0,
+    patient_copay_ngn: effectiveSplit.patient_copay_ngn || 0, facility_topup_ngn: effectiveSplit.facility_topup_ngn || 0,
     created_at: new Date().toISOString()
   }
   if (!existingSplit) await supabase.from('revenue_splits_ng').insert(revenueSplit)
 
-  await supabase.from('consultations_ng').update({
-    status: 'completed', duration_min: split.durationMin, blocks: split.blocks,
-    total_ngn: split.total_ngn, completed_at: new Date().toISOString()
-  }).eq('id', consultationId)
+  await updateAdaptive('consultations_ng', {
+    status: 'completed',
+    duration_min: effectiveSplit.durationMin,
+    blocks: effectiveSplit.blocks,
+    total_ngn: effectiveSplit.total_ngn,
+    patient_tokens_charged: tokenProration ? tokenProration.finalTokens : consultation.patient_tokens_charged,
+    patient_tokens_refunded: tokenProration ? tokenProration.refundTokens : null,
+    completed_at: new Date().toISOString(),
+  }, (query) => query.eq('id', consultationId), { select: null, maybeSingle: false })
 
   const completedAt = new Date().toISOString()
   await Promise.all([
@@ -5868,7 +5964,14 @@ app.post('/api/consultations/end', async (req, res) => {
 
   const currentBalances = await getPlatformBalances()
   res.json({
-    consultation: { ...consultation, status: 'completed', ...split },
+    consultation: {
+      ...consultation,
+      status: 'completed',
+      ...effectiveSplit,
+      patient_tokens_charged: tokenProration ? tokenProration.finalTokens : consultation.patient_tokens_charged,
+      patient_tokens_refunded: tokenProration ? tokenProration.refundTokens : 0,
+      billable_minutes: tokenProration ? tokenProration.billableMinutes : effectiveSplit.durationMin,
+    },
     split: revenueSplit,
     ledgers: { platformBalanceNgn: currentBalances.platformBalanceNgn, dataFundBalanceNgn: currentBalances.dataFundBalanceNgn },
     ratingRequired: true,

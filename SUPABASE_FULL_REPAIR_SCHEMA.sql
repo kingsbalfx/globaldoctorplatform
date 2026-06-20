@@ -379,6 +379,7 @@ CREATE TABLE IF NOT EXISTS public.consultations_ng (
   blocks integer DEFAULT 1,
   total_ngn integer DEFAULT 0,
   patient_tokens_charged integer DEFAULT 0,
+  patient_tokens_refunded integer DEFAULT 0,
   status text DEFAULT 'in_progress',
   completed_at timestamptz,
   created_at timestamptz DEFAULT now(),
@@ -943,6 +944,7 @@ ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS duration_min intege
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS blocks integer DEFAULT 1;
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS total_ngn integer DEFAULT 0;
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS patient_tokens_charged integer DEFAULT 0;
+ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS patient_tokens_refunded integer DEFAULT 0;
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS status text DEFAULT 'in_progress';
 ALTER TABLE public.consultations_ng ADD COLUMN IF NOT EXISTS completed_at timestamptz;
 
