@@ -1,16 +1,12 @@
-import { useState } from 'react'
 import Footer from '../components/Footer'
 
 function TermsOfService({ onNavigate }) {
-  const [currentView, setCurrentView] = useState('landing')
-
   const handleBackToHome = () => {
     onNavigate('landing')
   }
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
       <header className="bg-white shadow-sm border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 py-4 sm:px-8">
           <div className="flex items-center justify-between">
@@ -18,264 +14,105 @@ function TermsOfService({ onNavigate }) {
               <img src="/logo.png" alt="GlobalDoc Connect logo" className="h-8 w-8 rounded-full" />
               <span className="text-xl font-bold text-brand-700">GlobalDoc Connect</span>
             </div>
-            <button
-              onClick={handleBackToHome}
-              className="text-brand-700 hover:text-brand-600 font-medium"
-            >
-              ← Back to Home
-            </button>
+            <button onClick={handleBackToHome} className="text-brand-700 hover:text-brand-600 font-medium">← Back to Home</button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-4xl mx-auto px-6 py-12 sm:px-8">
         <div className="bg-white rounded-2xl shadow-lg p-8 md:p-12">
-          <h1 className="text-3xl font-bold text-slate-900 mb-8 text-center">
-            Terms of Service
-          </h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-4 text-center">Terms of Service</h1>
+          <p className="text-slate-600 mb-8 text-center"><strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
 
-          <div className="prose prose-slate max-w-none">
-            <p className="text-slate-600 mb-8 text-center">
-              <strong>Last Updated:</strong> {new Date().toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-              })}
-            </p>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">1. Introduction</h2>
-              <p className="text-slate-700 mb-4">
-                Welcome to GlobalDoc Connect ("our"). These Terms of Service ("Terms") govern your use of our telehealth platform that connects patients with healthcare professionals worldwide. By accessing or using our services, you agree to be bound by these Terms.
-              </p>
-              <p className="text-slate-700 mb-4">
-                Our platform provides secure video consultations, emergency medical support, appointment scheduling, payment processing, and related healthcare services. Our team is committed to maintaining the highest standards of medical care, privacy, and security.
-              </p>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">2. Definitions</h2>
-              <ul className="list-disc pl-6 text-slate-700 space-y-2">
-                <li><strong>"Platform"</strong> means the GlobalDoc Connect website, mobile applications, and related services.</li>
-                <li><strong>"Patient"</strong> means any individual seeking medical consultation or healthcare services through our platform.</li>
-                <li><strong>"Healthcare Professional" or "Doctor"</strong> means licensed medical practitioners who provide services through our platform.</li>
-                <li><strong>"Consultation"</strong> means video calls, chat sessions, or other forms of medical communication between patients and healthcare professionals.</li>
-                <li><strong>"Emergency Services"</strong> means urgent medical care provided through our 24/7 emergency support system.</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">3. User Eligibility</h2>
-              <h3 className="text-xl font-medium text-slate-800 mb-3">For Patients:</h3>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>You must be at least 18 years old or have parental/guardian consent</li>
-                <li>You must provide accurate and complete medical information</li>
-                <li>You must have access to necessary technology for video consultations</li>
-                <li>You must be located in a jurisdiction where telehealth services are permitted</li>
-              </ul>
-
-              <h3 className="text-xl font-medium text-slate-800 mb-3">For Healthcare Professionals:</h3>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>You must hold a valid medical license in your jurisdiction</li>
-                <li>You must provide proof of credentials and malpractice insurance</li>
-                <li>You must maintain patient confidentiality and follow medical ethics</li>
-                <li>You must complete our verification and training process</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">4. Services Provided</h2>
-              <h3 className="text-xl font-medium text-slate-800 mb-3">Patient Services:</h3>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Search and connect with verified healthcare professionals</li>
-                <li>Schedule video consultations and appointments</li>
-                <li>Secure payment processing for medical services</li>
-                <li>Access to medical records and consultation history</li>
-                <li>24/7 emergency medical support</li>
-                <li>Multi-language support (English, Arabic, Swahili, Hindi, French, Spanish)</li>
-              </ul>
-
-              <h3 className="text-xl font-medium text-slate-800 mb-3">Healthcare Professional Services:</h3>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Access to global patient base</li>
-                <li>Secure consultation platform</li>
-                <li>Payment processing and fee collection</li>
-                <li>Patient record management</li>
-                <li>Emergency consultation support</li>
-                <li>Continuing medical education resources</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">5. Payment Terms</h2>
-              <p className="text-slate-700 mb-4">
-                All fees for medical consultations are clearly displayed before booking. Payments are processed securely through Stripe and other certified payment processors.
-              </p>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Consultation fees are charged per session or package</li>
-                <li>Emergency consultations may have different pricing</li>
-                <li>Refunds are available within 24 hours for cancelled appointments</li>
-                <li>Healthcare professionals receive 70-80% of consultation fees after platform fees</li>
-                <li>All payments are in USD or local currency equivalents</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">6. Medical Disclaimer</h2>
-              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
-                <p className="text-yellow-800 font-medium">Important Medical Notice:</p>
-                <p className="text-yellow-800">
-                  Our platform facilitates telehealth consultations but does not replace emergency medical care. In case of medical emergencies, please call your local emergency services immediately.
-                </p>
-              </div>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Telehealth consultations are not appropriate for all medical conditions</li>
-                <li>Healthcare professionals may decline to provide care based on medical judgment</li>
-                <li>You are responsible for providing complete and accurate medical information</li>
-                <li>Follow-up care may be recommended for complex medical issues</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">7. Privacy and Data Protection</h2>
-              <p className="text-slate-700 mb-4">
-                Your privacy is our top priority. All medical consultations are encrypted and confidential. Please refer to our Privacy Policy for detailed information about data handling.
-              </p>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>All consultations use end-to-end encryption</li>
-                <li>Medical records are stored securely and access is restricted</li>
-                <li>Our platform complies with HIPAA and international privacy regulations</li>
-                <li>You control access to your medical information</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">8. User Responsibilities</h2>
-              <h3 className="text-xl font-medium text-slate-800 mb-3">All Users:</h3>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Maintain accurate account information</li>
-                <li>Use the platform only for lawful medical purposes</li>
-                <li>Respect the privacy and dignity of other users</li>
-                <li>Report any technical issues or inappropriate behavior</li>
-                <li>Keep login credentials secure and confidential</li>
-              </ul>
-
-              <h3 className="text-xl font-medium text-slate-800 mb-3">Patients:</h3>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Provide complete medical history and current symptoms</li>
-                <li>Follow healthcare professional recommendations</li>
-                <li>Attend scheduled appointments or cancel in advance</li>
-                <li>Rate and review consultations honestly</li>
-              </ul>
-
-              <h3 className="text-xl font-medium text-slate-800 mb-3">Healthcare Professionals:</h3>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Maintain professional standards and ethics</li>
-                <li>Provide accurate medical advice based on available information</li>
-                <li>Document consultations appropriately</li>
-                <li>Respond to patient inquiries in a timely manner</li>
-                <li>Maintain current medical licensure</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">9. Prohibited Activities</h2>
-              <p className="text-slate-700 mb-4">The following activities are strictly prohibited:</p>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Using the platform for non-medical purposes</li>
-                <li>Sharing false or misleading medical information</li>
-                <li>Harassing or abusing other users</li>
-                <li>Attempting to access other users' accounts</li>
-                <li>Violating medical privacy or confidentiality</li>
-                <li>Practicing medicine without proper licensure</li>
-                <li>Discriminating against patients based on race, religion, or background</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">10. Account Termination</h2>
-              <p className="text-slate-700 mb-4">
-                Our platform reserves the right to suspend or terminate accounts that violate these Terms or engage in harmful behavior. Termination may result in loss of access to medical records and services.
-              </p>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Immediate termination for serious violations</li>
-                <li>Written notice for minor violations with opportunity to correct</li>
-                <li>Appeal process available for disputed terminations</li>
-                <li>Data export available upon reasonable request</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">11. Limitation of Liability</h2>
-              <p className="text-slate-700 mb-4">
-                While our platform strives to provide reliable telehealth services, healthcare involves inherent risks. Our liability is limited to the amount paid for services in the preceding 12 months.
-              </p>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Our platform is not liable for medical outcomes or treatment effectiveness</li>
-                <li>Platform availability is provided "as is" without warranties</li>
-                <li>Users assume responsibility for technology requirements</li>
-                <li>Disputes between patients and healthcare professionals are handled separately</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">12. Dispute Resolution</h2>
-              <p className="text-slate-700 mb-4">
-                Our team encourages users to resolve disputes amicably. For unresolved issues:
-              </p>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Contact support at globaldoctorconnect@gmail.com</li>
-                <li>Medical disputes may involve independent review</li>
-                <li>Payment disputes are handled through our payment processor</li>
-                <li>Legal disputes will be resolved in competent courts</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">13. Updates to Terms</h2>
-              <p className="text-slate-700 mb-4">
-                Our team may update these Terms periodically to reflect changes in our services or legal requirements. Users will be notified of significant changes via email or platform notifications.
-              </p>
-              <ul className="list-disc pl-6 text-slate-700 mb-4 space-y-1">
-                <li>Continued use constitutes acceptance of updated Terms</li>
-                <li>Major changes require explicit user consent</li>
-                <li>Previous versions remain accessible for reference</li>
-              </ul>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">14. Contact Information</h2>
-              <p className="text-slate-700 mb-4">
-                For questions about these Terms or our services:
-              </p>
-              <div className="bg-slate-50 p-4 rounded-lg">
-                <p className="text-slate-700"><strong>Email:</strong> globaldoctorconnect@gmail.com</p>
-                <p className="text-slate-700"><strong>Emergency Support:</strong> Available 24/7</p>
-                <p className="text-slate-700"><strong>Address:</strong> GlobalDoc Connect, Telehealth Services Worldwide</p>
-              </div>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-4">15. Governing Law</h2>
-              <p className="text-slate-700 mb-4">
-                These Terms are governed by international healthcare standards and applicable local laws. Users are responsible for complying with laws in their jurisdiction.
-              </p>
-            </section>
-
-            <div className="bg-blue-50 border-l-4 border-blue-400 p-6 mt-8">
-              <h3 className="text-lg font-semibold text-blue-900 mb-2">Acknowledgment</h3>
-              <p className="text-blue-800">
-                By using GlobalDoc Connect, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use our platform.
-              </p>
-              <p className="text-blue-800 mt-2">
-                Remember: Your health and privacy are our top priorities. Our platform connects you with quality healthcare professionals worldwide.
-              </p>
-            </div>
+          <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-8">
+            <p className="font-semibold text-amber-900">Important medical and regulatory notice</p>
+            <p className="mt-2 text-amber-900">GlobalDoc Connect is a telehealth technology platform. It is not a hospital, emergency ambulance service, pharmacy, insurer, or regulator. Medical decisions, prescriptions, diagnoses, and treatment plans must be made by licensed healthcare professionals acting within the scope of their licence and the laws of the patient’s location.</p>
           </div>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">1. Acceptance of these Terms</h2>
+            <p>These Terms govern access to the GlobalDoc Connect website, applications, dashboards, telehealth workflows, support tools, payment flows, and related services. By using the platform, you agree to these Terms and any additional consent forms, clinical policies, privacy notices, or professional agreements that apply to your role.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">2. Platform role</h2>
+            <p>GlobalDoc Connect provides software for patient intake, appointment coordination, secure communication, health records, doctor consultation support, clinical documentation, facility workflows, and administrative support. The platform does not itself practise medicine.</p>
+            <p>Healthcare professionals are independent professionals or authorised facility users. They are responsible for their own clinical judgment, licensing, documentation, patient communication, prescriptions, follow-up instructions, and compliance with professional rules.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">3. Emergency limitations</h2>
+            <p>The platform is not a replacement for local emergency services. If a user may be facing an emergency, life-threatening symptom, severe injury, severe allergic reaction, loss of consciousness, chest pain, difficulty breathing, stroke-like symptom, severe bleeding, poisoning, overdose, or risk of self-harm, the user must contact local emergency services or go to the nearest emergency facility immediately.</p>
+            <p>AI tools, support agents, facility users, and online clinicians may provide routing guidance, but they cannot guarantee emergency response time or replace emergency care.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">4. Healthcare professional requirements</h2>
+            <ul className="list-disc pl-6 space-y-2">
+              <li>Doctors and clinical users must hold valid licences, registrations, and permissions required in each jurisdiction where they provide care.</li>
+              <li>Professionals must provide truthful credential information and keep licences, malpractice/indemnity cover, and practice details current.</li>
+              <li>Professionals must decline or refer cases that cannot safely be handled by telehealth.</li>
+              <li>Professionals must document consultations appropriately and protect patient confidentiality.</li>
+              <li>Professionals must comply with applicable medical, pharmacy, laboratory, health facility, consumer protection, advertising, and data protection laws.</li>
+            </ul>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">5. Patient responsibilities</h2>
+            <ul className="list-disc pl-6 space-y-2">
+              <li>Patients must provide accurate identity, contact, symptom, medication, allergy, pregnancy, medical history, and emergency contact information.</li>
+              <li>Patients must not rely on AI summaries or platform content as a final diagnosis or treatment decision.</li>
+              <li>Patients must seek in-person or emergency care when advised or when symptoms are severe.</li>
+              <li>Patients must use prescriptions, lab requests, and care instructions only as issued by authorised clinicians.</li>
+            </ul>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">6. AI and automation limits</h2>
+            <p>AI features may help with intake, translation support, routing, support summaries, symptom summaries, doctor-facing summaries, and administrative assistance. AI must not be treated as a doctor, final diagnosis, prescription authority, or emergency responder. All clinical outputs require review by a qualified human professional.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">7. Payments, refunds, and professional fees</h2>
+            <p>Fees are shown before payment where applicable. Payments may be processed through approved payment partners available in the user’s country. Refunds, cancellations, chargebacks, taxes, and professional payouts may vary by country, payment provider, and facility agreement.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">8. Privacy and health data</h2>
+            <p>Use of the platform involves personal information and health information. Users must review the Privacy Policy and any consent forms before using clinical workflows. Access to health data is role-restricted and should be used only for legitimate care, support, compliance, billing, or safety purposes.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">9. Prohibited uses</h2>
+            <ul className="list-disc pl-6 space-y-2">
+              <li>Practising medicine, pharmacy, laboratory services, or facility operations without proper authority.</li>
+              <li>Uploading false documents, forged licences, fake identities, or misleading medical records.</li>
+              <li>Using the platform for unlawful prescribing, controlled substances, fraud, harassment, spam, or exploitation.</li>
+              <li>Attempting to bypass access controls, view another user’s records, or misuse support/document uploads.</li>
+            </ul>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">10. Suspension and termination</h2>
+            <p>GlobalDoc Connect may suspend or terminate access for safety, suspected fraud, unauthorised clinical practice, data misuse, non-payment, legal risk, or violation of these Terms. Where legally required, medical records and data requests will be handled according to applicable retention and data protection rules.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">11. No guarantee of outcome</h2>
+            <p>Healthcare involves uncertainty. The platform does not guarantee diagnosis, cure, availability of any specific doctor, treatment outcome, prescription approval, refund approval, or emergency response. Clinical responsibility remains with the treating professional and facility where applicable.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">12. Governing law and country rules</h2>
+            <p>These Terms are designed for a global telehealth platform. Local laws may require additional terms, permits, facility approvals, data registrations, clinical licences, or patient notices. Where local law conflicts with these Terms, local mandatory law controls for users in that location.</p>
+          </section>
+
+          <section className="mb-8 space-y-4 text-slate-700">
+            <h2 className="text-2xl font-semibold text-slate-900">13. Contact</h2>
+            <p>Questions about these Terms, clinical safety, data protection, or support requests may be sent to globaldoctorconnect@gmail.com.</p>
+          </section>
         </div>
       </main>
-
       <Footer onNavigate={onNavigate} />
     </div>
   )
