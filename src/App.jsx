@@ -12,6 +12,7 @@ const PlatformAdminDashboard = lazy(() => import('./pages/PlatformAdminDashboard
 const SupportDashboard = lazy(() => import('./pages/SupportDashboard'))
 const RequestTracker = lazy(() => import('./pages/RequestTracker'))
 const AdvancedHealthOS = lazy(() => import('./pages/AdvancedHealthOS'))
+const ClinicalSafetyOS = lazy(() => import('./pages/ClinicalSafetyOS'))
 const FacilityPortal = lazy(() => import('./pages/FacilityPortal'))
 const AuthCallback = lazy(() => import('./pages/AuthCallback'))
 const PaymentSuccess = lazy(() => import('./pages/PaymentSuccess'))
@@ -25,6 +26,7 @@ function viewFromPath(pathname) {
   const path = String(pathname || '/')
   if (path === '/' || path === '') return 'landing'
   if (path.startsWith('/request-tracker')) return 'request-tracker'
+  if (path.startsWith('/clinical-safety')) return 'clinical-safety'
   if (path.startsWith('/health-os')) return 'health-os'
   if (path.startsWith('/patient')) return 'patient'
   if (path.startsWith('/doctor/dashboard')) return 'admin'
@@ -59,6 +61,8 @@ function pathFromView(view) {
       return '/request-tracker'
     case 'health-os':
       return '/health-os'
+    case 'clinical-safety':
+      return '/clinical-safety'
     case 'auth-callback':
       return '/auth/callback'
     case 'payment-success':
@@ -78,7 +82,7 @@ function pathFromView(view) {
 }
 
 function portalFromView(view) {
-  if (view === 'platform-admin' || view === 'platform-admin-support' || view === 'health-os') return ''
+  if (view === 'platform-admin' || view === 'platform-admin-support' || view === 'health-os' || view === 'clinical-safety') return ''
   if (view === 'patient' || view === 'payment-success') return 'patient'
   if (view === 'doctor-auth' || view === 'admin') return 'doctor'
   if (view === 'facility') return 'facility'
@@ -129,7 +133,7 @@ function App() {
   const navigate = (view) => {
     const nextView = viewFromPath(pathFromView(view))
     const nextPortal = portalFromView(nextView)
-    if (nextView === 'platform-admin' || nextView === 'platform-admin-support' || nextView === 'health-os') {
+    if (nextView === 'platform-admin' || nextView === 'platform-admin-support' || nextView === 'health-os' || nextView === 'clinical-safety') {
       setCurrentView(nextView)
       try {
         const nextPath = pathFromView(nextView)
@@ -157,7 +161,7 @@ function App() {
     const handler = () => {
       const nextView = viewFromPath(window.location.pathname)
       const nextPortal = portalFromView(nextView)
-      if (nextView === 'platform-admin' || nextView === 'platform-admin-support' || nextView === 'health-os') {
+      if (nextView === 'platform-admin' || nextView === 'platform-admin-support' || nextView === 'health-os' || nextView === 'clinical-safety') {
         setCurrentView(nextView)
         return
       }
@@ -176,7 +180,7 @@ function App() {
 
   useEffect(() => {
     if (!activePortal) return
-    if (currentView === 'platform-admin' || currentView === 'platform-admin-support' || currentView === 'health-os') return
+    if (currentView === 'platform-admin' || currentView === 'platform-admin-support' || currentView === 'health-os' || currentView === 'clinical-safety') return
     if (portalFromView(currentView) === activePortal) return
     const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
     setCurrentView(fallbackView)
@@ -209,7 +213,7 @@ function App() {
   useEffect(() => {
     if (!authDoctor?.id) return
     if (activePortal !== 'doctor') setPortalSession('doctor')
-    if (currentView !== 'admin' && currentView !== 'doctor-auth' && currentView !== 'health-os') {
+    if (currentView !== 'admin' && currentView !== 'doctor-auth' && currentView !== 'health-os' && currentView !== 'clinical-safety') {
       setCurrentView('admin')
       try {
         window.history.replaceState({ view: 'admin' }, '', '/doctor/dashboard')
@@ -383,18 +387,21 @@ function App() {
               <button onClick={() => navigate('doctor-auth')} className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}>Doctor Portal</button>
               <button onClick={() => navigate('facility')} className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}>Facility Portal</button>
               <button onClick={() => navigate('health-os')} className={`hover:text-brand-700 ${currentView === 'health-os' ? 'text-brand-700' : ''}`}>Health OS</button>
+              <button onClick={() => navigate('clinical-safety')} className={`hover:text-brand-700 ${currentView === 'clinical-safety' ? 'text-brand-700' : ''}`}>Clinical Safety</button>
             </>
           )}
           {activePortal === 'patient' && (
             <>
               <button onClick={() => navigate('patient')} className={`font-semibold ${currentView === 'patient' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Portal</button>
               <button onClick={() => navigate('health-os')} className={`font-semibold ${currentView === 'health-os' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Health OS</button>
+              <button onClick={() => navigate('clinical-safety')} className={`font-semibold ${currentView === 'clinical-safety' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Clinical Safety</button>
             </>
           )}
           {activePortal === 'doctor' && (
             <>
               <button onClick={() => navigate(authDoctor ? 'admin' : 'doctor-auth')} className={`font-semibold ${currentView === 'admin' || currentView === 'doctor-auth' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Doctor Portal</button>
               <button onClick={() => navigate('health-os')} className={`font-semibold ${currentView === 'health-os' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Health OS</button>
+              <button onClick={() => navigate('clinical-safety')} className={`font-semibold ${currentView === 'clinical-safety' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Clinical Safety</button>
             </>
           )}
           {activePortal === 'facility' && (
@@ -416,6 +423,7 @@ function App() {
         {currentView === 'landing' && <LandingPageEnhanced />}
         {currentView === 'request-tracker' && <RequestTracker />}
         {currentView === 'health-os' && <AdvancedHealthOS />}
+        {currentView === 'clinical-safety' && <ClinicalSafetyOS />}
         {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
         {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
         {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
