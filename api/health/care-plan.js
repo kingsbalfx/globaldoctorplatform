@@ -79,7 +79,7 @@ export default async function handler(req, res) {
       event_at: now,
       metadata: { diagnosis: plan.diagnosis, taskCount: tasks.length },
       created_at: now,
-    }).catch?.(() => null)
+    }).then(() => null, () => null)
 
     await tryAudit(supabase, {
       actorId: plan.created_by_id,
