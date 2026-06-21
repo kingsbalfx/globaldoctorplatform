@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GlobalDoc Operations OS</title>
   <style>
-    body{font-family:Inter,Arial,sans-serif;background:#f8fafc;margin:0;color:#0f172a}main{max-width:1100px;margin:0 auto;padding:32px 18px}.hero{background:#020617;color:#fff;border-radius:30px;padding:32px;box-shadow:0 20px 60px #0f172a33}.grid{display:grid;gap:18px;margin-top:24px}@media(min-width:900px){.grid{grid-template-columns:repeat(3,1fr)}}.card{background:#fff;border:1px solid #e2e8f0;border-radius:24px;padding:20px;box-shadow:0 10px 30px #64748b22}input,textarea,select,button{width:100%;box-sizing:border-box;border-radius:16px;padding:13px 14px;border:1px solid #cbd5e1;margin-top:10px;font:inherit}button{border:0;background:#0f766e;color:#fff;font-weight:800;cursor:pointer}.dark{background:#0f172a}.blue{background:#1d4ed8}.amber{background:#d97706}.slate{background:#0f172a}.msg{margin-top:18px;border-radius:18px;padding:14px;font-weight:700}.ok{background:#dcfce7;color:#166534}.err{background:#fee2e2;color:#991b1b}pre{white-space:pre-wrap;overflow:auto;background:#020617;color:#e2e8f0;border-radius:24px;padding:18px;margin-top:24px;max-height:460px}.top{display:flex;gap:12px;align-items:center;margin-bottom:20px}.top img{width:42px;height:42px;border-radius:999px;object-fit:cover}.pill{display:inline-block;background:#ffffff1a;border-radius:999px;padding:8px 12px;font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase}</style>
+    body{font-family:Inter,Arial,sans-serif;background:#f8fafc;margin:0;color:#0f172a}main{max-width:1100px;margin:0 auto;padding:32px 18px}.hero{background:#020617;color:#fff;border-radius:30px;padding:32px;box-shadow:0 20px 60px #0f172a33}.grid{display:grid;gap:18px;margin-top:24px}@media(min-width:900px){.grid{grid-template-columns:repeat(3,1fr)}}.card{background:#fff;border:1px solid #e2e8f0;border-radius:24px;padding:20px;box-shadow:0 10px 30px #64748b22}input,textarea,button{width:100%;box-sizing:border-box;border-radius:16px;padding:13px 14px;border:1px solid #cbd5e1;margin-top:10px;font:inherit}button{border:0;background:#0f766e;color:#fff;font-weight:800;cursor:pointer}.blue{background:#1d4ed8}.amber{background:#d97706}.slate{background:#0f172a}.msg{margin-top:18px;border-radius:18px;padding:14px;font-weight:700}.ok{background:#dcfce7;color:#166534}.err{background:#fee2e2;color:#991b1b}pre{white-space:pre-wrap;overflow:auto;background:#020617;color:#e2e8f0;border-radius:24px;padding:18px;margin-top:24px;max-height:460px}.top{display:flex;gap:12px;align-items:center;margin-bottom:20px}.top img{width:42px;height:42px;border-radius:999px;object-fit:cover}.pill{display:inline-block;background:#ffffff1a;border-radius:999px;padding:8px 12px;font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase}</style>
 </head>
 <body>
 <main>
@@ -21,16 +21,17 @@
   <pre id="output" style="display:none"></pre>
 </main>
 <script>
-const $ = (id) => document.getElementById(id);
-function show(type, text){ const n=$('notice'); n.style.display='block'; n.className='msg '+type; n.textContent=text; }
-function out(data){ const o=$('output'); o.style.display='block'; o.textContent=JSON.stringify(data,null,2); if(data.patientCode) $('patientCode').value=data.patientCode; }
-async function call(body){ try{ show('ok','Working...'); const r=await fetch('/api/operations/hospital',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const d=await r.json(); if(!r.ok) throw new Error(d.error||'Failed'); show('ok',d.message||'Saved'); out(d); }catch(e){ show('err',e.message||'Failed'); } }
-async function loadOps(){ try{ const q=new URLSearchParams(); if($('facilityId').value) q.set('facilityId',$('facilityId').value); if($('patientCode').value) q.set('patientCode',$('patientCode').value); const r=await fetch('/api/operations/hospital?'+q.toString()); const d=await r.json(); if(!r.ok) throw new Error(d.error||'Could not load'); show('ok','Loaded'); out(d); }catch(e){ show('err',e.message||'Could not load'); } }
-function createPatient(){ call({module:'phc_patient',facilityId:$('facilityId').value,fullName:$('fullName').value,pin:$('pin').value,consentGiven:true}); }
-function addQueue(){ call({module:'queue',facilityId:$('facilityId').value,patientCode:$('patientCode').value,reason:$('reason').value,queueType:'triage',priority:'normal'}); }
-function addReferral(){ call({module:'referral',fromFacilityId:$('facilityId').value,patientCode:$('patientCode').value,reason:$('reason').value,urgency:'routine'}); }
-function addPharmacy(){ call({module:'pharmacy',facilityId:$('facilityId').value,patientCode:$('patientCode').value,medicineName:$('itemName').value,quantity:'1'}); }
-function addLab(){ call({module:'lab_workflow',facilityId:$('facilityId').value,patientCode:$('patientCode').value,testName:$('itemName').value,status:'requested'}); }
+const API='/api/clinical/medication-orders';
+const $=(id)=>document.getElementById(id);
+function show(type,text){const n=$('notice');n.style.display='block';n.className='msg '+type;n.textContent=text;}
+function out(data){const o=$('output');o.style.display='block';o.textContent=JSON.stringify(data,null,2);if(data.patientCode)$('patientCode').value=data.patientCode;}
+async function call(body){try{show('ok','Working...');const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error||'Failed');show('ok',d.message||'Saved');out(d);}catch(e){show('err',e.message||'Failed');}}
+async function loadOps(){try{const q=new URLSearchParams();q.set('module','operations');if($('facilityId').value)q.set('facilityId',$('facilityId').value);if($('patientCode').value)q.set('patientCode',$('patientCode').value);const r=await fetch(API+'?'+q.toString());const d=await r.json();if(!r.ok)throw new Error(d.error||'Could not load');show('ok','Loaded');out(d);}catch(e){show('err',e.message||'Could not load');}}
+function createPatient(){call({module:'phc_patient',facilityId:$('facilityId').value,fullName:$('fullName').value,pin:$('pin').value,consentGiven:true});}
+function addQueue(){call({module:'queue',facilityId:$('facilityId').value,patientCode:$('patientCode').value,reason:$('reason').value,queueType:'triage',priority:'normal'});}
+function addReferral(){call({module:'referral',fromFacilityId:$('facilityId').value,patientCode:$('patientCode').value,reason:$('reason').value,urgency:'routine'});}
+function addPharmacy(){call({module:'pharmacy',facilityId:$('facilityId').value,patientCode:$('patientCode').value,medicineName:$('itemName').value,quantity:'1'});}
+function addLab(){call({module:'lab_workflow',facilityId:$('facilityId').value,patientCode:$('patientCode').value,testName:$('itemName').value,status:'requested'});}
 </script>
 </body>
 </html>
