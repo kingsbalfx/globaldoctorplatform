@@ -9,10 +9,12 @@ export default async function handler(req, res) {
     const doctorId = clean(req.query?.doctorId, 160)
     const labOrderId = clean(req.query?.labOrderId, 160)
     if (!patientId && !doctorId && !labOrderId) return jsonError(res, 400, 'patientId, doctorId, or labOrderId is required.')
+
     let query = supabase.from('lab_results').select('*').order('created_at', { ascending: false }).limit(80)
     if (patientId) query = query.eq('patient_id', patientId)
     if (doctorId) query = query.eq('doctor_id', doctorId)
     if (labOrderId) query = query.eq('lab_order_id', labOrderId)
+
     const { data, error } = await query
     if (error) return jsonError(res, 500, error.message, { migrationRequired: 'Run server/phase2-clinical-safety.sql in Supabase.' })
     return res.json({ labResults: data || [] })
@@ -23,8 +25,9 @@ export default async function handler(req, res) {
     const patientId = clean(body.patientId, 160)
     const testName = clean(body.testName, 240)
     if (!patientId || !testName) return jsonError(res, 400, 'patientId and testName are required.')
+
     const now = new Date().toISOString()
-    const result = {
+    const row = {
       id: makeId('labres'),
       lab_order_id: clean(body.labOrderId, 160) || null,
       patient_id: patientId,
@@ -45,11 +48,35 @@ export default async function handler(req, res) {
       created_at: now,
       updated_at: now,
     }
-    const { data, error } = await supabase.from('lab_results').insert(result).select('*').maybeSingle()
+
+    const { data, error } = await supabase.from('lab_results').insert(row).select('*').maybeSingle()
     if (error) return jsonError(res, 500, error.message, { migrationRequired: 'Run server/phase2-clinical-safety.sql in Supabase.' })
-    await supabase.from('health_passport_events').insert({ id: makeId('hpe'), patient_id: patientId, event_type: result.critical_flag ? 'critical_lab_result' : result.abnormal_flag ? 'abnormal_lab_result' : 'lab_result', title: result.test_name, summary: result.result_text || result.result_value || 'Lab result uploaded', source_table: 'lab_results', source_id: result.id, event_at: now, metadata: { abnormal: result.abnormal_flag, critical: result.critical_flag, doctorId: result.doctor_id }, created_at: now }).then(() => null, () => null)
-    await tryAudit(supabase, { actorId: result.uploaded_by_id || result.facility_id || 'system', actorType: result.uploaded_by_type, action: result.critical_flag ? 'critical_lab_result_uploaded' : 'lab_result_uploaded', resourceType: 'lab_results', resourceId: result.id, riskLevel: result.critical_flag ? 'critical' : result.abnormal_flag ? 'high' : 'medium', metadata: { patientId, doctorId: result.doctor_id, testName } })
-    return res.status(201).json({ labResult: data || result, message: 'Lab result saved.' })
+
+    const eventType = row.critical_flag ? 'critical_lab_result' : row.abnormal_flag ? 'abnormal_lab_result' : 'lab_result'
+    await supabase.from('health_passport_events').insert({
+      id: makeId('hpe'),
+      patient_id: patientId,
+      event_type: eventType,
+      title: row.test_name,
+      summary: row.result_text || row.result_value || 'Lab result uploaded',
+      source_table: 'lab_results',
+      source_id: row.id,
+      event_at: now,
+      metadata: { abnormal: row.abnormal_flag, critical: row.critical_flag, doctorId: row.doctor_id },
+      created_at: now,
+    }).then(() => null, () => null)
+
+    await tryAudit(supabase, {
+      actorId: row.uploaded_by_id || row.facility_id || 'system',
+      actorType: row.uploaded_by_type,
+      action: row.critical_flag ? 'critical_lab_result_uploaded' : 'lab_result_uploaded',
+      resourceType: 'lab_results',
+      resourceId: row.id,
+      riskLevel: row.critical_flag ? 'critical' : row.abnormal_flag ? 'high' : 'medium',
+      metadata: { patientId, doctorId: row.doctor_id, testName },
+    })
+
+    return res.status(201).json({ labResult: data || row, message: 'Lab result saved.' })
   }
 
   if (req.method === 'PATCH') {
