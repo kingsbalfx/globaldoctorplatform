@@ -2,8 +2,8 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import Footer from './components/Footer'
 import HumanoidAssistant from './components/ai/HumanoidAssistant'
 import { ErrorProvider } from './components/ErrorHandler'
-import { apiFetch, getApiBaseCandidates } from './lib/apiFetch'
-import './lib/i18n' // Initialize i18n
+import { apiFetch } from './lib/apiFetch'
+import './lib/i18n'
 
 const LandingPageEnhanced = lazy(() => import('./pages/LandingPageEnhanced'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
@@ -45,39 +45,23 @@ function viewFromPath(pathname) {
 
 function pathFromView(view) {
   switch (view) {
-    case 'patient':
-      return '/patient'
-    case 'doctor-auth':
-      return '/doctor'
-    case 'facility':
-      return '/facility'
-    case 'platform-admin-support':
-      return '/platform-admin/support'
-    case 'platform-admin':
-      return '/platform-admin'
-    case 'admin':
-      return '/doctor/dashboard'
-    case 'request-tracker':
-      return '/request-tracker'
-    case 'health-os':
-      return '/health-os'
-    case 'clinical-safety':
-      return '/clinical-safety'
-    case 'auth-callback':
-      return '/auth/callback'
-    case 'payment-success':
-      return '/payment-success'
-    case 'reset-password':
-      return '/reset-password'
-    case 'terms':
-      return '/terms'
-    case 'privacy':
-      return '/privacy'
-    case 'contact':
-      return '/contact'
+    case 'patient': return '/patient'
+    case 'doctor-auth': return '/doctor'
+    case 'facility': return '/facility'
+    case 'platform-admin-support': return '/platform-admin/support'
+    case 'platform-admin': return '/platform-admin'
+    case 'admin': return '/doctor/dashboard'
+    case 'request-tracker': return '/request-tracker'
+    case 'health-os': return '/health-os'
+    case 'clinical-safety': return '/clinical-safety'
+    case 'auth-callback': return '/auth/callback'
+    case 'payment-success': return '/payment-success'
+    case 'reset-password': return '/reset-password'
+    case 'terms': return '/terms'
+    case 'privacy': return '/privacy'
+    case 'contact': return '/contact'
     case 'landing':
-    default:
-      return '/'
+    default: return '/'
   }
 }
 
@@ -101,6 +85,14 @@ function normalizeDoctorSession(authData) {
   const doctor = authData?.doctor && typeof authData.doctor === 'object' ? authData.doctor : authData
   if (!doctor?.id) return null
   return { type: authData?.type || 'login', ...doctor }
+}
+
+function isClinicalWorkspace(view) {
+  return view === 'health-os' || view === 'clinical-safety'
+}
+
+function isOpenWorkspace(view) {
+  return view === 'platform-admin' || view === 'platform-admin-support' || isClinicalWorkspace(view)
 }
 
 function App() {
@@ -133,42 +125,24 @@ function App() {
   const navigate = (view) => {
     const nextView = viewFromPath(pathFromView(view))
     const nextPortal = portalFromView(nextView)
-    if (nextView === 'platform-admin' || nextView === 'platform-admin-support' || nextView === 'health-os' || nextView === 'clinical-safety') {
+    if (isOpenWorkspace(nextView)) {
       setCurrentView(nextView)
-      try {
-        const nextPath = pathFromView(nextView)
-        if (window.location.pathname !== nextPath) {
-          window.history.pushState({ view: nextView }, '', nextPath)
-        }
-      } catch {
-        // ignore
-      }
+      try { window.history.pushState({ view: nextView }, '', pathFromView(nextView)) } catch { /* ignore */ }
       return
     }
     if (activePortal && nextPortal !== activePortal) return
     setCurrentView(nextView)
-    try {
-      const nextPath = pathFromView(nextView)
-      if (window.location.pathname !== nextPath) {
-        window.history.pushState({ view: nextView }, '', nextPath)
-      }
-    } catch {
-      // ignore
-    }
+    try { window.history.pushState({ view: nextView }, '', pathFromView(nextView)) } catch { /* ignore */ }
   }
 
   useEffect(() => {
     const handler = () => {
       const nextView = viewFromPath(window.location.pathname)
       const nextPortal = portalFromView(nextView)
-      if (nextView === 'platform-admin' || nextView === 'platform-admin-support' || nextView === 'health-os' || nextView === 'clinical-safety') {
-        setCurrentView(nextView)
-        return
-      }
+      if (isOpenWorkspace(nextView)) return setCurrentView(nextView)
       if (activePortal && nextPortal !== activePortal) {
         const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
-        const fallbackPath = pathFromView(fallbackView)
-        window.history.replaceState({ view: fallbackView }, '', fallbackPath)
+        window.history.replaceState({ view: fallbackView }, '', pathFromView(fallbackView))
         setCurrentView(fallbackView)
         return
       }
@@ -177,19 +151,6 @@ function App() {
     window.addEventListener('popstate', handler)
     return () => window.removeEventListener('popstate', handler)
   }, [activePortal, authDoctor])
-
-  useEffect(() => {
-    if (!activePortal) return
-    if (currentView === 'platform-admin' || currentView === 'platform-admin-support' || currentView === 'health-os' || currentView === 'clinical-safety') return
-    if (portalFromView(currentView) === activePortal) return
-    const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
-    setCurrentView(fallbackView)
-    try {
-      window.history.replaceState({ view: fallbackView }, '', pathFromView(fallbackView))
-    } catch {
-      // ignore
-    }
-  }, [activePortal, authDoctor, currentView])
 
   useEffect(() => {
     try {
@@ -202,8 +163,6 @@ function App() {
         window.localStorage.removeItem('gd_patient_session')
         window.localStorage.removeItem('gd_facility_session_active')
         window.localStorage.removeItem('gd_pending_patient_profile')
-      } else {
-        window.localStorage.removeItem('gd_doctor_session')
       }
     } catch {
       window.localStorage.removeItem('gd_doctor_session')
@@ -211,15 +170,31 @@ function App() {
   }, [])
 
   useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('gd_platform_admin_session')
+      if (!stored) return
+      const parsed = JSON.parse(stored)
+      if (parsed?.type === 'admin-login' && (parsed?.admin?.email || parsed?.email)) setAuthAdmin(parsed)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!activePortal) return
+    if (isOpenWorkspace(currentView)) return
+    if (portalFromView(currentView) === activePortal) return
+    const fallbackView = activePortal === 'doctor' ? (authDoctor ? 'admin' : 'doctor-auth') : activePortal
+    setCurrentView(fallbackView)
+    try { window.history.replaceState({ view: fallbackView }, '', pathFromView(fallbackView)) } catch { /* ignore */ }
+  }, [activePortal, authDoctor, currentView])
+
+  useEffect(() => {
     if (!authDoctor?.id) return
     if (activePortal !== 'doctor') setPortalSession('doctor')
-    if (currentView !== 'admin' && currentView !== 'doctor-auth' && currentView !== 'health-os' && currentView !== 'clinical-safety') {
+    if (!['admin', 'doctor-auth', 'health-os', 'clinical-safety'].includes(currentView)) {
       setCurrentView('admin')
-      try {
-        window.history.replaceState({ view: 'admin' }, '', '/doctor/dashboard')
-      } catch {
-        // ignore
-      }
+      try { window.history.replaceState({ view: 'admin' }, '', '/doctor/dashboard') } catch { /* ignore */ }
     }
     try {
       window.localStorage.removeItem('gd_patient_session')
@@ -231,63 +206,15 @@ function App() {
   }, [authDoctor?.id, activePortal, currentView])
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem('gd_platform_admin_session')
-      if (!stored) return
-      const parsed = JSON.parse(stored)
-      if (parsed?.type === 'admin-login' && (parsed?.admin?.email || parsed?.email)) {
-        setAuthAdmin(parsed)
-      }
-    } catch {
-      // ignore
-    }
-  }, [])
-
-  useEffect(() => {
     if (!authDoctor?.id || currentView !== 'admin') return undefined
-    const statusPath = `/api/doctors/${encodeURIComponent(authDoctor.id)}/status`
-    const markOnline = () => {
-      void apiFetch(statusPath, {
+    const timer = window.setInterval(() => {
+      void apiFetch(`/api/doctors/${encodeURIComponent(authDoctor.id)}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-session-proof': authDoctor.session_proof || '' },
         body: JSON.stringify({ isOnline: true }),
-      })
-        .then((response) => response.json().catch(() => ({})))
-        .then((data) => {
-          if (data?.doctor?.id) {
-            setAuthDoctor((current) => {
-              if (!current?.id) return current
-              const nextDoctor = { ...current, ...data.doctor }
-              try {
-                window.localStorage.setItem('gd_doctor_session', JSON.stringify({ type: 'login', ...nextDoctor }))
-              } catch {
-                // ignore
-              }
-              return nextDoctor
-            })
-          }
-        })
-        .catch(() => null)
-    }
-    const markOfflineOnExit = () => {
-      const body = JSON.stringify({ isOnline: false })
-      const [base = ''] = getApiBaseCandidates()
-      void fetch(`${base}${statusPath}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-session-proof': authDoctor.session_proof || '' },
-        body,
-        keepalive: true,
       }).catch(() => null)
-    }
-    markOnline()
-    const timer = window.setInterval(markOnline, 60 * 1000)
-    window.addEventListener('pagehide', markOfflineOnExit)
-    window.addEventListener('beforeunload', markOfflineOnExit)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('pagehide', markOfflineOnExit)
-      window.removeEventListener('beforeunload', markOfflineOnExit)
-    }
+    }, 60 * 1000)
+    return () => window.clearInterval(timer)
   }, [authDoctor?.id, authDoctor?.session_proof, currentView])
 
   const handleAuth = (authData) => {
@@ -296,19 +223,10 @@ function App() {
       setAuthDoctor(null)
       setPortalSession('')
       setCurrentView('platform-admin')
-      try {
-        window.localStorage.setItem('gd_platform_admin_session', JSON.stringify(authData))
-      } catch {
-        // ignore
-      }
-      try {
-        window.history.pushState({ view: 'platform-admin' }, '', '/platform-admin')
-      } catch {
-        // ignore
-      }
+      try { window.localStorage.setItem('gd_platform_admin_session', JSON.stringify(authData)) } catch { /* ignore */ }
+      try { window.history.pushState({ view: 'platform-admin' }, '', '/platform-admin') } catch { /* ignore */ }
       return
     }
-
     if (authData.type === 'login' || authData.type === 'register') {
       const doctorSession = normalizeDoctorSession(authData)
       if (!doctorSession) return
@@ -324,11 +242,7 @@ function App() {
       } catch {
         // ignore
       }
-      try {
-        window.history.pushState({ view: 'admin' }, '', '/doctor/dashboard')
-      } catch {
-        // ignore
-      }
+      try { window.history.pushState({ view: 'admin' }, '', '/doctor/dashboard') } catch { /* ignore */ }
     }
   }
 
@@ -356,11 +270,7 @@ function App() {
     } catch {
       // ignore
     }
-    try {
-      window.history.pushState({ view: 'landing' }, '', '/')
-    } catch {
-      // ignore
-    }
+    try { window.history.pushState({ view: 'landing' }, '', '/') } catch { /* ignore */ }
   }
 
   const assistantPortal = assistantPortalFromView(currentView)
@@ -368,80 +278,44 @@ function App() {
   return (
     <ErrorProvider>
       <div className="min-h-screen text-slate-900">
-      <nav className="mx-auto mt-4 flex max-w-7xl flex-wrap items-center justify-between gap-4 rounded-3xl border border-white/80 bg-white/90 px-6 py-4 shadow-sm backdrop-blur sm:px-8">
-        <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="GlobalDoc Connect logo" className="h-10 w-10 rounded-full shadow-sm object-cover" />
-          <span className="text-lg font-bold text-brand-700">GlobalDoc Connect</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600">
-          {authAdmin && (
-            <>
-              <button onClick={() => navigate('platform-admin')} className={`font-semibold ${currentView === 'platform-admin' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Platform Admin</button>
-              <button onClick={() => navigate('platform-admin-support')} className={`font-semibold ${currentView === 'platform-admin-support' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Support</button>
-            </>
-          )}
-          {!activePortal && !authAdmin && (
-            <>
-              <button onClick={() => navigate('landing')} className={`hover:text-brand-700 ${currentView === 'landing' ? 'text-brand-700' : ''}`}>Home</button>
-              <button onClick={() => navigate('patient')} className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}>Patient Portal</button>
-              <button onClick={() => navigate('doctor-auth')} className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}>Doctor Portal</button>
-              <button onClick={() => navigate('facility')} className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}>Facility Portal</button>
-              <button onClick={() => navigate('health-os')} className={`hover:text-brand-700 ${currentView === 'health-os' ? 'text-brand-700' : ''}`}>Health OS</button>
-              <button onClick={() => navigate('clinical-safety')} className={`hover:text-brand-700 ${currentView === 'clinical-safety' ? 'text-brand-700' : ''}`}>Clinical Safety</button>
-            </>
-          )}
-          {activePortal === 'patient' && (
-            <>
-              <button onClick={() => navigate('patient')} className={`font-semibold ${currentView === 'patient' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Portal</button>
-              <button onClick={() => navigate('health-os')} className={`font-semibold ${currentView === 'health-os' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Health OS</button>
-              <button onClick={() => navigate('clinical-safety')} className={`font-semibold ${currentView === 'clinical-safety' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Clinical Safety</button>
-            </>
-          )}
-          {activePortal === 'doctor' && (
-            <>
-              <button onClick={() => navigate(authDoctor ? 'admin' : 'doctor-auth')} className={`font-semibold ${currentView === 'admin' || currentView === 'doctor-auth' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Doctor Portal</button>
-              <button onClick={() => navigate('health-os')} className={`font-semibold ${currentView === 'health-os' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Health OS</button>
-              <button onClick={() => navigate('clinical-safety')} className={`font-semibold ${currentView === 'clinical-safety' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Clinical Safety</button>
-            </>
-          )}
-          {activePortal === 'facility' && (
-            <button onClick={() => navigate('facility')} className="font-semibold text-brand-700">Facility Portal</button>
-          )}
-          {activePortal === 'platform-admin' && (
-            <>
-              <button onClick={() => navigate('platform-admin')} className={`font-semibold ${currentView === 'platform-admin' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Platform Admin</button>
-              <button onClick={() => navigate('platform-admin-support')} className={`font-semibold ${currentView === 'platform-admin-support' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Support</button>
-            </>
-          )}
-          {(authDoctor || authAdmin || activePortal) && (
-            <button onClick={handleLogout} className="text-red-600 hover:text-red-700">Logout</button>
-          )}
-        </div>
-      </nav>
+        <nav className="mx-auto mt-4 flex max-w-7xl flex-wrap items-center justify-between gap-4 rounded-3xl border border-white/80 bg-white/90 px-6 py-4 shadow-sm backdrop-blur sm:px-8">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="GlobalDoc Connect logo" className="h-10 w-10 rounded-full shadow-sm object-cover" />
+            <span className="text-lg font-bold text-brand-700">GlobalDoc Connect</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-sm text-slate-600">
+            {authAdmin && <><button onClick={() => navigate('platform-admin')} className={`font-semibold ${currentView === 'platform-admin' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Platform Admin</button><button onClick={() => navigate('platform-admin-support')} className={`font-semibold ${currentView === 'platform-admin-support' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Support</button></>}
+            {!activePortal && !authAdmin && <><button onClick={() => navigate('landing')} className={`hover:text-brand-700 ${currentView === 'landing' ? 'text-brand-700' : ''}`}>Home</button><button onClick={() => navigate('patient')} className={`hover:text-brand-700 ${currentView === 'patient' ? 'text-brand-700' : ''}`}>Patient Portal</button><button onClick={() => navigate('doctor-auth')} className={`hover:text-brand-700 ${currentView === 'doctor-auth' ? 'text-brand-700' : ''}`}>Doctor Portal</button><button onClick={() => navigate('facility')} className={`hover:text-brand-700 ${currentView === 'facility' ? 'text-brand-700' : ''}`}>Facility Portal</button></>}
+            {activePortal === 'patient' && <><button onClick={() => navigate('patient')} className={`font-semibold ${currentView === 'patient' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Portal</button><button onClick={() => navigate('health-os')} className={`font-semibold ${currentView === 'health-os' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Health Passport</button><button onClick={() => navigate('clinical-safety')} className={`font-semibold ${currentView === 'clinical-safety' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Clinical Safety</button></>}
+            {activePortal === 'doctor' && <><button onClick={() => navigate(authDoctor ? 'admin' : 'doctor-auth')} className={`font-semibold ${currentView === 'admin' || currentView === 'doctor-auth' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Doctor Portal</button><button onClick={() => navigate('health-os')} className={`font-semibold ${currentView === 'health-os' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Health Passport</button><button onClick={() => navigate('clinical-safety')} className={`font-semibold ${currentView === 'clinical-safety' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Clinical Safety</button></>}
+            {activePortal === 'facility' && <button onClick={() => navigate('facility')} className="font-semibold text-brand-700">Facility Portal</button>}
+            {activePortal === 'platform-admin' && <><button onClick={() => navigate('platform-admin')} className={`font-semibold ${currentView === 'platform-admin' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Platform Admin</button><button onClick={() => navigate('platform-admin-support')} className={`font-semibold ${currentView === 'platform-admin-support' ? 'text-brand-700' : 'text-slate-600 hover:text-brand-700'}`}>Patient Support</button></>}
+            {(authDoctor || authAdmin || activePortal) && <button onClick={handleLogout} className="text-red-600 hover:text-red-700">Logout</button>}
+          </div>
+        </nav>
 
-      <Suspense fallback={<div className="mx-auto mt-16 max-w-3xl rounded-3xl bg-white p-8 text-center text-sm font-semibold text-slate-600 shadow-lg">Loading workspace...</div>}>
-        {currentView === 'landing' && <LandingPageEnhanced />}
-        {currentView === 'request-tracker' && <RequestTracker />}
-        {currentView === 'health-os' && <AdvancedHealthOS />}
-        {currentView === 'clinical-safety' && <ClinicalSafetyOS />}
-        {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
-        {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
-        {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
-        {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
-        {currentView === 'platform-admin-support' && <SupportDashboard adminSession={authAdmin} />}
-        {currentView === 'facility' && <FacilityPortal logoutSignal={facilityLogoutSignal} onSessionChange={setPortalSession} />}
-        {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
-        {currentView === 'payment-success' && <PaymentSuccess onNavigate={navigate} />}
-        {currentView === 'reset-password' && <ResetPassword />}
-        {currentView === 'terms' && <TermsOfService onNavigate={navigate} />}
-        {currentView === 'privacy' && <PrivacyPolicy onNavigate={navigate} />}
-        {currentView === 'contact' && <Contact onNavigate={navigate} />}
-      </Suspense>
+        <Suspense fallback={<div className="mx-auto mt-16 max-w-3xl rounded-3xl bg-white p-8 text-center text-sm font-semibold text-slate-600 shadow-lg">Loading workspace...</div>}>
+          {currentView === 'landing' && <LandingPageEnhanced />}
+          {currentView === 'request-tracker' && <RequestTracker />}
+          {currentView === 'health-os' && <AdvancedHealthOS />}
+          {currentView === 'clinical-safety' && <ClinicalSafetyOS />}
+          {currentView === 'patient' && <PatientDashboard logoutSignal={patientLogoutSignal} onSessionChange={setPortalSession} />}
+          {currentView === 'doctor-auth' && <DoctorAuth onAuth={handleAuth} />}
+          {currentView === 'admin' && <AdminDashboard doctor={authDoctor} onLogout={handleLogout} />}
+          {currentView === 'platform-admin' && <PlatformAdminDashboard adminSession={authAdmin} onLogout={handleLogout} />}
+          {currentView === 'platform-admin-support' && <SupportDashboard adminSession={authAdmin} />}
+          {currentView === 'facility' && <FacilityPortal logoutSignal={facilityLogoutSignal} onSessionChange={setPortalSession} />}
+          {currentView === 'auth-callback' && <AuthCallback onNavigate={navigate} onDoctorAuth={handleAuth} onPatientNavigate={() => navigate('patient')} />}
+          {currentView === 'payment-success' && <PaymentSuccess onNavigate={navigate} />}
+          {currentView === 'reset-password' && <ResetPassword />}
+          {currentView === 'terms' && <TermsOfService onNavigate={navigate} />}
+          {currentView === 'privacy' && <PrivacyPolicy onNavigate={navigate} />}
+          {currentView === 'contact' && <Contact onNavigate={navigate} />}
+        </Suspense>
 
-      {assistantPortal && <HumanoidAssistant portal={assistantPortal} />}
-
-      {currentView === 'landing' && <Footer onNavigate={setCurrentView} />}
-    </div>
+        {assistantPortal && <HumanoidAssistant portal={assistantPortal} />}
+        {currentView === 'landing' && <Footer onNavigate={setCurrentView} />}
+      </div>
     </ErrorProvider>
   )
 }
