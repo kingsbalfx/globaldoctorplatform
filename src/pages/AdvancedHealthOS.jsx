@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ClipboardCheck, FileHeart, Loader2, NotebookPen, RefreshCw, ShieldCheck, Stethoscope } from 'lucide-react'
+import { AlertTriangle, ClipboardCheck, FileText, Loader2, RefreshCw, ShieldCheck, Stethoscope } from 'lucide-react'
 import { apiFetch } from '../lib/apiFetch'
 
 const consentItems = [
@@ -107,12 +107,7 @@ function AdvancedHealthOS() {
       const response = await apiFetch('/api/health/triage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          patientId: activePatientId || undefined,
-          patientName: session.user?.name,
-          ...triage,
-          source: 'advanced_health_os_page',
-        }),
+        body: JSON.stringify({ patientId: activePatientId || undefined, patientName: session.user?.name, ...triage, source: 'advanced_health_os_page' }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Triage failed.')
@@ -185,7 +180,6 @@ function AdvancedHealthOS() {
   }
 
   const timeline = passport?.timeline || []
-  const latestConsents = passport?.consents || []
   const carePlans = passport?.carePlans || []
 
   return (
@@ -202,40 +196,20 @@ function AdvancedHealthOS() {
       <div className="mt-8 grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
         <aside className="space-y-6">
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="font-black text-slate-900">Current session</h2>
-                <p className="mt-1 text-sm text-slate-500">{session.role ? `${session.role}: ${session.user?.name || session.user?.email || session.user?.id}` : 'No patient or doctor session found.'}</p>
-              </div>
-              <button type="button" onClick={loadPassport} disabled={!activePatientId || loading} className="rounded-full bg-slate-100 p-3 text-slate-700 hover:bg-slate-200 disabled:opacity-40"><RefreshCw className="h-4 w-4" /></button>
-            </div>
-            {session.role !== 'patient' && (
-              <label className="mt-4 block text-sm font-bold text-slate-700">Patient ID<input value={patientId} onChange={(event) => setPatientId(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-400" placeholder="patient id" /></label>
-            )}
+            <div className="flex items-center justify-between gap-3"><div><h2 className="font-black text-slate-900">Current session</h2><p className="mt-1 text-sm text-slate-500">{session.role ? `${session.role}: ${session.user?.name || session.user?.email || session.user?.id}` : 'No patient or doctor session found.'}</p></div><button type="button" onClick={loadPassport} disabled={!activePatientId || loading} className="rounded-full bg-slate-100 p-3 text-slate-700 hover:bg-slate-200 disabled:opacity-40"><RefreshCw className="h-4 w-4" /></button></div>
+            {session.role !== 'patient' && <label className="mt-4 block text-sm font-bold text-slate-700">Patient ID<input value={patientId} onChange={(event) => setPatientId(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-brand-400" placeholder="patient id" /></label>}
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
             <div className="flex items-start gap-3"><ShieldCheck className="h-5 w-5 text-brand-700" /><div><h2 className="font-black text-slate-900">Consent center</h2><p className="text-sm text-slate-500">Capture versioned consent before advanced care workflows.</p></div></div>
-            <div className="mt-4 space-y-3">
-              {consentItems.map((item) => (
-                <label key={item.type} className="flex gap-3 rounded-2xl bg-slate-50 p-3 text-sm">
-                  <input type="checkbox" checked={Boolean(consents[item.type])} onChange={(event) => setConsents((current) => ({ ...current, [item.type]: event.target.checked }))} className="mt-1" />
-                  <span><span className="font-bold text-slate-900">{item.label}</span><span className="mt-1 block text-xs leading-5 text-slate-500">{item.help}</span></span>
-                </label>
-              ))}
-            </div>
+            <div className="mt-4 space-y-3">{consentItems.map((item) => <label key={item.type} className="flex gap-3 rounded-2xl bg-slate-50 p-3 text-sm"><input type="checkbox" checked={Boolean(consents[item.type])} onChange={(event) => setConsents((current) => ({ ...current, [item.type]: event.target.checked }))} className="mt-1" /><span><span className="font-bold text-slate-900">{item.label}</span><span className="mt-1 block text-xs leading-5 text-slate-500">{item.help}</span></span></label>)}</div>
             <button type="button" onClick={submitConsents} disabled={!activePatientId || loading} className="mt-4 w-full rounded-2xl bg-brand-700 px-4 py-3 text-sm font-bold text-white hover:bg-brand-600 disabled:bg-slate-300">Save consent</button>
           </div>
 
           <form onSubmit={submitTriage} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
             <div className="flex items-start gap-3"><AlertTriangle className="h-5 w-5 text-red-600" /><div><h2 className="font-black text-slate-900">Emergency red-flag triage</h2><p className="text-sm text-slate-500">Detect urgent symptoms and route safely.</p></div></div>
             <textarea value={triage.symptoms} onChange={(event) => setTriage((current) => ({ ...current, symptoms: event.target.value }))} rows={4} className="mt-4 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-red-400" placeholder="Describe symptoms, e.g. chest pain, breathing difficulty..." />
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <input value={triage.duration} onChange={(event) => setTriage((current) => ({ ...current, duration: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Duration" />
-              <select value={triage.severity} onChange={(event) => setTriage((current) => ({ ...current, severity: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"><option>mild</option><option>moderate</option><option>severe</option></select>
-              <input value={triage.age} onChange={(event) => setTriage((current) => ({ ...current, age: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Age" />
-              <input value={triage.pregnancyStatus} onChange={(event) => setTriage((current) => ({ ...current, pregnancyStatus: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Pregnancy status if relevant" />
-            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2"><input value={triage.duration} onChange={(event) => setTriage((current) => ({ ...current, duration: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Duration" /><select value={triage.severity} onChange={(event) => setTriage((current) => ({ ...current, severity: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"><option>mild</option><option>moderate</option><option>severe</option></select><input value={triage.age} onChange={(event) => setTriage((current) => ({ ...current, age: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Age" /><input value={triage.pregnancyStatus} onChange={(event) => setTriage((current) => ({ ...current, pregnancyStatus: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Pregnancy status if relevant" /></div>
             <button type="submit" disabled={loading} className="mt-4 w-full rounded-2xl bg-red-600 px-4 py-3 text-sm font-bold text-white hover:bg-red-700 disabled:bg-slate-300">Check red flags</button>
             {triageResult && <div className={`mt-4 rounded-2xl p-4 text-sm ${triageResult.emergencyRecommended ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800'}`}><p className="font-black">{triageResult.emergencyRecommended ? 'Emergency warning' : 'No red flag detected'}</p><p className="mt-2 leading-6">{triageResult.recommendedAction}</p>{(triageResult.redFlags || []).length > 0 && <ul className="mt-2 list-disc pl-5">{triageResult.redFlags.map((flag) => <li key={flag.key}>{flag.label}</li>)}</ul>}</div>}
           </form>
@@ -243,50 +217,21 @@ function AdvancedHealthOS() {
 
         <section className="space-y-6">
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
-            <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><FileHeart className="h-5 w-5 text-brand-700" /><div><h2 className="font-black text-slate-900">Health Passport timeline</h2><p className="text-sm text-slate-500">Longitudinal patient memory from visits, files, prescriptions, labs, triage, and care plans.</p></div></div>{loading && <Loader2 className="h-5 w-5 animate-spin text-brand-700" />}</div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><FileText className="h-5 w-5 text-brand-700" /><div><h2 className="font-black text-slate-900">Health Passport timeline</h2><p className="text-sm text-slate-500">Longitudinal patient memory from visits, files, prescriptions, labs, triage, and care plans.</p></div></div>{loading && <Loader2 className="h-5 w-5 animate-spin text-brand-700" />}</div>
             {passport?.warnings?.length > 0 && <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-semibold text-amber-700">Some tables are missing or not migrated yet: {passport.warnings.join(' | ')}</p>}
-            <div className="mt-5 space-y-3">
-              {timeline.length === 0 && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No passport events yet. Add consent, triage, a care plan, or complete a consultation.</p>}
-              {timeline.map((event) => <div key={`${event.type}-${event.id}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-black uppercase tracking-[0.14em] text-brand-700">{event.type}</p><p className="mt-1 font-bold text-slate-900">{event.title}</p><p className="mt-1 text-sm leading-6 text-slate-600">{event.summary || 'No summary.'}</p><p className="mt-2 text-xs text-slate-400">{shortDate(event.at)}</p></div>)}
-            </div>
+            <div className="mt-5 space-y-3">{timeline.length === 0 && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No passport events yet. Add consent, triage, a care plan, or complete a consultation.</p>}{timeline.map((event) => <div key={`${event.type}-${event.id}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-black uppercase tracking-[0.14em] text-brand-700">{event.type}</p><p className="mt-1 font-bold text-slate-900">{event.title}</p><p className="mt-1 text-sm leading-6 text-slate-600">{event.summary || 'No summary.'}</p><p className="mt-2 text-xs text-slate-400">{shortDate(event.at)}</p></div>)}</div>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <form onSubmit={submitCarePlan} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
-              <div className="flex items-start gap-3"><ClipboardCheck className="h-5 w-5 text-emerald-700" /><div><h2 className="font-black text-slate-900">Care plan builder</h2><p className="text-sm text-slate-500">Create follow-up instructions after a consultation.</p></div></div>
-              <input value={carePlan.title} onChange={(event) => setCarePlan((current) => ({ ...current, title: event.target.value }))} className="mt-4 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Plan title" />
-              <input value={carePlan.diagnosis} onChange={(event) => setCarePlan((current) => ({ ...current, diagnosis: event.target.value }))} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Diagnosis / issue" />
-              <textarea value={carePlan.goals} onChange={(event) => setCarePlan((current) => ({ ...current, goals: event.target.value }))} rows={2} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Goals" />
-              <textarea value={carePlan.instructions} onChange={(event) => setCarePlan((current) => ({ ...current, instructions: event.target.value }))} rows={3} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Instructions" />
-              <textarea value={carePlan.redFlags} onChange={(event) => setCarePlan((current) => ({ ...current, redFlags: event.target.value }))} rows={2} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Danger signs" />
-              <input type="datetime-local" value={carePlan.followUpDate} onChange={(event) => setCarePlan((current) => ({ ...current, followUpDate: event.target.value }))} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" />
-              <button type="submit" disabled={!activePatientId || loading} className="mt-4 w-full rounded-2xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-600 disabled:bg-slate-300">Save care plan</button>
-            </form>
-
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
-              <h2 className="font-black text-slate-900">Active care plans</h2>
-              <div className="mt-4 space-y-3">
-                {carePlans.length === 0 && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No care plans yet.</p>}
-                {carePlans.map((plan) => <div key={plan.id} className="rounded-2xl bg-slate-50 p-4"><p className="font-bold text-slate-900">{plan.title}</p><p className="mt-1 text-sm text-slate-600">{plan.diagnosis || 'No diagnosis listed'}</p><p className="mt-2 text-xs font-bold uppercase text-slate-400">{plan.status}</p></div>)}
-              </div>
-            </div>
+            <form onSubmit={submitCarePlan} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50"><div className="flex items-start gap-3"><ClipboardCheck className="h-5 w-5 text-emerald-700" /><div><h2 className="font-black text-slate-900">Care plan builder</h2><p className="text-sm text-slate-500">Create follow-up instructions after a consultation.</p></div></div><input value={carePlan.title} onChange={(event) => setCarePlan((current) => ({ ...current, title: event.target.value }))} className="mt-4 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Plan title" /><input value={carePlan.diagnosis} onChange={(event) => setCarePlan((current) => ({ ...current, diagnosis: event.target.value }))} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Diagnosis / issue" /><textarea value={carePlan.goals} onChange={(event) => setCarePlan((current) => ({ ...current, goals: event.target.value }))} rows={2} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Goals" /><textarea value={carePlan.instructions} onChange={(event) => setCarePlan((current) => ({ ...current, instructions: event.target.value }))} rows={3} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Instructions" /><textarea value={carePlan.redFlags} onChange={(event) => setCarePlan((current) => ({ ...current, redFlags: event.target.value }))} rows={2} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Danger signs" /><input type="datetime-local" value={carePlan.followUpDate} onChange={(event) => setCarePlan((current) => ({ ...current, followUpDate: event.target.value }))} className="mt-3 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" /><button type="submit" disabled={!activePatientId || loading} className="mt-4 w-full rounded-2xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-600 disabled:bg-slate-300">Save care plan</button></form>
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50"><h2 className="font-black text-slate-900">Active care plans</h2><div className="mt-4 space-y-3">{carePlans.length === 0 && <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No care plans yet.</p>}{carePlans.map((plan) => <div key={plan.id} className="rounded-2xl bg-slate-50 p-4"><p className="font-bold text-slate-900">{plan.title}</p><p className="mt-1 text-sm text-slate-600">{plan.diagnosis || 'No diagnosis listed'}</p><p className="mt-2 text-xs font-bold uppercase text-slate-400">{plan.status}</p></div>)}</div></div>
           </div>
 
-          {session.role === 'doctor' && (
-            <form onSubmit={submitNote} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
-              <div className="flex items-start gap-3"><NotebookPen className="h-5 w-5 text-violet-700" /><div><h2 className="font-black text-slate-900">Structured care note</h2><p className="text-sm text-slate-500">SOAP foundation for doctor documentation.</p></div></div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3"><input value={note.patientId} onChange={(event) => setNote((current) => ({ ...current, patientId: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Patient ID" /><input value={note.consultationId} onChange={(event) => setNote((current) => ({ ...current, consultationId: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Consultation ID" /><select value={note.status} onChange={(event) => setNote((current) => ({ ...current, status: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"><option>draft</option><option>signed</option></select></div>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2"><textarea value={note.subjective} onChange={(event) => setNote((current) => ({ ...current, subjective: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Subjective" /><textarea value={note.objective} onChange={(event) => setNote((current) => ({ ...current, objective: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Objective" /><textarea value={note.assessment} onChange={(event) => setNote((current) => ({ ...current, assessment: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Assessment" /><textarea value={note.plan} onChange={(event) => setNote((current) => ({ ...current, plan: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Plan" /></div>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2"><input value={note.diagnosis} onChange={(event) => setNote((current) => ({ ...current, diagnosis: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Diagnosis" /><input value={note.followUp} onChange={(event) => setNote((current) => ({ ...current, followUp: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Follow-up" /></div>
-              <button type="submit" disabled={loading} className="mt-4 rounded-2xl bg-violet-700 px-5 py-3 text-sm font-bold text-white hover:bg-violet-600 disabled:bg-slate-300">Save care note</button>
-            </form>
-          )}
+          {session.role === 'doctor' && <form onSubmit={submitNote} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50"><div className="flex items-start gap-3"><ClipboardCheck className="h-5 w-5 text-violet-700" /><div><h2 className="font-black text-slate-900">Structured care note</h2><p className="text-sm text-slate-500">SOAP foundation for doctor documentation.</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-3"><input value={note.patientId} onChange={(event) => setNote((current) => ({ ...current, patientId: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Patient ID" /><input value={note.consultationId} onChange={(event) => setNote((current) => ({ ...current, consultationId: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Consultation ID" /><select value={note.status} onChange={(event) => setNote((current) => ({ ...current, status: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"><option>draft</option><option>signed</option></select></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><textarea value={note.subjective} onChange={(event) => setNote((current) => ({ ...current, subjective: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Subjective" /><textarea value={note.objective} onChange={(event) => setNote((current) => ({ ...current, objective: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Objective" /><textarea value={note.assessment} onChange={(event) => setNote((current) => ({ ...current, assessment: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Assessment" /><textarea value={note.plan} onChange={(event) => setNote((current) => ({ ...current, plan: event.target.value }))} rows={3} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Plan" /></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><input value={note.diagnosis} onChange={(event) => setNote((current) => ({ ...current, diagnosis: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Diagnosis" /><input value={note.followUp} onChange={(event) => setNote((current) => ({ ...current, followUp: event.target.value }))} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none" placeholder="Follow-up" /></div><button type="submit" disabled={loading} className="mt-4 rounded-2xl bg-violet-700 px-5 py-3 text-sm font-bold text-white hover:bg-violet-600 disabled:bg-slate-300">Save care note</button></form>}
         </section>
       </div>
 
-      <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
-        <div className="flex items-start gap-3"><Stethoscope className="h-5 w-5 text-brand-700" /><div><h2 className="font-black text-slate-900">Safety rule</h2><p className="mt-1 text-sm leading-6 text-slate-600">This Health OS assists routing, memory, consent, and documentation. It does not replace a licensed clinician, and emergency symptoms should be handled through local emergency services immediately.</p></div></div>
-      </section>
+      <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50"><div className="flex items-start gap-3"><Stethoscope className="h-5 w-5 text-brand-700" /><div><h2 className="font-black text-slate-900">Safety rule</h2><p className="mt-1 text-sm leading-6 text-slate-600">This Health OS assists routing, memory, consent, and documentation. It does not replace a licensed clinician, and emergency symptoms should be handled through local emergency services immediately.</p></div></div></section>
     </main>
   )
 }
