@@ -20,6 +20,10 @@ function pinHash(pin) {
   return `pin_${Math.abs(hash)}_${text.length}`
 }
 
+function lines(text, max = 8) {
+  return clean(text, 5000).split(/[.!?\n]/).map((item) => item.trim()).filter(Boolean).slice(0, max)
+}
+
 function buildChecks(items, allergies, currentMeds, pregnancyStatus, patientAge) {
   const checks = []
   const allergyText = allergies.join(' ').toLowerCase()
@@ -47,6 +51,10 @@ function buildPatientSummary(body) {
   return rows.map(([label, value]) => clean(value, 1200) ? `${label}: ${clean(value, 1200)}` : '').filter(Boolean).join('\n') || 'Your consultation summary is ready. Follow your clinician instructions and seek urgent care if symptoms worsen.'
 }
 
+function safetyRouting(text) {
+  return /urgent|emergency|faint|bleeding|breathing|severe|chest|stroke/i.test(String(text || '')) ? 'urgent clinician review' : 'normal clinician review'
+}
+
 async function passportEvent(supabase, patientId, code, type, title, summary, table, id) {
   if (!patientId && !code) return null
   return supabase.from('health_passport_events').insert({ id: makeId('hpe'), patient_id: patientId || code, event_type: type, title, summary, source_table: table, source_id: id, event_at: new Date().toISOString(), metadata: { patientCode: code }, created_at: new Date().toISOString() }).then(() => null, () => null)
@@ -64,6 +72,12 @@ async function hydrateOrders(supabase, rows) {
   const itemMap = group(items.data || [])
   const checkMap = group(checks.data || [])
   return orders.map((order) => ({ ...order, items: itemMap[order.id] || [], safetyChecks: checkMap[order.id] || [] }))
+}
+
+async function insertRow(supabase, table, row, res, responseKey, message, migrationRequired = 'Run phase migrations in Supabase.') {
+  const { data, error } = await supabase.from(table).insert(row).select('*').maybeSingle()
+  if (error) return jsonError(res, 500, error.message, { migrationRequired })
+  return res.status(201).json({ [responseKey]: data || row, message })
 }
 
 async function getMedicationOrders(supabase, req, res) {
@@ -108,6 +122,21 @@ async function getOperations(supabase, req, res) {
   const errors = [patients.error, queue.error, referrals.error, pharmacy.error, labOrders.error].filter(Boolean).map((error) => error.message)
   if (errors.length) return jsonError(res, 500, errors.join(' | '), { migrationRequired: 'Run server/phase3-hospital-phc.sql in Supabase.' })
   return res.json({ phcPatients: patients.data || [], queue: queue.data || [], referrals: referrals.data || [], pharmacy: pharmacy.data || [], labOrders: labOrders.data || [] })
+}
+
+async function getCompliance(supabase, req, res) {
+  const patientId = clean(req.query?.patientId, 160)
+  const code = clean(req.query?.patientCode, 160)
+  const [permissions, fileLogs, dataRequests, consentHistory, securitySteps] = await Promise.all([
+    supabase.from('gd_role_permissions').select('*').order('created_at', { ascending: false }).limit(80),
+    supabase.from('gd_file_access_events').select('*').order('created_at', { ascending: false }).limit(80),
+    supabase.from('gd_patient_data_requests').select('*').order('created_at', { ascending: false }).limit(80),
+    supabase.from('gd_consent_history').select('*').order('created_at', { ascending: false }).limit(80),
+    supabase.from('gd_admin_security_steps').select('*').order('created_at', { ascending: false }).limit(80),
+  ])
+  const errors = [permissions.error, fileLogs.error, dataRequests.error, consentHistory.error, securitySteps.error].filter(Boolean).map((error) => error.message)
+  if (errors.length) return jsonError(res, 500, errors.join(' | '), { migrationRequired: 'Run server/phase4-population-health.sql in Supabase.' })
+  return res.json({ permissions: permissions.data || [], fileLogs: fileLogs.data || [], dataRequests: dataRequests.data || [], consentHistory: consentHistory.data || [], securitySteps: securitySteps.data || [], patientId, patientCode: code })
 }
 
 async function createMedicationOrder(supabase, body, res) {
@@ -184,6 +213,24 @@ async function createPhase3Operation(supabase, body, res) {
   return jsonError(res, 400, 'Unknown module.')
 }
 
+async function createCompliance(supabase, body, res) {
+  const now = new Date().toISOString()
+  if (body.module === 'role_permission') return insertRow(supabase, 'gd_role_permissions', { id: makeId('perm'), role_name: clean(body.roleName, 120), permission_key: clean(body.permissionKey, 180), permission_scope: clean(body.permissionScope, 120) || 'global', allowed: body.allowed !== false, description: clean(body.description, 1000) || null, created_at: now }, res, 'permission', 'Role permission saved.', 'Run server/phase4-population-health.sql in Supabase.')
+  if (body.module === 'file_access_log') return insertRow(supabase, 'gd_file_access_events', { id: makeId('filelog'), file_id: clean(body.fileId, 160) || null, file_name: clean(body.fileName, 240) || null, patient_id: clean(body.patientId, 160) || null, patient_code: clean(body.patientCode, 160) || null, actor_id: clean(body.actorId, 160) || null, actor_type: clean(body.actorType, 80) || 'staff', access_reason: clean(body.accessReason, 1000) || null, action_name: clean(body.actionName, 80) || 'viewed', created_at: now }, res, 'fileLog', 'File access log saved.', 'Run server/phase4-population-health.sql in Supabase.')
+  if (body.module === 'patient_data_request') return insertRow(supabase, 'gd_patient_data_requests', { id: makeId('datareq'), request_code: makeId('DREQ').toUpperCase(), patient_id: clean(body.patientId, 160) || null, patient_code: clean(body.patientCode, 160) || null, request_type: clean(body.requestType, 80) || 'export', contact: clean(body.contact, 180) || null, status: 'pending', notes: clean(body.notes, 1000) || null, created_at: now, updated_at: now }, res, 'dataRequest', 'Patient data request saved.', 'Run server/phase4-population-health.sql in Supabase.')
+  if (body.module === 'consent_history') return insertRow(supabase, 'gd_consent_history', { id: makeId('consent'), patient_id: clean(body.patientId, 160) || null, patient_code: clean(body.patientCode, 160) || null, consent_type: clean(body.consentType, 180), consent_status: clean(body.consentStatus, 80) || 'given', version: clean(body.version, 80) || 'v1', source: clean(body.source, 120) || 'app', notes: clean(body.notes, 1000) || null, created_at: now }, res, 'consent', 'Consent history saved.', 'Run server/phase4-population-health.sql in Supabase.')
+  if (body.module === 'security_step') return insertRow(supabase, 'gd_admin_security_steps', { id: makeId('secstep'), user_id: clean(body.userId, 160) || null, user_type: clean(body.userType, 80) || 'admin', method_name: clean(body.methodName, 80) || 'email', destination: clean(body.destination, 180) || null, status: clean(body.status, 80) || 'pending', expires_at: body.expiresAt || null, verified_at: body.verifiedAt || null, created_at: now }, res, 'securityStep', 'Security step saved.', 'Run server/phase4-population-health.sql in Supabase.')
+  return jsonError(res, 400, 'Unknown compliance module.')
+}
+
+async function createAssistantOutput(supabase, body, res) {
+  const sourceText = clean(body.sourceText || body.text || body.intakeText, 5000)
+  const summary = lines(sourceText, 8)
+  const response = { type: clean(body.module, 80), language: clean(body.language, 80) || 'English', summary, routing: safetyRouting(sourceText), guardrail: 'summary only; human review required', createdAt: new Date().toISOString() }
+  await tryAudit(supabase, { actorId: clean(body.userId, 160) || clean(body.patientId, 160) || 'assistant', actorType: clean(body.userType, 80) || 'assistant', action: `assistant_${response.type}`, resourceType: 'assistant_summary', resourceId: makeId('assist'), riskLevel: response.routing.includes('urgent') ? 'high' : 'medium', metadata: response })
+  return res.status(201).json({ assistant: response, message: 'Assistant summary created.' })
+}
+
 export default async function handler(req, res) {
   const supabase = db()
   if (!supabase) return jsonError(res, 500, 'Supabase is not configured.')
@@ -192,6 +239,7 @@ export default async function handler(req, res) {
     if (module === 'lab_results') return getSimpleTable(supabase, req, res, 'lab_results', 'labResults')
     if (module === 'summaries') return getSimpleTable(supabase, req, res, 'consultation_summaries', 'summaries')
     if (module === 'operations') return getOperations(supabase, req, res)
+    if (module === 'compliance') return getCompliance(supabase, req, res)
     return getMedicationOrders(supabase, req, res)
   }
   if (req.method === 'POST') {
@@ -200,6 +248,8 @@ export default async function handler(req, res) {
     if (body.module === 'consultation_summary') return createSummary(supabase, body, res)
     if (body.module === 'phc_patient') return createPhcPatient(supabase, body, res)
     if (['queue', 'referral', 'pharmacy', 'lab_workflow'].includes(body.module)) return createPhase3Operation(supabase, body, res)
+    if (['role_permission', 'file_access_log', 'patient_data_request', 'consent_history', 'security_step'].includes(body.module)) return createCompliance(supabase, body, res)
+    if (['safe_navigator', 'local_language_intake', 'symptom_summary', 'doctor_summary', 'support_summary', 'safety_guardrail'].includes(body.module)) return createAssistantOutput(supabase, body, res)
     return createMedicationOrder(supabase, body, res)
   }
   res.setHeader('Allow', 'GET, POST')
