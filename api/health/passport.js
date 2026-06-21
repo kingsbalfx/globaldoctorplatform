@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   const patientId = clean(req.query?.patientId, 160)
   if (!patientId) return jsonError(res, 400, 'patientId is required.')
 
-  const [patientResult, consultationsResult, filesResult, prescriptionsResult, labsResult, consentsResult, carePlansResult, notesResult, eventsResult, triageResult] = await Promise.all([
+  const [patientResult, consultationsResult, filesResult, prescriptionsResult, labsResult, consentsResult, carePlansResult, notesResult, eventsResult, triageResult, medOrdersResult, labResultsResult, summariesResult] = await Promise.all([
     safeSelect(supabase, 'patients', (q) => q.select('id,name,email,phone,country,gender,date_of_birth,language_preference,medical_history,allergies,current_medications,chronic_conditions,created_at').eq('id', patientId).maybeSingle(), null),
     safeSelect(supabase, 'consultations', (q) => q.select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(20)),
     safeSelect(supabase, 'files', (q) => q.select('*').eq('uploaded_by', patientId).order('created_at', { ascending: false }).limit(20)),
@@ -35,6 +35,9 @@ export default async function handler(req, res) {
     safeSelect(supabase, 'clinical_soap_notes', (q) => q.select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(20)),
     safeSelect(supabase, 'health_passport_events', (q) => q.select('*').eq('patient_id', patientId).order('event_at', { ascending: false }).limit(50)),
     safeSelect(supabase, 'clinical_triage_events', (q) => q.select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(20)),
+    safeSelect(supabase, 'medication_orders', (q) => q.select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(20)),
+    safeSelect(supabase, 'lab_results', (q) => q.select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(20)),
+    safeSelect(supabase, 'consultation_summaries', (q) => q.select('*').eq('patient_id', patientId).order('created_at', { ascending: false }).limit(20)),
   ])
 
   const timeline = [
@@ -43,8 +46,11 @@ export default async function handler(req, res) {
     ...(filesResult.data || []).map((item) => normalizeTimelineItem({ ...item, event_type: 'document', title: item.original_filename || item.file_name || 'Uploaded document', summary: item.upload_type || item.mime_type, event_at: item.created_at, source_table: 'files' })),
     ...(prescriptionsResult.data || []).map((item) => normalizeTimelineItem({ ...item, event_type: 'prescription', title: 'Prescription issued', summary: item.medications || item.prescription_text || item.notes, event_at: item.issued_at || item.created_at, source_table: 'prescriptions' })),
     ...(labsResult.data || []).map((item) => normalizeTimelineItem({ ...item, event_type: 'lab_request', title: 'Lab / imaging request', summary: Array.isArray(item.tests) ? item.tests.join(', ') : item.status, event_at: item.created_at, source_table: 'lab_orders' })),
+    ...(medOrdersResult.data || []).map((item) => normalizeTimelineItem({ ...item, event_type: 'medication_order', title: 'Structured medication order', summary: item.diagnosis || item.status, event_at: item.issued_at || item.created_at, source_table: 'medication_orders' })),
+    ...(labResultsResult.data || []).map((item) => normalizeTimelineItem({ ...item, event_type: item.critical_flag ? 'critical_lab_result' : item.abnormal_flag ? 'abnormal_lab_result' : 'lab_result', title: item.test_name || 'Lab result', summary: item.result_text || item.result_value || item.status, event_at: item.created_at, source_table: 'lab_results' })),
+    ...(summariesResult.data || []).map((item) => normalizeTimelineItem({ ...item, event_type: item.status === 'final' ? 'final_consultation_summary' : 'consultation_summary', title: item.diagnosis ? `Consultation summary: ${item.diagnosis}` : 'Consultation summary', summary: item.patient_friendly_summary || item.follow_up_plan || item.treatment_given, event_at: item.finalized_at || item.created_at, source_table: 'consultation_summaries' })),
     ...(triageResult.data || []).map((item) => normalizeTimelineItem({ ...item, event_type: item.emergency_recommended ? 'emergency_triage' : 'triage', title: item.emergency_recommended ? 'Emergency red flag check' : 'Symptom triage', summary: item.recommended_action, event_at: item.created_at, source_table: 'clinical_triage_events', metadata: { redFlags: item.red_flags } })),
-  ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 80)
+  ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 100)
 
   await tryAudit(supabase, { actorId: patientId, actorType: 'patient', action: 'health_passport_viewed', resourceType: 'patient', resourceId: patientId, riskLevel: 'medium', metadata: { timelineCount: timeline.length } })
 
@@ -55,10 +61,13 @@ export default async function handler(req, res) {
     files: filesResult.data || [],
     prescriptions: prescriptionsResult.data || [],
     labOrders: labsResult.data || [],
+    medicationOrders: medOrdersResult.data || [],
+    labResults: labResultsResult.data || [],
+    consultationSummaries: summariesResult.data || [],
     consents: consentsResult.data || [],
     carePlans: carePlansResult.data || [],
     clinicalNotes: notesResult.data || [],
     triageEvents: triageResult.data || [],
-    warnings: [consultationsResult, filesResult, prescriptionsResult, labsResult, consentsResult, carePlansResult, notesResult, eventsResult, triageResult].map((result) => result.error).filter(Boolean),
+    warnings: [consultationsResult, filesResult, prescriptionsResult, labsResult, consentsResult, carePlansResult, notesResult, eventsResult, triageResult, medOrdersResult, labResultsResult, summariesResult].map((result) => result.error).filter(Boolean),
   })
 }
